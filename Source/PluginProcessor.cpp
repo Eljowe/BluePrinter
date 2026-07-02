@@ -117,6 +117,12 @@ void SimpleEQAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     spec.numChannels = getTotalNumOutputChannels();
     osc.prepare(spec);
     osc.setFrequency(440);
+
+    inputClippingDetected.store(false, std::memory_order_release);
+    outputClippingDetected.store(false, std::memory_order_release);
+    inputPeakLevel.store(0.0f, std::memory_order_release);
+    outputPeakLevel.store(0.0f, std::memory_order_release);
+    distortionToneState = { 0.0f, 0.0f };
 }
 
 void SimpleEQAudioProcessor::releaseResources()
@@ -166,6 +172,28 @@ void SimpleEQAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     for (auto i = totalNumInputChannels; i < totalNumOutputChannels; ++i)
         buffer.clear (i, 0, buffer.getNumSamples());
 
+    auto chainSettings = getChainSettings(apvts);
+
+    bool didInputClip = false;
+    float inputPeak = 0.0f;
+    for( int channel = 0; channel < buffer.getNumChannels(); ++channel )
+    {
+        const auto* channelData = buffer.getReadPointer(channel);
+        for( int sample = 0; sample < buffer.getNumSamples(); ++sample )
+        {
+            const auto absSample = std::abs(channelData[sample]);
+            inputPeak = juce::jmax(inputPeak, absSample);
+            didInputClip = didInputClip || (absSample >= 1.0f);
+        }
+    }
+
+    if( didInputClip )
+        inputClippingDetected.store(true, std::memory_order_release);
+
+    pushPeakLevel(inputPeakLevel, inputPeak);
+
+    applyGain(buffer, chainSettings.inputGainInDecibels);
+
     updateFilters();
     
     juce::dsp::AudioBlock<float> block(buffer);
@@ -189,12 +217,49 @@ void SimpleEQAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     leftChain.process(leftContext);
     rightChain.process(rightContext);
 
-    auto chainSettings = getChainSettings(apvts);
     applyDistortion(buffer, chainSettings);
+
+    applyGain(buffer, chainSettings.outputGainInDecibels);
+
+    bool didOutputClip = false;
+    float outputPeak = 0.0f;
+    for( int channel = 0; channel < buffer.getNumChannels(); ++channel )
+    {
+        const auto* channelData = buffer.getReadPointer(channel);
+        for( int sample = 0; sample < buffer.getNumSamples(); ++sample )
+        {
+            const auto absSample = std::abs(channelData[sample]);
+            outputPeak = juce::jmax(outputPeak, absSample);
+            didOutputClip = didOutputClip || (absSample >= 1.0f);
+        }
+    }
+
+    if( didOutputClip )
+        outputClippingDetected.store(true, std::memory_order_release);
+
+    pushPeakLevel(outputPeakLevel, outputPeak);
     
     leftChannelFifo.update(buffer);
     rightChannelFifo.update(buffer);
     
+}
+
+void SimpleEQAudioProcessor::applyGain(juce::AudioBuffer<float>& buffer, float gainDecibels)
+{
+    const auto gain = juce::Decibels::decibelsToGain(gainDecibels);
+    buffer.applyGain(gain);
+}
+
+void SimpleEQAudioProcessor::pushPeakLevel(std::atomic<float>& targetPeak, float peakValue)
+{
+    auto previousPeak = targetPeak.load(std::memory_order_relaxed);
+    while( peakValue > previousPeak
+           && !targetPeak.compare_exchange_weak(previousPeak,
+                                                peakValue,
+                                                std::memory_order_release,
+                                                std::memory_order_relaxed) )
+    {
+    }
 }
 
 //==============================================================================
@@ -241,6 +306,8 @@ ChainSettings getChainSettings(juce::AudioProcessorValueTreeState& apvts)
     settings.peakFreq = apvts.getRawParameterValue("Peak Freq")->load();
     settings.peakGainInDecibels = apvts.getRawParameterValue("Peak Gain")->load();
     settings.peakQuality = apvts.getRawParameterValue("Peak Quality")->load();
+    settings.inputGainInDecibels = apvts.getRawParameterValue("Input Gain")->load();
+    settings.outputGainInDecibels = apvts.getRawParameterValue("Output Gain")->load();
     settings.distortionDriveInDecibels = apvts.getRawParameterValue("Distortion Drive")->load();
     settings.lowCutSlope = static_cast<Slope>(apvts.getRawParameterValue("LowCut Slope")->load());
     settings.highCutSlope = static_cast<Slope>(apvts.getRawParameterValue("HighCut Slope")->load());
@@ -255,19 +322,47 @@ ChainSettings getChainSettings(juce::AudioProcessorValueTreeState& apvts)
 
 void SimpleEQAudioProcessor::applyDistortion(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings)
 {
-    if( chainSettings.distortionBypassed )
+    if (chainSettings.distortionBypassed)
         return;
 
-    auto drive = juce::Decibels::decibelsToGain(chainSettings.distortionDriveInDecibels);
+    const auto driveDb = chainSettings.distortionDriveInDecibels;
+    const auto driveNorm = juce::jlimit(0.0f, 1.0f, driveDb / 24.0f);
 
-    for( int channel = 0; channel < buffer.getNumChannels(); ++channel )
+    const auto preGain = juce::Decibels::decibelsToGain(3.0f + driveDb * 0.85f);
+    const auto wetMix = juce::jmap(driveNorm, 0.0f, 1.0f, 0.30f, 0.92f);
+    const auto autoGain = juce::jlimit(0.30f, 1.0f, std::pow(preGain, -0.28f));
+
+    const auto sampleRate = juce::jmax(1.0, getSampleRate());
+    const auto cutoffHz = juce::jmap(driveNorm, 0.0f, 1.0f, 12000.0f, 4500.0f);
+    const auto smoothing = 1.0f - std::exp(-2.0f * juce::MathConstants<float>::pi * cutoffHz / static_cast<float>(sampleRate));
+
+    auto softClip = [](float x)
+    {
+        const auto ax = std::abs(x);
+        if (ax <= 1.0f)
+            return x - (x * x * x) / 3.0f;
+
+        return (x > 0.0f ? 2.0f / 3.0f : -2.0f / 3.0f);
+    };
+
+    for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
     {
         auto* channelData = buffer.getWritePointer(channel);
+        auto& toneState = distortionToneState[static_cast<size_t>(juce::jmin(channel, 1))];
 
-        for( int sample = 0; sample < buffer.getNumSamples(); ++sample )
+        for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
         {
-            auto inputSample = channelData[sample];
-            channelData[sample] = (2.0f / juce::MathConstants<float>::pi) * std::atan(drive * inputSample);
+            const auto dry = channelData[sample];
+            const auto driven = dry * preGain;
+
+            const auto tanhShape = std::tanh(driven);
+            const auto cubicShape = softClip(driven * 0.75f) * 1.4f;
+            auto wet = (0.78f * tanhShape + 0.22f * cubicShape) * autoGain;
+
+            toneState += smoothing * (wet - toneState);
+            wet = toneState;
+
+            channelData[sample] = juce::jlimit(-1.5f, 1.5f, juce::jmap(wetMix, dry, wet));
         }
     }
 }
@@ -360,6 +455,16 @@ juce::AudioProcessorValueTreeState::ParameterLayout SimpleEQAudioProcessor::crea
                                                            "Peak Quality",
                                                            juce::NormalisableRange<float>(0.1f, 10.f, 0.05f, 1.f),
                                                            1.f));
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>("Input Gain",
+                                                           "Input Gain",
+                                                           juce::NormalisableRange<float>(-24.f, 24.f, 0.1f, 1.f),
+                                                           0.f));
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>("Output Gain",
+                                                           "Output Gain",
+                                                           juce::NormalisableRange<float>(-24.f, 24.f, 0.1f, 1.f),
+                                                           0.f));
 
     layout.add(std::make_unique<juce::AudioParameterFloat>("Distortion Drive",
                                                            "Distortion Drive",

@@ -628,6 +628,8 @@ SimpleEQAudioProcessorEditor::SimpleEQAudioProcessorEditor (SimpleEQAudioProcess
 peakFreqSlider(*audioProcessor.apvts.getParameter("Peak Freq"), "Hz"),
 peakGainSlider(*audioProcessor.apvts.getParameter("Peak Gain"), "dB"),
 peakQualitySlider(*audioProcessor.apvts.getParameter("Peak Quality"), ""),
+inputGainSlider(*audioProcessor.apvts.getParameter("Input Gain"), "dB"),
+outputGainSlider(*audioProcessor.apvts.getParameter("Output Gain"), "dB"),
 lowCutFreqSlider(*audioProcessor.apvts.getParameter("LowCut Freq"), "Hz"),
 highCutFreqSlider(*audioProcessor.apvts.getParameter("HighCut Freq"), "Hz"),
 lowCutSlopeSlider(*audioProcessor.apvts.getParameter("LowCut Slope"), "dB/Oct"),
@@ -639,6 +641,8 @@ responseCurveComponent(audioProcessor),
 peakFreqSliderAttachment(audioProcessor.apvts, "Peak Freq", peakFreqSlider),
 peakGainSliderAttachment(audioProcessor.apvts, "Peak Gain", peakGainSlider),
 peakQualitySliderAttachment(audioProcessor.apvts, "Peak Quality", peakQualitySlider),
+inputGainSliderAttachment(audioProcessor.apvts, "Input Gain", inputGainSlider),
+outputGainSliderAttachment(audioProcessor.apvts, "Output Gain", outputGainSlider),
 lowCutFreqSliderAttachment(audioProcessor.apvts, "LowCut Freq", lowCutFreqSlider),
 highCutFreqSliderAttachment(audioProcessor.apvts, "HighCut Freq", highCutFreqSlider),
 lowCutSlopeSliderAttachment(audioProcessor.apvts, "LowCut Slope", lowCutSlopeSlider),
@@ -659,6 +663,12 @@ distortionBypassButtonAttachment(audioProcessor.apvts, "Distortion Bypassed", di
     
     peakQualitySlider.labels.add({0.f, "0.1"});
     peakQualitySlider.labels.add({1.f, "10.0"});
+
+    inputGainSlider.labels.add({0.f, "-24dB"});
+    inputGainSlider.labels.add({1.f, "+24dB"});
+
+    outputGainSlider.labels.add({0.f, "-24dB"});
+    outputGainSlider.labels.add({1.f, "+24dB"});
     
     lowCutFreqSlider.labels.add({0.f, "20Hz"});
     lowCutFreqSlider.labels.add({1.f, "20kHz"});
@@ -741,12 +751,16 @@ distortionBypassButtonAttachment(audioProcessor.apvts, "Distortion Bypassed", di
             comp->responseCurveComponent.toggleAnalysisEnablement(enabled);
         }
     };
+
+    startTimerHz(30);
     
     setSize (480, 500);
 }
 
 SimpleEQAudioProcessorEditor::~SimpleEQAudioProcessorEditor()
 {
+    stopTimer();
+
     peakBypassButton.setLookAndFeel(nullptr);
     highcutBypassButton.setLookAndFeel(nullptr);
     lowcutBypassButton.setLookAndFeel(nullptr);
@@ -802,6 +816,9 @@ void SimpleEQAudioProcessorEditor::paint(juce::Graphics &g)
     
     g.setColour(Colours::grey);
     g.setFont(14);
+    g.drawFittedText("Input", inputGainSlider.getBounds(), juce::Justification::centredBottom, 1);
+    g.drawFittedText("Distortion", distortionDriveSlider.getBounds(), juce::Justification::centredBottom, 1);
+    g.drawFittedText("Output", outputGainSlider.getBounds(), juce::Justification::centredBottom, 1);
     g.drawFittedText("LowCut", lowCutSlopeSlider.getBounds(), juce::Justification::centredBottom, 1);
     g.drawFittedText("Peak", peakQualitySlider.getBounds(), juce::Justification::centredBottom, 1);
     g.drawFittedText("HighCut", highCutSlopeSlider.getBounds(), juce::Justification::centredBottom, 1);
@@ -810,6 +827,38 @@ void SimpleEQAudioProcessorEditor::paint(juce::Graphics &g)
     auto buildTime = Time::getCompilationDate().toString(false, true);
     g.setFont(12);
     g.drawFittedText("Build: " + buildDate + "\n" + buildTime, highCutSlopeSlider.getBounds().withY(6), Justification::topRight, 2);
+
+    auto drawMeterBar = [&g](juce::Rectangle<int> bounds, float level)
+    {
+        auto clampedLevel = juce::jlimit(0.0f, 1.0f, level);
+        g.setColour(juce::Colour(20u, 20u, 20u));
+        g.fillRoundedRectangle(bounds.toFloat(), 2.f);
+        g.setColour(juce::Colours::dimgrey);
+        g.drawRoundedRectangle(bounds.toFloat(), 2.f, 1.f);
+
+        auto filled = bounds;
+        filled.removeFromTop(static_cast<int>((1.0f - clampedLevel) * bounds.getHeight()));
+        g.setColour(clampedLevel > 0.95f ? juce::Colour(220u, 35u, 20u) : juce::Colour(0u, 172u, 1u));
+        g.fillRoundedRectangle(filled.toFloat(), 2.f);
+    };
+
+    drawMeterBar(inputMeterBounds, inputMeterLevel);
+    drawMeterBar(outputMeterBounds, outputMeterLevel);
+
+    g.setColour(Colours::darkgrey);
+    g.drawRoundedRectangle(inputClipIndicatorBounds.toFloat(), 4.f, 1.f);
+    g.setColour(inputClipIndicatorActive ? Colour(220u, 35u, 20u) : Colour(40u, 15u, 15u));
+    g.fillRoundedRectangle(inputClipIndicatorBounds.reduced(1).toFloat(), 3.f);
+    g.setColour(inputClipIndicatorActive ? Colours::white : Colours::grey);
+    g.setFont(12.f);
+    g.drawFittedText("IN CLIP", inputClipIndicatorBounds, Justification::centred, 1);
+
+    g.setColour(Colours::darkgrey);
+    g.drawRoundedRectangle(outputClipIndicatorBounds.toFloat(), 4.f, 1.f);
+    g.setColour(outputClipIndicatorActive ? Colour(220u, 35u, 20u) : Colour(40u, 15u, 15u));
+    g.fillRoundedRectangle(outputClipIndicatorBounds.reduced(1).toFloat(), 3.f);
+    g.setColour(outputClipIndicatorActive ? Colours::white : Colours::grey);
+    g.drawFittedText("OUT CLIP", outputClipIndicatorBounds, Justification::centred, 1);
 }
 
 void SimpleEQAudioProcessorEditor::resized()
@@ -827,10 +876,27 @@ void SimpleEQAudioProcessorEditor::resized()
     
     bounds.removeFromTop(5);
 
-    auto distortionArea = bounds.removeFromTop(46);
-    distortionBypassButton.setBounds(distortionArea.removeFromLeft(50));
-    distortionArea.removeFromLeft(4);
-    distortionDriveSlider.setBounds(distortionArea);
+    auto driveArea = bounds.removeFromTop(118);
+
+    auto inputArea = driveArea.removeFromLeft(driveArea.getWidth() / 3);
+    auto distortionArea = driveArea.removeFromLeft(driveArea.getWidth() / 2);
+    auto outputArea = driveArea;
+
+    auto inputStatusArea = inputArea.removeFromBottom(24);
+    inputMeterBounds = inputStatusArea.removeFromLeft(10).reduced(0, 2);
+    inputStatusArea.removeFromLeft(4);
+    inputClipIndicatorBounds = inputStatusArea.removeFromLeft(74).reduced(2, 2);
+    inputGainSlider.setBounds(inputArea.reduced(6, 2));
+
+    auto distortionStatusArea = distortionArea.removeFromBottom(24);
+    distortionBypassButton.setBounds(distortionStatusArea.removeFromLeft(50));
+    distortionDriveSlider.setBounds(distortionArea.reduced(6, 2));
+
+    auto outputStatusArea = outputArea.removeFromBottom(24);
+    outputMeterBounds = outputStatusArea.removeFromLeft(10).reduced(0, 2);
+    outputStatusArea.removeFromLeft(4);
+    outputClipIndicatorBounds = outputStatusArea.removeFromLeft(78).reduced(2, 2);
+    outputGainSlider.setBounds(outputArea.reduced(6, 2));
     
     bounds.removeFromTop(5);
     
@@ -858,6 +924,46 @@ void SimpleEQAudioProcessorEditor::resized()
     peakQualitySlider.setBounds(bounds);
 }
 
+void SimpleEQAudioProcessorEditor::timerCallback()
+{
+    const auto consumedInputPeak = audioProcessor.consumeInputPeakLevel();
+    const auto consumedOutputPeak = audioProcessor.consumeOutputPeakLevel();
+
+    inputMeterLevel = juce::jmax(consumedInputPeak, inputMeterLevel * 0.90f);
+    outputMeterLevel = juce::jmax(consumedOutputPeak, outputMeterLevel * 0.90f);
+
+    if( audioProcessor.consumeInputClippingFlag() )
+        inputClipHoldFramesRemaining = 30;
+
+    if( audioProcessor.consumeOutputClippingFlag() )
+        outputClipHoldFramesRemaining = 30;
+
+    if( inputClipHoldFramesRemaining > 0 )
+    {
+        --inputClipHoldFramesRemaining;
+        inputClipIndicatorActive = true;
+    }
+    else
+    {
+        inputClipIndicatorActive = false;
+    }
+
+    if( outputClipHoldFramesRemaining > 0 )
+    {
+        --outputClipHoldFramesRemaining;
+        outputClipIndicatorActive = true;
+    }
+    else
+    {
+        outputClipIndicatorActive = false;
+    }
+
+    repaint(inputMeterBounds.expanded(2));
+    repaint(outputMeterBounds.expanded(2));
+    repaint(inputClipIndicatorBounds.expanded(2));
+    repaint(outputClipIndicatorBounds.expanded(2));
+}
+
 std::vector<juce::Component*> SimpleEQAudioProcessorEditor::getComps()
 {
     return
@@ -865,6 +971,8 @@ std::vector<juce::Component*> SimpleEQAudioProcessorEditor::getComps()
         &peakFreqSlider,
         &peakGainSlider,
         &peakQualitySlider,
+        &inputGainSlider,
+        &outputGainSlider,
         &lowCutFreqSlider,
         &highCutFreqSlider,
         &lowCutSlopeSlider,

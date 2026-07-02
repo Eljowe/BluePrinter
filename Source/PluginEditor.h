@@ -313,7 +313,8 @@ struct AnalyzerButton : juce::ToggleButton
 };
 /**
 */
-class SimpleEQAudioProcessorEditor  : public juce::AudioProcessorEditor
+class SimpleEQAudioProcessorEditor  : public juce::AudioProcessorEditor,
+                                      private juce::Timer
 {
 public:
     SimpleEQAudioProcessorEditor (SimpleEQAudioProcessor&);
@@ -324,6 +325,8 @@ public:
     void resized() override;
 
 private:
+    void timerCallback() override;
+
     // This reference is provided as a quick way for your editor to
     // access the processor object that created it.
     SimpleEQAudioProcessor& audioProcessor;
@@ -332,6 +335,8 @@ private:
     RotarySliderWithLabels peakFreqSlider,
     peakGainSlider,
     peakQualitySlider,
+    inputGainSlider,
+    outputGainSlider,
     lowCutFreqSlider,
     highCutFreqSlider,
     lowCutSlopeSlider,
@@ -346,6 +351,8 @@ private:
     Attachment peakFreqSliderAttachment,
                 peakGainSliderAttachment,
                 peakQualitySliderAttachment,
+                inputGainSliderAttachment,
+                outputGainSliderAttachment,
                 lowCutFreqSliderAttachment,
                 highCutFreqSliderAttachment,
                 lowCutSlopeSliderAttachment,
@@ -365,6 +372,17 @@ private:
                         highcutBypassButtonAttachment,
                         analyzerEnabledButtonAttachment,
                         distortionBypassButtonAttachment;
+
+    juce::Rectangle<int> inputClipIndicatorBounds;
+    juce::Rectangle<int> outputClipIndicatorBounds;
+    juce::Rectangle<int> inputMeterBounds;
+    juce::Rectangle<int> outputMeterBounds;
+    int inputClipHoldFramesRemaining = 0;
+    int outputClipHoldFramesRemaining = 0;
+    bool inputClipIndicatorActive = false;
+    bool outputClipIndicatorActive = false;
+    float inputMeterLevel = 0.0f;
+    float outputMeterLevel = 0.0f;
     
     SimpleEQLookAndFeel lnf;
 

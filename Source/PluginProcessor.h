@@ -9,6 +9,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <atomic>
 
 #include <array>
 template<typename T>
@@ -155,6 +156,8 @@ enum Slope
 struct ChainSettings
 {
     float peakFreq { 0 }, peakGainInDecibels{ 0 }, peakQuality {1.f};
+    float inputGainInDecibels { 0.f };
+    float outputGainInDecibels { 0.f };
     float distortionDriveInDecibels { 0.f };
     float lowCutFreq { 0 }, highCutFreq { 0 };
     
@@ -280,6 +283,26 @@ public:
 
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
     juce::AudioProcessorValueTreeState apvts {*this, nullptr, "Parameters", createParameterLayout()};
+
+    bool consumeInputClippingFlag()
+    {
+        return inputClippingDetected.exchange(false, std::memory_order_acq_rel);
+    }
+
+    bool consumeOutputClippingFlag()
+    {
+        return outputClippingDetected.exchange(false, std::memory_order_acq_rel);
+    }
+
+    float consumeInputPeakLevel()
+    {
+        return inputPeakLevel.exchange(0.0f, std::memory_order_acq_rel);
+    }
+
+    float consumeOutputPeakLevel()
+    {
+        return outputPeakLevel.exchange(0.0f, std::memory_order_acq_rel);
+    }
     
     using BlockType = juce::AudioBuffer<float>;
     SingleChannelSampleFifo<BlockType> leftChannelFifo { Channel::Left };
@@ -289,6 +312,8 @@ private:
     
     void updatePeakFilter(const ChainSettings& chainSettings);
     void applyDistortion(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings);
+    void applyGain(juce::AudioBuffer<float>& buffer, float gainDecibels);
+    void pushPeakLevel(std::atomic<float>& targetPeak, float peakValue);
 
     
     
@@ -297,6 +322,13 @@ private:
     void updateHighCutFilters(const ChainSettings& chainSettings);
     
     void updateFilters();
+
+    std::atomic<bool> inputClippingDetected { false };
+    std::atomic<bool> outputClippingDetected { false };
+    std::atomic<float> inputPeakLevel { 0.0f };
+    std::atomic<float> outputPeakLevel { 0.0f };
+
+    std::array<float, 2> distortionToneState { 0.0f, 0.0f };
     
     juce::dsp::Oscillator<float> osc;
     //==============================================================================
