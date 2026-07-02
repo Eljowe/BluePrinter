@@ -165,7 +165,7 @@ private:
     Fifo<PathType> pathFifo;
 };
 
-struct LookAndFeel : juce::LookAndFeel_V4
+struct SimpleEQLookAndFeel : juce::LookAndFeel_V4
 {
     void drawRotarySlider (juce::Graphics&,
                            int x, int y, int width, int height,
@@ -209,7 +209,7 @@ struct RotarySliderWithLabels : juce::Slider
     int getTextHeight() const { return 14; }
     juce::String getDisplayString() const;
 private:
-    LookAndFeel lnf;
+    SimpleEQLookAndFeel lnf;
     
     juce::RangedAudioParameter* param;
     juce::String suffix;
@@ -335,7 +335,8 @@ private:
     lowCutFreqSlider,
     highCutFreqSlider,
     lowCutSlopeSlider,
-    highCutSlopeSlider;
+    highCutSlopeSlider,
+    distortionDriveSlider;
     
     ResponseCurveComponent responseCurveComponent;
     
@@ -348,21 +349,24 @@ private:
                 lowCutFreqSliderAttachment,
                 highCutFreqSliderAttachment,
                 lowCutSlopeSliderAttachment,
-                highCutSlopeSliderAttachment;
+                highCutSlopeSliderAttachment,
+                distortionDriveSliderAttachment;
 
     std::vector<juce::Component*> getComps();
     
     PowerButton lowcutBypassButton, peakBypassButton, highcutBypassButton;
     AnalyzerButton analyzerEnabledButton;
+    PowerButton distortionBypassButton;
     
     using ButtonAttachment = APVTS::ButtonAttachment;
     
     ButtonAttachment lowcutBypassButtonAttachment,
                         peakBypassButtonAttachment,
                         highcutBypassButtonAttachment,
-                        analyzerEnabledButtonAttachment;
+                        analyzerEnabledButtonAttachment,
+                        distortionBypassButtonAttachment;
     
-    LookAndFeel lnf;
+    SimpleEQLookAndFeel lnf;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SimpleEQAudioProcessorEditor)
 };

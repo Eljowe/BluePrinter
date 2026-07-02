@@ -9,7 +9,7 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
-void LookAndFeel::drawRotarySlider(juce::Graphics & g,
+void SimpleEQLookAndFeel::drawRotarySlider(juce::Graphics & g,
                                    int x,
                                    int y,
                                    int width,
@@ -54,7 +54,7 @@ void LookAndFeel::drawRotarySlider(juce::Graphics & g,
         
         g.setFont(rswl->getTextHeight());
         auto text = rswl->getDisplayString();
-        auto strWidth = g.getCurrentFont().getStringWidth(text);
+        auto strWidth = juce::GlyphArrangement::getStringWidth(g.getCurrentFont(), text);
         
         r.setSize(strWidth + 4, rswl->getTextHeight() + 2);
         r.setCentre(bounds.getCentre());
@@ -67,7 +67,7 @@ void LookAndFeel::drawRotarySlider(juce::Graphics & g,
     }
 }
 
-void LookAndFeel::drawToggleButton(juce::Graphics &g,
+void SimpleEQLookAndFeel::drawToggleButton(juce::Graphics &g,
                                    juce::ToggleButton &toggleButton,
                                    bool shouldDrawButtonAsHighlighted,
                                    bool shouldDrawButtonAsDown)
@@ -165,7 +165,7 @@ void RotarySliderWithLabels::paint(juce::Graphics &g)
         
         Rectangle<float> r;
         auto str = labels[i].label;
-        r.setSize(g.getCurrentFont().getStringWidth(str), getTextHeight());
+        r.setSize(juce::GlyphArrangement::getStringWidth(g.getCurrentFont(), str), getTextHeight());
         r.setCentre(c);
         r.setY(r.getY() + getTextHeight());
         
@@ -463,7 +463,7 @@ void ResponseCurveComponent::drawTextLabels(juce::Graphics &g)
             str << "k";
         str << "Hz";
         
-        auto textWidth = g.getCurrentFont().getStringWidth(str);
+        auto textWidth = juce::GlyphArrangement::getStringWidth(g.getCurrentFont(), str);
 
         Rectangle<int> r;
 
@@ -485,7 +485,7 @@ void ResponseCurveComponent::drawTextLabels(juce::Graphics &g)
             str << "+";
         str << gDb;
         
-        auto textWidth = g.getCurrentFont().getStringWidth(str);
+        auto textWidth = juce::GlyphArrangement::getStringWidth(g.getCurrentFont(), str);
         
         Rectangle<int> r;
         r.setSize(textWidth, fontHeight);
@@ -500,7 +500,7 @@ void ResponseCurveComponent::drawTextLabels(juce::Graphics &g)
         str << (gDb - 24.f);
 
         r.setX(1);
-        textWidth = g.getCurrentFont().getStringWidth(str);
+        textWidth = juce::GlyphArrangement::getStringWidth(g.getCurrentFont(), str);
         r.setSize(textWidth, fontHeight);
         g.setColour(Colours::lightgrey);
         g.drawFittedText(str, r, juce::Justification::centredLeft, 1);
@@ -632,6 +632,7 @@ lowCutFreqSlider(*audioProcessor.apvts.getParameter("LowCut Freq"), "Hz"),
 highCutFreqSlider(*audioProcessor.apvts.getParameter("HighCut Freq"), "Hz"),
 lowCutSlopeSlider(*audioProcessor.apvts.getParameter("LowCut Slope"), "dB/Oct"),
 highCutSlopeSlider(*audioProcessor.apvts.getParameter("HighCut Slope"), "db/Oct"),
+distortionDriveSlider(*audioProcessor.apvts.getParameter("Distortion Drive"), "dB"),
 
 responseCurveComponent(audioProcessor),
 
@@ -642,11 +643,13 @@ lowCutFreqSliderAttachment(audioProcessor.apvts, "LowCut Freq", lowCutFreqSlider
 highCutFreqSliderAttachment(audioProcessor.apvts, "HighCut Freq", highCutFreqSlider),
 lowCutSlopeSliderAttachment(audioProcessor.apvts, "LowCut Slope", lowCutSlopeSlider),
 highCutSlopeSliderAttachment(audioProcessor.apvts, "HighCut Slope", highCutSlopeSlider),
+distortionDriveSliderAttachment(audioProcessor.apvts, "Distortion Drive", distortionDriveSlider),
 
 lowcutBypassButtonAttachment(audioProcessor.apvts, "LowCut Bypassed", lowcutBypassButton),
 peakBypassButtonAttachment(audioProcessor.apvts, "Peak Bypassed", peakBypassButton),
 highcutBypassButtonAttachment(audioProcessor.apvts, "HighCut Bypassed", highcutBypassButton),
-analyzerEnabledButtonAttachment(audioProcessor.apvts, "Analyzer Enabled", analyzerEnabledButton)
+analyzerEnabledButtonAttachment(audioProcessor.apvts, "Analyzer Enabled", analyzerEnabledButton),
+distortionBypassButtonAttachment(audioProcessor.apvts, "Distortion Bypassed", distortionBypassButton)
 {
     peakFreqSlider.labels.add({0.f, "20Hz"});
     peakFreqSlider.labels.add({1.f, "20kHz"});
@@ -668,6 +671,9 @@ analyzerEnabledButtonAttachment(audioProcessor.apvts, "Analyzer Enabled", analyz
     
     highCutSlopeSlider.labels.add({0.0f, "12"});
     highCutSlopeSlider.labels.add({1.f, "48"});
+
+    distortionDriveSlider.labels.add({0.f, "0dB"});
+    distortionDriveSlider.labels.add({1.f, "+24dB"});
     
     for( auto* comp : getComps() )
     {
@@ -679,6 +685,7 @@ analyzerEnabledButtonAttachment(audioProcessor.apvts, "Analyzer Enabled", analyz
     lowcutBypassButton.setLookAndFeel(&lnf);
 
     analyzerEnabledButton.setLookAndFeel(&lnf);
+    distortionBypassButton.setLookAndFeel(&lnf);
     
     auto safePtr = juce::Component::SafePointer<SimpleEQAudioProcessorEditor>(this);
     peakBypassButton.onClick = [safePtr]()
@@ -716,6 +723,16 @@ analyzerEnabledButtonAttachment(audioProcessor.apvts, "Analyzer Enabled", analyz
         }
     };
 
+    distortionBypassButton.onClick = [safePtr]()
+    {
+        if( auto* comp = safePtr.getComponent() )
+        {
+            auto bypassed = comp->distortionBypassButton.getToggleState();
+
+            comp->distortionDriveSlider.setEnabled( !bypassed );
+        }
+    };
+
     analyzerEnabledButton.onClick = [safePtr]()
     {
         if( auto* comp = safePtr.getComponent() )
@@ -735,6 +752,7 @@ SimpleEQAudioProcessorEditor::~SimpleEQAudioProcessorEditor()
     lowcutBypassButton.setLookAndFeel(nullptr);
 
     analyzerEnabledButton.setLookAndFeel(nullptr);
+    distortionBypassButton.setLookAndFeel(nullptr);
 }
 
 //==============================================================================
@@ -753,7 +771,7 @@ void SimpleEQAudioProcessorEditor::paint(juce::Graphics &g)
     
     String title { "PFM::C++ FOR MUSICIANS" };
     g.setFont(30);
-    auto titleWidth = g.getCurrentFont().getStringWidth(title);
+    auto titleWidth = juce::GlyphArrangement::getStringWidth(g.getCurrentFont(), title);
     
     curve.startNewSubPath(center.x, 32);
     curve.lineTo(center.x - titleWidth * 0.45f, 32);
@@ -808,6 +826,13 @@ void SimpleEQAudioProcessorEditor::resized()
     analyzerEnabledButton.setBounds(analyzerEnabledArea);
     
     bounds.removeFromTop(5);
+
+    auto distortionArea = bounds.removeFromTop(46);
+    distortionBypassButton.setBounds(distortionArea.removeFromLeft(50));
+    distortionArea.removeFromLeft(4);
+    distortionDriveSlider.setBounds(distortionArea);
+    
+    bounds.removeFromTop(5);
     
     float hRatio = 25.f / 100.f; //JUCE_LIVE_CONSTANT(25) / 100.f;
     auto responseArea = bounds.removeFromTop(bounds.getHeight() * hRatio); //change from 0.33 to 0.25 because I needed peak hz text to not overlap the slider thumb
@@ -844,11 +869,13 @@ std::vector<juce::Component*> SimpleEQAudioProcessorEditor::getComps()
         &highCutFreqSlider,
         &lowCutSlopeSlider,
         &highCutSlopeSlider,
+        &distortionDriveSlider,
         &responseCurveComponent,
         
         &lowcutBypassButton,
         &peakBypassButton,
         &highcutBypassButton,
-        &analyzerEnabledButton
+        &analyzerEnabledButton,
+        &distortionBypassButton
     };
 }

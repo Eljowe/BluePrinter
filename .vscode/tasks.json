@@ -1,0 +1,36 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build SimpleEQ Debug",
+      "type": "shell",
+      "command": "cmake",
+      "args": ["--build", "build", "--config", "Debug"],
+      "isBackground": false,
+      "problemMatcher": ["$msCompile"],
+      "group": "build"
+    },
+    {
+      "label": "Rebuild SimpleEQ Debug",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-NoProfile", "-Command", "cmake --build build --config Debug --clean-first"],
+      "isBackground": false,
+      "problemMatcher": ["$msCompile"],
+      "group": "build"
+    },
+    {
+      "label": "Run SimpleEQ Debug",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-Command",
+        "cmake --build build --config Debug --target SimpleEQ_Standalone; Start-Process -FilePath \".\\build\\SimpleEQ_artefacts\\Debug\\Standalone\\SimpleEQ.exe\""
+      ],
+      "isBackground": false,
+      "problemMatcher": ["$msCompile"],
+      "group": "test"
+    }
+  ]
+}
