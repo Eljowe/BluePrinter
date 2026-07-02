@@ -1,0 +1,49 @@
+cmake_minimum_required(VERSION 3.22)
+
+project(SimpleEQ VERSION 1.0.0)
+
+set(JUCE_DIR "C:/JUCE/JUCE" CACHE PATH "Path to the JUCE source tree")
+
+add_subdirectory(${JUCE_DIR} JUCE)
+
+juce_add_plugin(SimpleEQ
+    COMPANY_NAME "Matkat Music LLC"
+    PRODUCT_NAME "SimpleEQ"
+    BUNDLE_ID "com.matkatmusic.SimpleEQ"
+    PLUGIN_MANUFACTURER_CODE MtkM
+    PLUGIN_CODE SEq1
+    FORMATS VST3 Standalone
+    COPY_PLUGIN_AFTER_BUILD FALSE
+    NEEDS_MIDI_INPUT FALSE
+    NEEDS_MIDI_OUTPUT FALSE
+    IS_MIDI_EFFECT FALSE
+    EDITOR_WANTS_KEYBOARD_FOCUS FALSE)
+
+juce_generate_juce_header(SimpleEQ)
+
+target_sources(SimpleEQ PRIVATE
+    Source/PluginProcessor.cpp
+    Source/PluginEditor.cpp)
+
+target_include_directories(SimpleEQ PRIVATE
+    ${CMAKE_CURRENT_BINARY_DIR})
+
+target_compile_definitions(SimpleEQ PRIVATE
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0
+    JUCE_IGNORE_VST3_MISMATCHED_PARAMETER_ID_WARNING=1)
+
+target_link_libraries(SimpleEQ PRIVATE
+    juce::juce_audio_basics
+    juce::juce_audio_devices
+    juce::juce_audio_formats
+    juce::juce_audio_plugin_client
+    juce::juce_audio_processors
+    juce::juce_audio_utils
+    juce::juce_core
+    juce::juce_data_structures
+    juce::juce_dsp
+    juce::juce_events
+    juce::juce_graphics
+    juce::juce_gui_basics
+    juce::juce_gui_extra)

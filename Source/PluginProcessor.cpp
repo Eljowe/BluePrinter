@@ -188,6 +188,9 @@ void SimpleEQAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     
     leftChain.process(leftContext);
     rightChain.process(rightContext);
+
+    auto chainSettings = getChainSettings(apvts);
+    applyDistortion(buffer, chainSettings);
     
     leftChannelFifo.update(buffer);
     rightChannelFifo.update(buffer);
@@ -238,14 +241,35 @@ ChainSettings getChainSettings(juce::AudioProcessorValueTreeState& apvts)
     settings.peakFreq = apvts.getRawParameterValue("Peak Freq")->load();
     settings.peakGainInDecibels = apvts.getRawParameterValue("Peak Gain")->load();
     settings.peakQuality = apvts.getRawParameterValue("Peak Quality")->load();
+    settings.distortionDriveInDecibels = apvts.getRawParameterValue("Distortion Drive")->load();
     settings.lowCutSlope = static_cast<Slope>(apvts.getRawParameterValue("LowCut Slope")->load());
     settings.highCutSlope = static_cast<Slope>(apvts.getRawParameterValue("HighCut Slope")->load());
     
     settings.lowCutBypassed = apvts.getRawParameterValue("LowCut Bypassed")->load() > 0.5f;
     settings.peakBypassed = apvts.getRawParameterValue("Peak Bypassed")->load() > 0.5f;
     settings.highCutBypassed = apvts.getRawParameterValue("HighCut Bypassed")->load() > 0.5f;
+    settings.distortionBypassed = apvts.getRawParameterValue("Distortion Bypassed")->load() > 0.5f;
     
     return settings;
+}
+
+void SimpleEQAudioProcessor::applyDistortion(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings)
+{
+    if( chainSettings.distortionBypassed )
+        return;
+
+    auto drive = juce::Decibels::decibelsToGain(chainSettings.distortionDriveInDecibels);
+
+    for( int channel = 0; channel < buffer.getNumChannels(); ++channel )
+    {
+        auto* channelData = buffer.getWritePointer(channel);
+
+        for( int sample = 0; sample < buffer.getNumSamples(); ++sample )
+        {
+            auto inputSample = channelData[sample];
+            channelData[sample] = (2.0f / juce::MathConstants<float>::pi) * std::atan(drive * inputSample);
+        }
+    }
 }
 
 Coefficients makePeakFilter(const ChainSettings& chainSettings, double sampleRate)
@@ -336,6 +360,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout SimpleEQAudioProcessor::crea
                                                            "Peak Quality",
                                                            juce::NormalisableRange<float>(0.1f, 10.f, 0.05f, 1.f),
                                                            1.f));
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>("Distortion Drive",
+                                                           "Distortion Drive",
+                                                           juce::NormalisableRange<float>(0.f, 24.f, 0.1f, 1.f),
+                                                           0.f));
     
     juce::StringArray stringArray;
     for( int i = 0; i < 4; ++i )
@@ -352,6 +381,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout SimpleEQAudioProcessor::crea
     layout.add(std::make_unique<juce::AudioParameterBool>("LowCut Bypassed", "LowCut Bypassed", false));
     layout.add(std::make_unique<juce::AudioParameterBool>("Peak Bypassed", "Peak Bypassed", false));
     layout.add(std::make_unique<juce::AudioParameterBool>("HighCut Bypassed", "HighCut Bypassed", false));
+    layout.add(std::make_unique<juce::AudioParameterBool>("Distortion Bypassed", "Distortion Bypassed", false));
     layout.add(std::make_unique<juce::AudioParameterBool>("Analyzer Enabled", "Analyzer Enabled", true));
     
     return layout;
