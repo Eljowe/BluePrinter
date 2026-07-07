@@ -8,6 +8,7 @@
 
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "WebViewEditor.h"
 
 //==============================================================================
 SimpleEQAudioProcessor::SimpleEQAudioProcessor()
@@ -122,6 +123,7 @@ void SimpleEQAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     outputClippingDetected.store(false, std::memory_order_release);
     inputPeakLevel.store(0.0f, std::memory_order_release);
     outputPeakLevel.store(0.0f, std::memory_order_release);
+    compressorGainReductionDb = { 0.0f, 0.0f };
     distortionToneState = { 0.0f, 0.0f };
 }
 
@@ -174,6 +176,8 @@ void SimpleEQAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
 
     auto chainSettings = getChainSettings(apvts);
 
+    applyGain(buffer, chainSettings.inputGainInDecibels);
+
     bool didInputClip = false;
     float inputPeak = 0.0f;
     for( int channel = 0; channel < buffer.getNumChannels(); ++channel )
@@ -192,7 +196,7 @@ void SimpleEQAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
 
     pushPeakLevel(inputPeakLevel, inputPeak);
 
-    applyGain(buffer, chainSettings.inputGainInDecibels);
+    applyCompressor(buffer, chainSettings);
 
     updateFilters();
     
@@ -270,7 +274,13 @@ bool SimpleEQAudioProcessor::hasEditor() const
 
 juce::AudioProcessorEditor* SimpleEQAudioProcessor::createEditor()
 {
-    return new SimpleEQAudioProcessorEditor (*this);
+    auto webViewOptions = juce::WebBrowserComponent::Options{}
+                              .withBackend(juce::WebBrowserComponent::Options::Backend::webview2);
+
+    if (!juce::WebBrowserComponent::areOptionsSupported(webViewOptions))
+        return new SimpleEQAudioProcessorEditor(*this);
+
+    return new SimpleEQWebViewEditor(*this);
 //    return new juce::GenericAudioProcessorEditor(*this);
 }
 
@@ -307,6 +317,7 @@ ChainSettings getChainSettings(juce::AudioProcessorValueTreeState& apvts)
     settings.peakGainInDecibels = apvts.getRawParameterValue("Peak Gain")->load();
     settings.peakQuality = apvts.getRawParameterValue("Peak Quality")->load();
     settings.inputGainInDecibels = apvts.getRawParameterValue("Input Gain")->load();
+    settings.compressorAmount = apvts.getRawParameterValue("Compressor Amount")->load();
     settings.outputGainInDecibels = apvts.getRawParameterValue("Output Gain")->load();
     settings.distortionDriveInDecibels = apvts.getRawParameterValue("Distortion Drive")->load();
     settings.lowCutSlope = static_cast<Slope>(apvts.getRawParameterValue("LowCut Slope")->load());
@@ -316,8 +327,53 @@ ChainSettings getChainSettings(juce::AudioProcessorValueTreeState& apvts)
     settings.peakBypassed = apvts.getRawParameterValue("Peak Bypassed")->load() > 0.5f;
     settings.highCutBypassed = apvts.getRawParameterValue("HighCut Bypassed")->load() > 0.5f;
     settings.distortionBypassed = apvts.getRawParameterValue("Distortion Bypassed")->load() > 0.5f;
+    settings.compressorBypassed = apvts.getRawParameterValue("Compressor Bypassed")->load() > 0.5f;
     
     return settings;
+}
+
+void SimpleEQAudioProcessor::applyCompressor(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings)
+{
+    if (chainSettings.compressorBypassed)
+        return;
+
+    const auto amount = juce::jlimit(0.0f, 24.0f, chainSettings.compressorAmount);
+    if (amount <= 0.0f)
+        return;
+
+    const auto amountNorm = amount / 24.0f;
+
+    const auto thresholdDb = juce::jmap(amountNorm, 0.0f, 1.0f, -6.0f, -30.0f);
+    const auto ratio = juce::jmap(amountNorm, 0.0f, 1.0f, 1.2f, 8.0f);
+    const auto attackMs = juce::jmap(amountNorm, 0.0f, 1.0f, 20.0f, 2.5f);
+    const auto releaseMs = juce::jmap(amountNorm, 0.0f, 1.0f, 220.0f, 65.0f);
+
+    const auto sampleRate = juce::jmax(1.0, getSampleRate());
+    const auto attackCoeff = std::exp(-1.0f / (0.001f * attackMs * static_cast<float>(sampleRate)));
+    const auto releaseCoeff = std::exp(-1.0f / (0.001f * releaseMs * static_cast<float>(sampleRate)));
+
+    for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
+    {
+        auto* channelData = buffer.getWritePointer(channel);
+        auto& gainReductionDb = compressorGainReductionDb[static_cast<size_t>(juce::jmin(channel, 1))];
+
+        for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
+        {
+            const auto detectorInput = std::abs(channelData[sample]) + 1.0e-9f;
+            const auto detectorDb = juce::Decibels::gainToDecibels(detectorInput, -120.0f);
+            const auto overDb = juce::jmax(0.0f, detectorDb - thresholdDb);
+
+            const auto targetReductionDb = overDb > 0.0f
+                                               ? overDb * (1.0f - (1.0f / ratio))
+                                               : 0.0f;
+
+            const auto smoothingCoeff = targetReductionDb > gainReductionDb ? attackCoeff : releaseCoeff;
+            gainReductionDb = smoothingCoeff * gainReductionDb + (1.0f - smoothingCoeff) * targetReductionDb;
+
+            const auto gain = juce::Decibels::decibelsToGain(-gainReductionDb);
+            channelData[sample] *= gain;
+        }
+    }
 }
 
 void SimpleEQAudioProcessor::applyDistortion(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings)
@@ -461,6 +517,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout SimpleEQAudioProcessor::crea
                                                            juce::NormalisableRange<float>(-24.f, 24.f, 0.1f, 1.f),
                                                            0.f));
 
+    layout.add(std::make_unique<juce::AudioParameterFloat>("Compressor Amount",
+                                                           "Compressor Amount",
+                                                           juce::NormalisableRange<float>(0.f, 24.f, 0.1f, 1.f),
+                                                           0.f));
+
     layout.add(std::make_unique<juce::AudioParameterFloat>("Output Gain",
                                                            "Output Gain",
                                                            juce::NormalisableRange<float>(-24.f, 24.f, 0.1f, 1.f),
@@ -487,6 +548,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout SimpleEQAudioProcessor::crea
     layout.add(std::make_unique<juce::AudioParameterBool>("Peak Bypassed", "Peak Bypassed", false));
     layout.add(std::make_unique<juce::AudioParameterBool>("HighCut Bypassed", "HighCut Bypassed", false));
     layout.add(std::make_unique<juce::AudioParameterBool>("Distortion Bypassed", "Distortion Bypassed", false));
+    layout.add(std::make_unique<juce::AudioParameterBool>("Compressor Bypassed", "Compressor Bypassed", false));
     layout.add(std::make_unique<juce::AudioParameterBool>("Analyzer Enabled", "Analyzer Enabled", true));
     
     return layout;

@@ -72,6 +72,49 @@ Recommended manual test flow:
 4. Toggle bypass controls (LowCut, Peak, HighCut, Distortion) and verify behavior.
 5. Enable analyzer and verify response/FFT display updates during playback.
 
+## WebView UI (React + Vite)
+
+This project now includes a WebView-based editor implementation in [Source/WebViewEditor.cpp](Source/WebViewEditor.cpp), powered by a React + Vite app in [WebUI](WebUI).
+
+### 1) Frontend setup
+
+From the project root:
+
+cd WebUI
+npm install
+
+### 2) Build frontend assets for JUCE WebView
+
+cd WebUI
+npm run build
+
+This creates: WebUI/dist/index.html
+
+The JUCE editor tries to load this file automatically.
+
+### 3) Optional: load a custom URL (dev server)
+
+You can override the loaded URL with an environment variable:
+
+set SIMPLEEQ_WEB_UI_URL=http://127.0.0.1:5173
+
+Then run:
+
+cd WebUI
+npm run dev
+
+And launch the plugin/standalone in the same shell session where the environment variable is set.
+
+### 4) Build JUCE plugin/app
+
+cmake --build build --config Debug --target SimpleEQ_Standalone
+cmake --build build --config Debug --target SimpleEQ_VST3
+
+### Notes
+
+- Web browser support is enabled via JUCE_WEB_BROWSER=1 in [CMakeLists.txt](CMakeLists.txt).
+- Initial bridge wiring from React controls to APVTS parameters is not implemented yet.
+
 ## VS Code Tasks
 
 This workspace already includes these tasks:
