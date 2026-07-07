@@ -13,6 +13,7 @@ juce_add_plugin(SimpleEQ
     PLUGIN_MANUFACTURER_CODE MtkM
     PLUGIN_CODE SEq1
     FORMATS VST3 Standalone
+    NEEDS_WEBVIEW2 TRUE
     COPY_PLUGIN_AFTER_BUILD FALSE
     NEEDS_MIDI_INPUT FALSE
     NEEDS_MIDI_OUTPUT FALSE
@@ -23,13 +24,15 @@ juce_generate_juce_header(SimpleEQ)
 
 target_sources(SimpleEQ PRIVATE
     Source/PluginProcessor.cpp
-    Source/PluginEditor.cpp)
+    Source/PluginEditor.cpp
+    Source/WebViewEditor.cpp)
 
 target_include_directories(SimpleEQ PRIVATE
     ${CMAKE_CURRENT_BINARY_DIR})
 
 target_compile_definitions(SimpleEQ PRIVATE
-    JUCE_WEB_BROWSER=0
+    JUCE_WEB_BROWSER=1
+    JUCE_USE_WIN_WEBVIEW2=1
     JUCE_USE_CURL=0
     JUCE_IGNORE_VST3_MISMATCHED_PARAMETER_ID_WARNING=1)
 

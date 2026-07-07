@@ -157,6 +157,7 @@ struct ChainSettings
 {
     float peakFreq { 0 }, peakGainInDecibels{ 0 }, peakQuality {1.f};
     float inputGainInDecibels { 0.f };
+    float compressorAmount { 0.f };
     float outputGainInDecibels { 0.f };
     float distortionDriveInDecibels { 0.f };
     float lowCutFreq { 0 }, highCutFreq { 0 };
@@ -164,7 +165,7 @@ struct ChainSettings
     Slope lowCutSlope { Slope::Slope_12 }, highCutSlope { Slope::Slope_12 };
     
     bool lowCutBypassed { false }, peakBypassed { false }, highCutBypassed { false };
-    bool distortionBypassed { false };
+    bool distortionBypassed { false }, compressorBypassed { false };
 };
 
 ChainSettings getChainSettings(juce::AudioProcessorValueTreeState& apvts);
@@ -311,6 +312,7 @@ private:
     MonoChain leftChain, rightChain;
     
     void updatePeakFilter(const ChainSettings& chainSettings);
+    void applyCompressor(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings);
     void applyDistortion(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings);
     void applyGain(juce::AudioBuffer<float>& buffer, float gainDecibels);
     void pushPeakLevel(std::atomic<float>& targetPeak, float peakValue);
@@ -328,6 +330,7 @@ private:
     std::atomic<float> inputPeakLevel { 0.0f };
     std::atomic<float> outputPeakLevel { 0.0f };
 
+    std::array<float, 2> compressorGainReductionDb { 0.0f, 0.0f };
     std::array<float, 2> distortionToneState { 0.0f, 0.0f };
     
     juce::dsp::Oscillator<float> osc;
