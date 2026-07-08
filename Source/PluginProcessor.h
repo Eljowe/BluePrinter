@@ -291,6 +291,9 @@ struct ChainSettings
     float doublerMix { 0.0f };
     float doublerDelayMs { 20.0f };
     float doublerDetuneCents { 5.0f };
+    float tremoloSpeedHz { 5.0f };
+    float tremoloDepth { 0.5f };
+    int   tremoloLfoIndex { 0 };
     float delayMix { 0.35f };
     float delayTimeLMs { 350.0f };
     float delayTimeRMs { 350.0f };
@@ -320,6 +323,7 @@ struct ChainSettings
     bool gateBypassed { false };
     bool octaveBypassed { false };
     bool doublerBypassed { false };
+    bool tremoloBypassed { false };
     bool delayBypassed { false };
     bool monoInput { false };
     bool mute { false };
@@ -444,6 +448,7 @@ private:
     void applyCompressor(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings);
     void applyOctave(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings);
     void applyDoubler(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings);
+    void applyTremolo(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings);
     void applyDelay(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings);
     void applyDistortion(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings);
     void applyFuzz(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings);
@@ -479,6 +484,7 @@ private:
     std::array<GranularPitchShifter, 2> octavePitchShifters {};
     std::array<DelayLine, 2> doublerDelayLines {};
     std::array<GranularPitchShifter, 2> doublerPitchShifters {};
+    double tremoloLfoPhase { 0.0 };
     std::array<DelayLine, 2> delayDelayLines {};
     std::array<float, 2> distortionToneState { 0.0f, 0.0f };
     std::array<float, 2> fuzzToneState { 0.0f, 0.0f };

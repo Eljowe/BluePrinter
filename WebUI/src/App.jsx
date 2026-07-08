@@ -17,6 +17,10 @@ const PARAM_IDS = {
   doublerDelay: "Doubler Delay",
   doublerDetune: "Doubler Detune",
   doublerBypassed: "Doubler Bypassed",
+  tremoloSpeed: "Tremolo Speed",
+  tremoloDepth: "Tremolo Depth",
+  tremoloLfo: "Tremolo LFO",
+  tremoloBypassed: "Tremolo Bypassed",
   delayMix: "Delay Mix",
   delayTimeL: "Delay Time L",
   delayTimeR: "Delay Time R",
@@ -84,6 +88,9 @@ function readInitialParametersFromJuce() {
     doublerMix: Number(first.doublerMix ?? 0),
     doublerDelay: Number(first.doublerDelay ?? 20),
     doublerDetune: Number(first.doublerDetune ?? 5),
+    tremoloSpeed: Number(first.tremoloSpeed ?? 5),
+    tremoloDepth: Number(first.tremoloDepth ?? 0.5),
+    tremoloLfoIndex: Number(first.tremoloLfoIndex ?? 0),
     delayMix: Number(first.delayMix ?? 0.35),
     delayTimeL: Number(first.delayTimeL ?? 350),
     delayTimeR: Number(first.delayTimeR ?? 350),
@@ -166,6 +173,9 @@ export default function App() {
   const [doublerMix, setDoublerMix] = useState(initial?.doublerMix ?? 0);
   const [doublerDelay, setDoublerDelay] = useState(initial?.doublerDelay ?? 20);
   const [doublerDetune, setDoublerDetune] = useState(initial?.doublerDetune ?? 5);
+  const [tremoloSpeed, setTremoloSpeed] = useState(initial?.tremoloSpeed ?? 5);
+  const [tremoloDepth, setTremoloDepth] = useState(initial?.tremoloDepth ?? 0.5);
+  const [tremoloLfoIndex, setTremoloLfoIndex] = useState(initial?.tremoloLfoIndex ?? 0);
   const [delayMix, setDelayMix] = useState(initial?.delayMix ?? 0.35);
   const [delayTimeL, setDelayTimeL] = useState(initial?.delayTimeL ?? 350);
   const [delayTimeR, setDelayTimeR] = useState(initial?.delayTimeR ?? 350);
@@ -181,6 +191,7 @@ export default function App() {
   const [compressorBypassed, setCompressorBypassed] = useState(initial?.compressorBypassed ?? false);
   const [octaveBypassed, setOctaveBypassed] = useState(initial?.octaveBypassed ?? false);
   const [doublerBypassed, setDoublerBypassed] = useState(initial?.doublerBypassed ?? false);
+  const [tremoloBypassed, setTremoloBypassed] = useState(initial?.tremoloBypassed ?? false);
   const [delayBypassed, setDelayBypassed] = useState(initial?.delayBypassed ?? false);
   const [reverbSize, setReverbSize] = useState(initial?.reverbSize ?? 0.5);
   const [reverbDamping, setReverbDamping] = useState(initial?.reverbDamping ?? 0.5);
@@ -219,6 +230,9 @@ export default function App() {
       if (payload.doublerMix !== undefined) setDoublerMix(Number(payload.doublerMix));
       if (payload.doublerDelay !== undefined) setDoublerDelay(Number(payload.doublerDelay));
       if (payload.doublerDetune !== undefined) setDoublerDetune(Number(payload.doublerDetune));
+      if (payload.tremoloSpeed !== undefined) setTremoloSpeed(Number(payload.tremoloSpeed));
+      if (payload.tremoloDepth !== undefined) setTremoloDepth(Number(payload.tremoloDepth));
+      if (payload.tremoloLfoIndex !== undefined) setTremoloLfoIndex(Number(payload.tremoloLfoIndex));
       if (payload.delayMix !== undefined) setDelayMix(Number(payload.delayMix));
       if (payload.delayTimeL !== undefined) setDelayTimeL(Number(payload.delayTimeL));
       if (payload.delayTimeR !== undefined) setDelayTimeR(Number(payload.delayTimeR));
@@ -243,6 +257,7 @@ export default function App() {
       if (payload.compressorBypassed !== undefined) setCompressorBypassed(Boolean(payload.compressorBypassed));
       if (payload.octaveBypassed !== undefined) setOctaveBypassed(Boolean(payload.octaveBypassed));
       if (payload.doublerBypassed !== undefined) setDoublerBypassed(Boolean(payload.doublerBypassed));
+      if (payload.tremoloBypassed !== undefined) setTremoloBypassed(Boolean(payload.tremoloBypassed));
       if (payload.delayBypassed !== undefined) setDelayBypassed(Boolean(payload.delayBypassed));
       if (payload.reverbSize !== undefined) setReverbSize(Number(payload.reverbSize));
       if (payload.reverbDamping !== undefined) setReverbDamping(Number(payload.reverbDamping));
@@ -392,6 +407,10 @@ export default function App() {
           doublerDelay={doublerDelay}
           doublerDetune={doublerDetune}
           doublerBypassed={doublerBypassed}
+          tremoloSpeed={tremoloSpeed}
+          tremoloDepth={tremoloDepth}
+          tremoloLfoIndex={tremoloLfoIndex}
+          tremoloBypassed={tremoloBypassed}
           delayMix={delayMix}
           delayTimeL={delayTimeL}
           delayTimeR={delayTimeR}
@@ -493,6 +512,23 @@ export default function App() {
             const next = !doublerBypassed;
             setDoublerBypassed(next);
             emitParameterChange(PARAM_IDS.doublerBypassed, next ? 1 : 0);
+          }}
+          onTremoloSpeedChange={(next) => {
+            setTremoloSpeed(next);
+            emitParameterChange(PARAM_IDS.tremoloSpeed, next);
+          }}
+          onTremoloDepthChange={(next) => {
+            setTremoloDepth(next);
+            emitParameterChange(PARAM_IDS.tremoloDepth, next);
+          }}
+          onTremoloLfoChange={(next) => {
+            setTremoloLfoIndex(next);
+            emitParameterChange(PARAM_IDS.tremoloLfo, next);
+          }}
+          onTremoloToggle={() => {
+            const next = !tremoloBypassed;
+            setTremoloBypassed(next);
+            emitParameterChange(PARAM_IDS.tremoloBypassed, next ? 1 : 0);
           }}
           onDelayMixChange={(next) => {
             setDelayMix(next);

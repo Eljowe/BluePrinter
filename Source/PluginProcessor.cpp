@@ -273,6 +273,8 @@ void SimpleEQAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
 
     applyReverb(buffer, chainSettings);
 
+    applyTremolo(buffer, chainSettings);
+
     applyGain(buffer, chainSettings.outputGainInDecibels);
 
     // Global mute: silence the entire output. Applied last so it overrides
@@ -576,6 +578,13 @@ ChainSettings getChainSettings(juce::AudioProcessorValueTreeState& apvts)
     settings.doublerMix = apvts.getRawParameterValue("Doubler Mix")->load();
     settings.doublerDelayMs = apvts.getRawParameterValue("Doubler Delay")->load();
     settings.doublerDetuneCents = apvts.getRawParameterValue("Doubler Detune")->load();
+    settings.tremoloSpeedHz = apvts.getRawParameterValue("Tremolo Speed")->load();
+    settings.tremoloDepth = apvts.getRawParameterValue("Tremolo Depth")->load();
+    {
+        const auto* lfoParam = dynamic_cast<juce::AudioParameterChoice*>(
+            apvts.getParameter("Tremolo LFO"));
+        settings.tremoloLfoIndex = lfoParam != nullptr ? lfoParam->getIndex() : 0;
+    }
     settings.delayMix = apvts.getRawParameterValue("Delay Mix")->load();
     settings.delayTimeLMs = apvts.getRawParameterValue("Delay Time L")->load();
     settings.delayTimeRMs = apvts.getRawParameterValue("Delay Time R")->load();
@@ -610,6 +619,7 @@ ChainSettings getChainSettings(juce::AudioProcessorValueTreeState& apvts)
     settings.compressorBypassed = apvts.getRawParameterValue("Compressor Bypassed")->load() > 0.5f;
     settings.octaveBypassed = apvts.getRawParameterValue("Octave Bypassed")->load() > 0.5f;
     settings.doublerBypassed = apvts.getRawParameterValue("Doubler Bypassed")->load() > 0.5f;
+    settings.tremoloBypassed = apvts.getRawParameterValue("Tremolo Bypassed")->load() > 0.5f;
     settings.delayBypassed = apvts.getRawParameterValue("Delay Bypassed")->load() > 0.5f;
     settings.monoInput = apvts.getRawParameterValue("Mono Input")->load() > 0.5f;
     settings.mute = apvts.getRawParameterValue("Mute")->load() > 0.5f;
@@ -894,6 +904,54 @@ void SimpleEQAudioProcessor::applyFuzz(juce::AudioBuffer<float>& buffer, const C
     }
 }
 
+void SimpleEQAudioProcessor::applyTremolo(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings)
+{
+    if (chainSettings.tremoloBypassed)
+        return;
+
+    const auto speedHz = juce::jlimit(0.05f, 20.0f, chainSettings.tremoloSpeedHz);
+    const auto depth   = juce::jlimit(0.0f, 1.0f, chainSettings.tremoloDepth);
+    if (depth <= 0.0f || speedHz <= 0.0f)
+        return;
+
+    const auto sampleRate = juce::jmax(1.0, getSampleRate());
+    const auto phaseInc   = speedHz / sampleRate;
+    const auto lfoIndex   = juce::jlimit(0, 2, chainSettings.tremoloLfoIndex);
+
+    const auto numChannels = buffer.getNumChannels();
+    const auto numSamples  = buffer.getNumSamples();
+    if (numChannels <= 0 || numSamples <= 0)
+        return;
+
+    auto phase = tremoloLfoPhase;
+    for (int sample = 0; sample < numSamples; ++sample)
+    {
+        // Unipolar 0..1 waveform sample.
+        float lfo;
+        if (lfoIndex == 1)            // triangle
+            lfo = phase < 0.5 ? static_cast<float>(phase) * 2.0f
+                              : (1.0f - static_cast<float>(phase)) * 2.0f;
+        else if (lfoIndex == 2)       // square
+            lfo = phase < 0.5 ? 1.0f : 0.0f;
+        else                          // sine (default)
+            lfo = 0.5f + 0.5f * std::sin(phase * juce::MathConstants<double>::twoPi);
+
+        // depth=0 -> gain stays at 1; depth=1 -> gain sweeps 1..0.
+        const auto gain = 1.0f - depth * (1.0f - lfo);
+
+        for (int channel = 0; channel < numChannels; ++channel)
+        {
+            auto* channelData = buffer.getWritePointer(channel);
+            channelData[sample] *= gain;
+        }
+
+        phase += phaseInc;
+        if (phase >= 1.0)
+            phase -= 1.0;
+    }
+    tremoloLfoPhase = phase;
+}
+
 void SimpleEQAudioProcessor::applyReverb(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings)
 {
     if (chainSettings.reverbBypassed)
@@ -1020,6 +1078,21 @@ juce::AudioProcessorValueTreeState::ParameterLayout SimpleEQAudioProcessor::crea
                                                            juce::NormalisableRange<float>(-50.f, 50.f, 1.f, 1.f),
                                                            6.0f));
 
+    layout.add(std::make_unique<juce::AudioParameterFloat>("Tremolo Speed",
+                                                           "Tremolo Speed",
+                                                           juce::NormalisableRange<float>(0.1f, 15.f, 0.05f, 1.f),
+                                                           5.0f));
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>("Tremolo Depth",
+                                                           "Tremolo Depth",
+                                                           juce::NormalisableRange<float>(0.f, 1.f, 0.01f, 1.f),
+                                                           0.5f));
+
+    layout.add(std::make_unique<juce::AudioParameterChoice>("Tremolo LFO",
+                                                            "Tremolo LFO",
+                                                            juce::StringArray { "Sine", "Triangle", "Square" },
+                                                            0));
+
     layout.add(std::make_unique<juce::AudioParameterFloat>("Delay Mix",
                                                            "Delay Mix",
                                                            juce::NormalisableRange<float>(0.f, 1.f, 0.01f, 1.f),
@@ -1106,6 +1179,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout SimpleEQAudioProcessor::crea
     layout.add(std::make_unique<juce::AudioParameterBool>("Compressor Bypassed", "Compressor Bypassed", false));
     layout.add(std::make_unique<juce::AudioParameterBool>("Octave Bypassed", "Octave Bypassed", false));
     layout.add(std::make_unique<juce::AudioParameterBool>("Doubler Bypassed", "Doubler Bypassed", false));
+    layout.add(std::make_unique<juce::AudioParameterBool>("Tremolo Bypassed", "Tremolo Bypassed", false));
     layout.add(std::make_unique<juce::AudioParameterBool>("Delay Bypassed", "Delay Bypassed", false));
     layout.add(std::make_unique<juce::AudioParameterBool>("Mono Input", "Mono Input", false));
     layout.add(std::make_unique<juce::AudioParameterBool>("Mute", "Mute", false));

@@ -26,6 +26,10 @@ export default function Pedalboard({
   doublerDelay,
   doublerDetune,
   doublerBypassed,
+  tremoloSpeed,
+  tremoloDepth,
+  tremoloLfoIndex,
+  tremoloBypassed,
   delayMix,
   delayTimeL,
   delayTimeR,
@@ -58,6 +62,10 @@ export default function Pedalboard({
   onDoublerDelayChange,
   onDoublerDetuneChange,
   onDoublerToggle,
+  onTremoloSpeedChange,
+  onTremoloDepthChange,
+  onTremoloLfoChange,
+  onTremoloToggle,
   onDelayMixChange,
   onDelayTimeLChange,
   onDelayTimeRChange,
@@ -460,6 +468,69 @@ export default function Pedalboard({
             onToggle={onDelayToggle}
            />
          </article>
+
+        <article className={`fx-pedal-card ${tremoloBypassed ? "is-bypassed" : ""}`.trim()}>
+          <p className="fx-pedal-title">Tremolo</p>
+          <div className="knob-grid knob-grid-2">
+            <Knob
+              className="pedal-compact"
+              label="Speed"
+              min={0.1}
+              max={15}
+              step={0.05}
+              value={tremoloSpeed}
+              onChange={onTremoloSpeedChange}
+              unit="Hz"
+              decimals={2}
+              accent="yellow"
+            />
+            <Knob
+              className="pedal-compact"
+              label="Depth"
+              min={0}
+              max={1}
+              step={0.01}
+              value={tremoloDepth}
+              onChange={onTremoloDepthChange}
+              accent="yellow"
+            />
+          </div>
+          <div className="pedal-mode-toggle">
+            <div className="pedal-mode-option">
+              <button
+                type="button"
+                className={`pedal-mode-circle ${tremoloLfoIndex === 0 ? "active" : ""}`.trim()}
+                onClick={() => { if (tremoloLfoIndex !== 0) onTremoloLfoChange(0); }}
+                aria-label="Sine"
+              />
+              <span className="pedal-mode-label">Sine</span>
+            </div>
+            <div className="pedal-mode-option">
+              <button
+                type="button"
+                className={`pedal-mode-circle ${tremoloLfoIndex === 1 ? "active" : ""}`.trim()}
+                onClick={() => { if (tremoloLfoIndex !== 1) onTremoloLfoChange(1); }}
+                aria-label="Triangle"
+              />
+              <span className="pedal-mode-label">Tri</span>
+            </div>
+            <div className="pedal-mode-option">
+              <button
+                type="button"
+                className={`pedal-mode-circle ${tremoloLfoIndex === 2 ? "active" : ""}`.trim()}
+                onClick={() => { if (tremoloLfoIndex !== 2) onTremoloLfoChange(2); }}
+                aria-label="Square"
+              />
+              <span className="pedal-mode-label">Square</span>
+            </div>
+          </div>
+          <BypassButton
+            label="Power"
+            enabled={tremoloBypassed}
+            className="pedal-power"
+            onToggle={onTremoloToggle}
+          />
+        </article>
       </div>
     </section>
   );

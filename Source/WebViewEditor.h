@@ -46,6 +46,10 @@ private:
     static constexpr const char* paramDoublerDelay = "Doubler Delay";
     static constexpr const char* paramDoublerDetune = "Doubler Detune";
     static constexpr const char* paramDoublerBypassed = "Doubler Bypassed";
+    static constexpr const char* paramTremoloSpeed = "Tremolo Speed";
+    static constexpr const char* paramTremoloDepth = "Tremolo Depth";
+    static constexpr const char* paramTremoloLfo = "Tremolo LFO";
+    static constexpr const char* paramTremoloBypassed = "Tremolo Bypassed";
     static constexpr const char* paramDelayMix = "Delay Mix";
     static constexpr const char* paramDelayTimeL = "Delay Time L";
     static constexpr const char* paramDelayTimeR = "Delay Time R";

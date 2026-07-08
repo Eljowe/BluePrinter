@@ -39,6 +39,9 @@ juce::var makeSnapshotVar(float inputGain,
                           float doublerMix,
                           float doublerDelay,
                           float doublerDetune,
+                          float tremoloSpeed,
+                          float tremoloDepth,
+                          int   tremoloLfoIndex,
                           float delayMix,
                           float delayTimeL,
                           float delayTimeR,
@@ -61,6 +64,7 @@ juce::var makeSnapshotVar(float inputGain,
                           bool compressorBypassed,
                           bool octaveBypassed,
                           bool doublerBypassed,
+                          bool tremoloBypassed,
                           bool delayBypassed,
                           bool reverbBypassed,
                           bool tunerBypassed,
@@ -92,6 +96,9 @@ juce::var makeSnapshotVar(float inputGain,
     payload->setProperty("doublerMix", doublerMix);
     payload->setProperty("doublerDelay", doublerDelay);
     payload->setProperty("doublerDetune", doublerDetune);
+    payload->setProperty("tremoloSpeed", tremoloSpeed);
+    payload->setProperty("tremoloDepth", tremoloDepth);
+    payload->setProperty("tremoloLfoIndex", tremoloLfoIndex);
     payload->setProperty("delayMix", delayMix);
     payload->setProperty("delayTimeL", delayTimeL);
     payload->setProperty("delayTimeR", delayTimeR);
@@ -115,6 +122,7 @@ juce::var makeSnapshotVar(float inputGain,
     payload->setProperty("compressorBypassed", compressorBypassed);
     payload->setProperty("octaveBypassed", octaveBypassed);
     payload->setProperty("doublerBypassed", doublerBypassed);
+    payload->setProperty("tremoloBypassed", tremoloBypassed);
     payload->setProperty("delayBypassed", delayBypassed);
     payload->setProperty("reverbBypassed", reverbBypassed);
     payload->setProperty("tunerBypassed", tunerBypassed);
@@ -187,6 +195,12 @@ juce::WebBrowserComponent::Options makeWebViewOptions(SimpleEQAudioProcessor& pr
     auto doublerMix = processor.apvts.getRawParameterValue("Doubler Mix")->load();
     auto doublerDelay = processor.apvts.getRawParameterValue("Doubler Delay")->load();
     auto doublerDetune = processor.apvts.getRawParameterValue("Doubler Detune")->load();
+    auto tremoloSpeed = processor.apvts.getRawParameterValue("Tremolo Speed")->load();
+    auto tremoloDepth = processor.apvts.getRawParameterValue("Tremolo Depth")->load();
+    int tremoloLfoIndex = 0;
+    if (auto* lfoParam = dynamic_cast<juce::AudioParameterChoice*>(
+            processor.apvts.getParameter("Tremolo LFO")))
+        tremoloLfoIndex = lfoParam->getIndex();
     auto delayMix = processor.apvts.getRawParameterValue("Delay Mix")->load();
     auto delayTimeL = processor.apvts.getRawParameterValue("Delay Time L")->load();
     auto delayTimeR = processor.apvts.getRawParameterValue("Delay Time R")->load();
@@ -211,6 +225,7 @@ juce::WebBrowserComponent::Options makeWebViewOptions(SimpleEQAudioProcessor& pr
     auto compressorBypassed = processor.apvts.getRawParameterValue("Compressor Bypassed")->load() > 0.5f;
     auto octaveBypassed = processor.apvts.getRawParameterValue("Octave Bypassed")->load() > 0.5f;
     auto doublerBypassed = processor.apvts.getRawParameterValue("Doubler Bypassed")->load() > 0.5f;
+    auto tremoloBypassed = processor.apvts.getRawParameterValue("Tremolo Bypassed")->load() > 0.5f;
     auto delayBypassed = processor.apvts.getRawParameterValue("Delay Bypassed")->load() > 0.5f;
     auto reverbSize = processor.apvts.getRawParameterValue("Reverb Size")->load();
     auto reverbDamping = processor.apvts.getRawParameterValue("Reverb Damping")->load();
@@ -282,6 +297,9 @@ juce::WebBrowserComponent::Options makeWebViewOptions(SimpleEQAudioProcessor& pr
                                     doublerMix,
                                     doublerDelay,
                                     doublerDetune,
+                                    tremoloSpeed,
+                                    tremoloDepth,
+                                    tremoloLfoIndex,
                                     delayMix,
                                     delayTimeL,
                                     delayTimeR,
@@ -304,6 +322,7 @@ juce::WebBrowserComponent::Options makeWebViewOptions(SimpleEQAudioProcessor& pr
                                     compressorBypassed,
                                     octaveBypassed,
                                     doublerBypassed,
+                                    tremoloBypassed,
                                     delayBypassed,
                                     reverbBypassed,
                                     tunerBypassed,
@@ -370,6 +389,10 @@ SimpleEQWebViewEditor::SimpleEQWebViewEditor(SimpleEQAudioProcessor& p)
     audioProcessor.apvts.addParameterListener(paramDoublerDelay, this);
     audioProcessor.apvts.addParameterListener(paramDoublerDetune, this);
     audioProcessor.apvts.addParameterListener(paramDoublerBypassed, this);
+    audioProcessor.apvts.addParameterListener(paramTremoloSpeed, this);
+    audioProcessor.apvts.addParameterListener(paramTremoloDepth, this);
+    audioProcessor.apvts.addParameterListener(paramTremoloLfo, this);
+    audioProcessor.apvts.addParameterListener(paramTremoloBypassed, this);
     audioProcessor.apvts.addParameterListener(paramDelayMix, this);
     audioProcessor.apvts.addParameterListener(paramDelayTimeL, this);
     audioProcessor.apvts.addParameterListener(paramDelayTimeR, this);
@@ -421,6 +444,10 @@ SimpleEQWebViewEditor::~SimpleEQWebViewEditor()
     audioProcessor.apvts.removeParameterListener(paramDoublerDelay, this);
     audioProcessor.apvts.removeParameterListener(paramDoublerDetune, this);
     audioProcessor.apvts.removeParameterListener(paramDoublerBypassed, this);
+    audioProcessor.apvts.removeParameterListener(paramTremoloSpeed, this);
+    audioProcessor.apvts.removeParameterListener(paramTremoloDepth, this);
+    audioProcessor.apvts.removeParameterListener(paramTremoloLfo, this);
+    audioProcessor.apvts.removeParameterListener(paramTremoloBypassed, this);
     audioProcessor.apvts.removeParameterListener(paramDelayMix, this);
     audioProcessor.apvts.removeParameterListener(paramDelayTimeL, this);
     audioProcessor.apvts.removeParameterListener(paramDelayTimeR, this);
@@ -501,6 +528,10 @@ void SimpleEQWebViewEditor::parameterChanged(const juce::String& parameterID, fl
         && parameterID != paramDoublerDelay
         && parameterID != paramDoublerDetune
         && parameterID != paramDoublerBypassed
+        && parameterID != paramTremoloSpeed
+        && parameterID != paramTremoloDepth
+        && parameterID != paramTremoloLfo
+        && parameterID != paramTremoloBypassed
         && parameterID != paramDelayMix
         && parameterID != paramDelayTimeL
         && parameterID != paramDelayTimeR
@@ -576,6 +607,12 @@ juce::var SimpleEQWebViewEditor::makeParameterSnapshot()
     auto doublerMix = audioProcessor.apvts.getRawParameterValue(paramDoublerMix)->load();
     auto doublerDelay = audioProcessor.apvts.getRawParameterValue(paramDoublerDelay)->load();
     auto doublerDetune = audioProcessor.apvts.getRawParameterValue(paramDoublerDetune)->load();
+    auto tremoloSpeed = audioProcessor.apvts.getRawParameterValue(paramTremoloSpeed)->load();
+    auto tremoloDepth = audioProcessor.apvts.getRawParameterValue(paramTremoloDepth)->load();
+    int tremoloLfoIndex = 0;
+    if (auto* lfoParam = dynamic_cast<juce::AudioParameterChoice*>(
+            audioProcessor.apvts.getParameter(paramTremoloLfo)))
+        tremoloLfoIndex = lfoParam->getIndex();
     auto delayMix = audioProcessor.apvts.getRawParameterValue(paramDelayMix)->load();
     auto delayTimeL = audioProcessor.apvts.getRawParameterValue(paramDelayTimeL)->load();
     auto delayTimeR = audioProcessor.apvts.getRawParameterValue(paramDelayTimeR)->load();
@@ -600,6 +637,7 @@ juce::var SimpleEQWebViewEditor::makeParameterSnapshot()
     auto compressorBypassed = audioProcessor.apvts.getRawParameterValue(paramCompressorBypassed)->load() > 0.5f;
     auto octaveBypassed = audioProcessor.apvts.getRawParameterValue(paramOctaveBypassed)->load() > 0.5f;
     auto doublerBypassed = audioProcessor.apvts.getRawParameterValue(paramDoublerBypassed)->load() > 0.5f;
+    auto tremoloBypassed = audioProcessor.apvts.getRawParameterValue(paramTremoloBypassed)->load() > 0.5f;
     auto delayBypassed = audioProcessor.apvts.getRawParameterValue(paramDelayBypassed)->load() > 0.5f;
     auto reverbSize = audioProcessor.apvts.getRawParameterValue(paramReverbSize)->load();
     auto reverbDamping = audioProcessor.apvts.getRawParameterValue(paramReverbDamping)->load();
@@ -635,6 +673,9 @@ juce::var SimpleEQWebViewEditor::makeParameterSnapshot()
                            doublerMix,
                            doublerDelay,
                            doublerDetune,
+                           tremoloSpeed,
+                           tremoloDepth,
+                           tremoloLfoIndex,
                            delayMix,
                            delayTimeL,
                            delayTimeR,
@@ -657,6 +698,7 @@ juce::var SimpleEQWebViewEditor::makeParameterSnapshot()
                            compressorBypassed,
                            octaveBypassed,
                            doublerBypassed,
+                           tremoloBypassed,
                            delayBypassed,
                            reverbBypassed,
                            tunerBypassed,
