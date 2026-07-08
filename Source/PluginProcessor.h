@@ -153,13 +153,150 @@ enum Slope
     Slope_48
 };
 
+//==============================================================================
+// Two-voice, time-domain granular pitch shifter with Hann-windowed overlap-add.
+// Voices are phase-staggered by half a grain; on each phase wrap the read
+// pointer jumps back so the voice always reads the most recent grainLength /
+// pitchRatio input samples. Sum of two half-offset Hann windows is 1, so
+// COLA holds and amplitude is preserved.
+class GranularPitchShifter
+{
+public:
+    static constexpr int bufferSize = 4096;
+    static constexpr int grainLength = 1024;
+
+    void prepare()
+    {
+        std::fill(std::begin(buffer), std::end(buffer), 0.0f);
+        writePos = 0;
+        for (int v = 0; v < 2; ++v)
+        {
+            voices[v].readPos = 0.0f;
+            voices[v].phase = (v == 0) ? 0.0f : static_cast<float>(grainLength) * 0.5f;
+            lpfState[v] = 0.0f;
+        }
+    }
+
+    void setSampleRate (double sampleRate)
+    {
+        // One-pole low-pass to take the edge off aliasing when shifting up.
+        const auto cutoffHz = juce::jmin (8000.0f, static_cast<float>(sampleRate) * 0.4f);
+        lpfCoeff = 1.0f - std::exp (-2.0f * juce::MathConstants<float>::pi * cutoffHz
+                                    / static_cast<float>(sampleRate));
+    }
+
+    float processSample (float input, float pitchRatio)
+    {
+        if (pitchRatio < 0.25f) pitchRatio = 0.25f;
+        if (pitchRatio > 4.0f)  pitchRatio = 4.0f;
+
+        buffer[writePos] = input;
+
+        float output = 0.0f;
+        for (int v = 0; v < 2; ++v)
+        {
+            const auto readIdx = static_cast<int>(voices[v].readPos) & (bufferSize - 1);
+            output += buffer[readIdx] * hannWindow (voices[v].phase);
+
+            voices[v].readPos += pitchRatio;
+            voices[v].phase   += pitchRatio;
+
+            if (voices[v].phase >= static_cast<float>(grainLength))
+            {
+                voices[v].phase -= static_cast<float>(grainLength);
+                const auto lookback = static_cast<float>(grainLength) / pitchRatio;
+                auto newRead = static_cast<float>(writePos) - lookback;
+                newRead = std::fmod (newRead, static_cast<float>(bufferSize));
+                if (newRead < 0.0f)
+                    newRead += static_cast<float>(bufferSize);
+                voices[v].readPos = newRead;
+            }
+        }
+
+        // Soft LP to dampen upward-shift aliasing.
+        lpfState[0] += lpfCoeff * (output - lpfState[0]);
+        lpfState[1] += lpfCoeff * (lpfState[0] - lpfState[1]);
+        output = lpfState[1];
+
+        writePos = (writePos + 1) & (bufferSize - 1);
+        return output;
+    }
+
+private:
+    static float hannWindow (float phase)
+    {
+        if (phase < 0.0f || phase >= static_cast<float>(grainLength))
+            return 0.0f;
+        return 0.5f * (1.0f - std::cos (2.0f * juce::MathConstants<float>::pi
+                                        * phase / static_cast<float>(grainLength)));
+    }
+
+    std::array<float, bufferSize> buffer {};
+    int writePos = 0;
+    struct Voice { float readPos = 0.0f; float phase = 0.0f; };
+    Voice voices[2];
+
+    float lpfCoeff = 0.5f;
+    float lpfState[2] { 0.0f, 0.0f };
+};
+
+//==============================================================================
+// Simple fractional delay line. Buffer size must be a power of two.
+class DelayLine
+{
+public:
+    static constexpr int size = 262144;
+
+    void prepare()
+    {
+        std::fill(std::begin(buffer), std::end(buffer), 0.0f);
+        writePos = 0;
+    }
+
+    void push (float sample)
+    {
+        buffer[writePos] = sample;
+        writePos = (writePos + 1) & (size - 1);
+    }
+
+    int getWritePos() const { return writePos; }
+
+    float read (float delaySamples) const
+    {
+        const auto clamped = juce::jlimit (0.0f, static_cast<float>(size - 1), delaySamples);
+        const auto readPos = static_cast<float>(writePos) - clamped - 1.0f;
+        auto wrapped = std::fmod (readPos, static_cast<float>(size));
+        if (wrapped < 0.0f)
+            wrapped += static_cast<float>(size);
+        const auto idx0 = static_cast<int>(wrapped) & (size - 1);
+        const auto idx1 = (idx0 + 1) & (size - 1);
+        const auto frac = wrapped - std::floor (wrapped);
+        return buffer[idx0] * (1.0f - frac) + buffer[idx1] * frac;
+    }
+
+private:
+    std::array<float, size> buffer {};
+    int writePos = 0;
+};
+
 struct ChainSettings
 {
     float peakFreq { 0 }, peakGainInDecibels{ 0 }, peakQuality {1.f};
     float inputGainInDecibels { 0.f };
+    float tunerReferencePitchHz { 440.f };
+    float gateThresholdInDecibels { -60.f };
     float compressorAmount { 0.f };
     float compressorTone { 0.f };
     float compressorLevelInDecibels { 0.f };
+    float octaveTransposeSemitones { 0.0f };
+    float doublerMix { 0.0f };
+    float doublerDelayMs { 20.0f };
+    float doublerDetuneCents { 5.0f };
+    float delayMix { 0.35f };
+    float delayTimeLMs { 350.0f };
+    float delayTimeRMs { 350.0f };
+    float delayFeedback { 0.35f };
+    bool  delayModeIsDual { false };
     float outputGainInDecibels { 0.f };
     float distortionDriveInDecibels { 0.f };
     float distortionTone { 0.7f };
@@ -180,6 +317,11 @@ struct ChainSettings
     bool distortionBypassed { false }, compressorBypassed { false };
     bool fuzzBypassed { false };
     bool reverbBypassed { false };
+    bool tunerBypassed { false };
+    bool gateBypassed { false };
+    bool octaveBypassed { false };
+    bool doublerBypassed { false };
+    bool delayBypassed { false };
 };
 
 ChainSettings getChainSettings(juce::AudioProcessorValueTreeState& apvts);
@@ -318,6 +460,26 @@ public:
     {
         return outputPeakLevel.exchange(0.0f, std::memory_order_acq_rel);
     }
+
+    float getTunerDetectedFrequencyHz() const
+    {
+        return tunerDetectedFrequencyHz.load(std::memory_order_acquire);
+    }
+
+    float getTunerDetectedCents() const
+    {
+        return tunerDetectedCents.load(std::memory_order_acquire);
+    }
+
+    int getTunerDetectedNoteIndex() const
+    {
+        return tunerDetectedNoteIndex.load(std::memory_order_acquire);
+    }
+
+    float getTunerDetectedLevelDb() const
+    {
+        return tunerDetectedLevel.load(std::memory_order_acquire);
+    }
     
     using BlockType = juce::AudioBuffer<float>;
     SingleChannelSampleFifo<BlockType> leftChannelFifo { Channel::Left };
@@ -327,10 +489,15 @@ private:
     
     void updatePeakFilter(const ChainSettings& chainSettings);
     void applyCompressor(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings);
+    void applyOctave(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings);
+    void applyDoubler(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings);
+    void applyDelay(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings);
     void applyDistortion(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings);
     void applyFuzz(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings);
     void applyReverb(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings);
     void applyGain(juce::AudioBuffer<float>& buffer, float gainDecibels);
+    void applyTuner(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings);
+    void applyGate(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings);
     void pushPeakLevel(std::atomic<float>& targetPeak, float peakValue);
 
     
@@ -346,10 +513,26 @@ private:
     std::atomic<float> inputPeakLevel { 0.0f };
     std::atomic<float> outputPeakLevel { 0.0f };
 
+    std::atomic<float> tunerDetectedFrequencyHz { 0.0f };
+    std::atomic<float> tunerDetectedCents { 0.0f };
+    std::atomic<float> tunerDetectedLevel { 0.0f };
+    std::atomic<int>   tunerDetectedNoteIndex { -1 };
+
+    std::vector<float> tunerYinBuffer;
+    std::vector<float> tunerAnalysisBuffer;
+    int tunerYinBufferWriteIndex { 0 };
+    int tunerSamplesUntilNextAnalysis { 0 };
+    double tunerAnalysisSampleRate { 48000.0 };
+
     std::array<float, 2> compressorGainReductionDb { 0.0f, 0.0f };
     std::array<float, 2> compressorSidechainHpfX1 { 0.0f, 0.0f };
     std::array<float, 2> compressorSidechainHpfY1 { 0.0f, 0.0f };
     float compressorSidechainHpfCoeff { 0.0f };
+    std::array<float, 2> gateEnvelope { 0.0f, 0.0f };
+    std::array<GranularPitchShifter, 2> octavePitchShifters {};
+    std::array<DelayLine, 2> doublerDelayLines {};
+    std::array<GranularPitchShifter, 2> doublerPitchShifters {};
+    std::array<DelayLine, 2> delayDelayLines {};
     std::array<float, 2> distortionToneState { 0.0f, 0.0f };
     std::array<float, 2> fuzzToneState { 0.0f, 0.0f };
 

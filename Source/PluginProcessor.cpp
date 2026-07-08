@@ -8,6 +8,8 @@
 
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+
+#include <fstream>
 #include "WebViewEditor.h"
 
 //==============================================================================
@@ -123,12 +125,39 @@ void SimpleEQAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     reverb.setParameters(reverbParameters);
     reverb.prepare(spec);
 
+    for (auto& shifter : octavePitchShifters)
+    {
+        shifter.prepare();
+        shifter.setSampleRate(sampleRate);
+    }
+
+    for (auto& line : doublerDelayLines)
+        line.prepare();
+    for (auto& line : delayDelayLines)
+        line.prepare();
+    for (auto& shifter : doublerPitchShifters)
+    {
+        shifter.prepare();
+        shifter.setSampleRate(sampleRate);
+    }
+
     inputClippingDetected.store(false, std::memory_order_release);
     outputClippingDetected.store(false, std::memory_order_release);
     inputPeakLevel.store(0.0f, std::memory_order_release);
     outputPeakLevel.store(0.0f, std::memory_order_release);
     compressorGainReductionDb = { 0.0f, 0.0f };
     distortionToneState = { 0.0f, 0.0f };
+
+    constexpr int tunerWindowSize = 2048;
+    tunerYinBuffer.assign(static_cast<size_t>(tunerWindowSize), 0.0f);
+    tunerAnalysisBuffer.assign(static_cast<size_t>(tunerWindowSize), 0.0f);
+    tunerYinBufferWriteIndex = 0;
+    tunerSamplesUntilNextAnalysis = tunerWindowSize;
+    tunerAnalysisSampleRate = sampleRate;
+    tunerDetectedFrequencyHz.store(0.0f, std::memory_order_release);
+    tunerDetectedCents.store(0.0f, std::memory_order_release);
+    tunerDetectedLevel.store(0.0f, std::memory_order_release);
+    tunerDetectedNoteIndex.store(-1, std::memory_order_release);
 }
 
 void SimpleEQAudioProcessor::releaseResources()
@@ -182,6 +211,10 @@ void SimpleEQAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
 
     applyGain(buffer, chainSettings.inputGainInDecibels);
 
+    applyTuner(buffer, chainSettings);
+
+    applyGate(buffer, chainSettings);
+
     bool didInputClip = false;
     float inputPeak = 0.0f;
     for( int channel = 0; channel < buffer.getNumChannels(); ++channel )
@@ -225,9 +258,15 @@ void SimpleEQAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     leftChain.process(leftContext);
     rightChain.process(rightContext);
 
+    applyOctave(buffer, chainSettings);
+
+    applyDoubler(buffer, chainSettings);
+
     applyDistortion(buffer, chainSettings);
 
     applyFuzz(buffer, chainSettings);
+
+    applyDelay(buffer, chainSettings);
 
     applyReverb(buffer, chainSettings);
 
@@ -260,6 +299,187 @@ void SimpleEQAudioProcessor::applyGain(juce::AudioBuffer<float>& buffer, float g
 {
     const auto gain = juce::Decibels::decibelsToGain(gainDecibels);
     buffer.applyGain(gain);
+}
+
+void SimpleEQAudioProcessor::applyTuner(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings)
+{
+    const auto numChannels = buffer.getNumChannels();
+    const auto numSamples = buffer.getNumSamples();
+    if (numChannels <= 0 || numSamples <= 0)
+        return;
+
+    if (chainSettings.tunerBypassed)
+    {
+        tunerDetectedFrequencyHz.store(0.0f, std::memory_order_release);
+        tunerDetectedCents.store(0.0f, std::memory_order_release);
+        tunerDetectedNoteIndex.store(-1, std::memory_order_release);
+        tunerDetectedLevel.store(-60.0f, std::memory_order_release);
+        return;
+    }
+
+    const auto windowSize = static_cast<int>(tunerYinBuffer.size());
+    if (windowSize <= 0)
+        return;
+
+    const auto referenceHz = juce::jlimit(430.0f, 450.0f, chainSettings.tunerReferencePitchHz);
+    const auto halfBufferLevel = 1.0e-3f;
+
+    auto rmsAccum = 0.0f;
+    auto peak = 0.0f;
+    const auto* leftData = buffer.getReadPointer(0);
+
+    auto runAnalysis = [&](float blockRms, int blockSampleCount)
+    {
+        std::copy(tunerYinBuffer.begin(), tunerYinBuffer.end(), tunerAnalysisBuffer.begin());
+
+        const auto analysisRms = std::sqrt(blockRms / static_cast<float>(juce::jmax(1, blockSampleCount)));
+        tunerDetectedLevel.store(juce::Decibels::gainToDecibels(analysisRms, -60.0f), std::memory_order_release);
+
+        if (analysisRms < halfBufferLevel)
+        {
+            tunerDetectedFrequencyHz.store(0.0f, std::memory_order_release);
+            tunerDetectedCents.store(0.0f, std::memory_order_release);
+            tunerDetectedNoteIndex.store(-1, std::memory_order_release);
+            return;
+        }
+
+        const auto tauMax = windowSize / 2;
+        std::vector<float> yin(static_cast<size_t>(tauMax), 0.0f);
+        for (int tau = 1; tau < tauMax; ++tau)
+        {
+            auto sum = 0.0f;
+            for (int j = 0; j < tauMax; ++j)
+            {
+                const auto delta = tunerAnalysisBuffer[static_cast<size_t>(j)]
+                                 - tunerAnalysisBuffer[static_cast<size_t>(j + tau)];
+                sum += delta * delta;
+            }
+            yin[static_cast<size_t>(tau)] = sum;
+        }
+
+        yin[0] = 1.0f;
+        auto runningSum = 0.0f;
+        for (int tau = 1; tau < tauMax; ++tau)
+        {
+            runningSum += yin[static_cast<size_t>(tau)];
+            if (runningSum > 0.0f)
+                yin[static_cast<size_t>(tau)] = yin[static_cast<size_t>(tau)] * static_cast<float>(tau) / runningSum;
+            else
+                yin[static_cast<size_t>(tau)] = 1.0f;
+        }
+
+        constexpr float yinThreshold = 0.15f;
+        int tauEstimate = -1;
+        for (int tau = 2; tau < tauMax; ++tau)
+        {
+            if (yin[static_cast<size_t>(tau)] < yinThreshold)
+            {
+                while (tau + 1 < tauMax && yin[static_cast<size_t>(tau + 1)] < yin[static_cast<size_t>(tau)])
+                    ++tau;
+                tauEstimate = tau;
+                break;
+            }
+        }
+
+        if (tauEstimate <= 0)
+        {
+            tunerDetectedFrequencyHz.store(0.0f, std::memory_order_release);
+            tunerDetectedCents.store(0.0f, std::memory_order_release);
+            tunerDetectedNoteIndex.store(-1, std::memory_order_release);
+            return;
+        }
+
+        auto betterTau = static_cast<float>(tauEstimate);
+        if (tauEstimate + 1 < tauMax && tauEstimate - 1 > 0)
+        {
+            const auto s0 = yin[static_cast<size_t>(tauEstimate - 1)];
+            const auto s1 = yin[static_cast<size_t>(tauEstimate)];
+            const auto s2 = yin[static_cast<size_t>(tauEstimate + 1)];
+            const auto denom = 2.0f * (2.0f * s1 - s2 - s0);
+            if (std::abs(denom) > 1.0e-9f)
+                betterTau += (s2 - s0) / denom;
+        }
+
+        const auto frequency = static_cast<float>(tunerAnalysisSampleRate) / betterTau;
+        if (frequency < 20.0f || frequency > 5000.0f)
+        {
+            tunerDetectedFrequencyHz.store(0.0f, std::memory_order_release);
+            tunerDetectedCents.store(0.0f, std::memory_order_release);
+            tunerDetectedNoteIndex.store(-1, std::memory_order_release);
+            return;
+        }
+
+        const auto noteNumberFloat = 12.0f * std::log2(frequency / referenceHz) + 69.0f;
+        const auto noteNumber = static_cast<int>(std::lround(noteNumberFloat));
+        const auto cents = (noteNumberFloat - static_cast<float>(noteNumber)) * 100.0f;
+
+        tunerDetectedFrequencyHz.store(frequency, std::memory_order_release);
+        tunerDetectedCents.store(cents, std::memory_order_release);
+        tunerDetectedNoteIndex.store(noteNumber, std::memory_order_release);
+    };
+
+    auto samplesInBlockForRms = 0;
+
+    for (int i = 0; i < numSamples; ++i)
+    {
+        const auto s = leftData[i];
+        rmsAccum += s * s;
+        peak = juce::jmax(peak, std::abs(s));
+        ++samplesInBlockForRms;
+
+        tunerYinBuffer[static_cast<size_t>(tunerYinBufferWriteIndex)] = s;
+        tunerYinBufferWriteIndex = (tunerYinBufferWriteIndex + 1) % windowSize;
+
+        if (--tunerSamplesUntilNextAnalysis <= 0)
+        {
+            tunerSamplesUntilNextAnalysis = windowSize;
+
+            const auto blockRms = rmsAccum;
+            rmsAccum = 0.0f;
+
+            const auto blockSampleCount = samplesInBlockForRms;
+            samplesInBlockForRms = 0;
+
+            runAnalysis(blockRms, blockSampleCount);
+        }
+    }
+
+    juce::ignoreUnused(peak);
+}
+
+void SimpleEQAudioProcessor::applyGate(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings)
+{
+    if (chainSettings.gateBypassed)
+        return;
+
+    const auto thresholdDb = juce::jlimit(-60.0f, 0.0f, chainSettings.gateThresholdInDecibels);
+
+    const auto sampleRate = juce::jmax(1.0, getSampleRate());
+    const auto attackMs = 0.5f;
+    const auto releaseMs = 80.0f;
+    const auto attackCoeff = std::exp(-1.0f / (0.001f * attackMs * static_cast<float>(sampleRate)));
+    const auto releaseCoeff = std::exp(-1.0f / (0.001f * releaseMs * static_cast<float>(sampleRate)));
+
+    for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
+    {
+        const auto channelIndex = static_cast<size_t>(juce::jmin(channel, 1));
+        auto* channelData = buffer.getWritePointer(channel);
+        auto& envelope = gateEnvelope[channelIndex];
+
+        for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
+        {
+            const auto rawSample = channelData[sample];
+            const auto detectorInput = std::abs(rawSample) + 1.0e-9f;
+            const auto detectorDb = juce::Decibels::gainToDecibels(detectorInput, -120.0f);
+            const auto isOpen = detectorDb >= thresholdDb ? 1.0f : 0.0f;
+
+            const auto target = isOpen;
+            const auto coeff = target > envelope ? attackCoeff : releaseCoeff;
+            envelope = coeff * envelope + (1.0f - coeff) * target;
+
+            channelData[sample] = rawSample * envelope;
+        }
+    }
 }
 
 void SimpleEQAudioProcessor::pushPeakLevel(std::atomic<float>& targetPeak, float peakValue)
@@ -325,9 +545,24 @@ ChainSettings getChainSettings(juce::AudioProcessorValueTreeState& apvts)
     settings.peakGainInDecibels = apvts.getRawParameterValue("Peak Gain")->load();
     settings.peakQuality = apvts.getRawParameterValue("Peak Quality")->load();
     settings.inputGainInDecibels = apvts.getRawParameterValue("Input Gain")->load();
+    settings.tunerReferencePitchHz = apvts.getRawParameterValue("Tuner Reference")->load();
+    settings.gateThresholdInDecibels = apvts.getRawParameterValue("Gate Threshold")->load();
     settings.compressorAmount = apvts.getRawParameterValue("Compressor Amount")->load();
     settings.compressorTone = apvts.getRawParameterValue("Compressor Tone")->load();
     settings.compressorLevelInDecibels = apvts.getRawParameterValue("Compressor Level")->load();
+    settings.octaveTransposeSemitones = apvts.getRawParameterValue("Octave Transpose")->load();
+    settings.doublerMix = apvts.getRawParameterValue("Doubler Mix")->load();
+    settings.doublerDelayMs = apvts.getRawParameterValue("Doubler Delay")->load();
+    settings.doublerDetuneCents = apvts.getRawParameterValue("Doubler Detune")->load();
+    settings.delayMix = apvts.getRawParameterValue("Delay Mix")->load();
+    settings.delayTimeLMs = apvts.getRawParameterValue("Delay Time L")->load();
+    settings.delayTimeRMs = apvts.getRawParameterValue("Delay Time R")->load();
+    settings.delayFeedback = apvts.getRawParameterValue("Delay Feedback")->load();
+    {
+        const auto* modeParam = dynamic_cast<juce::AudioParameterChoice*>(
+            apvts.getParameter("Delay Mode"));
+        settings.delayModeIsDual = modeParam != nullptr && modeParam->getIndex() == 1;
+    }
     settings.outputGainInDecibels = apvts.getRawParameterValue("Output Gain")->load();
     settings.distortionDriveInDecibels = apvts.getRawParameterValue("Distortion Drive")->load();
     settings.distortionTone = apvts.getRawParameterValue("Distortion Tone")->load();
@@ -349,7 +584,12 @@ ChainSettings getChainSettings(juce::AudioProcessorValueTreeState& apvts)
     settings.distortionBypassed = apvts.getRawParameterValue("Distortion Bypassed")->load() > 0.5f;
     settings.fuzzBypassed = apvts.getRawParameterValue("Fuzz Bypassed")->load() > 0.5f;
     settings.compressorBypassed = apvts.getRawParameterValue("Compressor Bypassed")->load() > 0.5f;
+    settings.octaveBypassed = apvts.getRawParameterValue("Octave Bypassed")->load() > 0.5f;
+    settings.doublerBypassed = apvts.getRawParameterValue("Doubler Bypassed")->load() > 0.5f;
+    settings.delayBypassed = apvts.getRawParameterValue("Delay Bypassed")->load() > 0.5f;
     settings.reverbBypassed = apvts.getRawParameterValue("Reverb Bypassed")->load() > 0.5f;
+    settings.tunerBypassed = apvts.getRawParameterValue("Tuner Bypassed")->load() > 0.5f;
+    settings.gateBypassed = apvts.getRawParameterValue("Gate Bypassed")->load() > 0.5f;
 
     return settings;
 }
@@ -415,6 +655,108 @@ void SimpleEQAudioProcessor::applyCompressor(juce::AudioBuffer<float>& buffer, c
 
             const auto gain = juce::Decibels::decibelsToGain(-gainReductionDb) * makeupGain;
             channelData[sample] = rawSample * gain;
+        }
+    }
+}
+
+void SimpleEQAudioProcessor::applyOctave(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings)
+{
+    if (chainSettings.octaveBypassed)
+        return;
+
+    const auto semitones = juce::jlimit(-12.0f, 12.0f, chainSettings.octaveTransposeSemitones);
+    if (semitones == 0.0f)
+        return;
+
+    const auto pitchRatio = std::pow(2.0f, semitones / 12.0f);
+
+    for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
+    {
+        const auto channelIndex = static_cast<size_t>(juce::jmin(channel, 1));
+        auto* channelData = buffer.getWritePointer(channel);
+        auto& shifter = octavePitchShifters[channelIndex];
+
+        for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
+            channelData[sample] = shifter.processSample(channelData[sample], pitchRatio);
+    }
+}
+
+void SimpleEQAudioProcessor::applyDoubler(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings)
+{
+    if (chainSettings.doublerBypassed)
+        return;
+
+    const auto mix = juce::jlimit(0.0f, 1.0f, chainSettings.doublerMix);
+    if (mix <= 0.0f)
+        return;
+
+    const auto sampleRate = static_cast<float>(juce::jmax(1.0, getSampleRate()));
+    const auto delaySamples = juce::jlimit(0.0f, static_cast<float>(DelayLine::size - 2),
+                                            chainSettings.doublerDelayMs * sampleRate / 1000.0f);
+    const auto detuneRatio = std::pow(2.0f, chainSettings.doublerDetuneCents / 1200.0f);
+
+    for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
+    {
+        const auto channelIndex = static_cast<size_t>(juce::jmin(channel, 1));
+        auto* channelData = buffer.getWritePointer(channel);
+        auto& delayLine = doublerDelayLines[channelIndex];
+        auto& shifter = doublerPitchShifters[channelIndex];
+
+        for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
+        {
+            const auto dry = channelData[sample];
+
+            delayLine.push(dry);
+            const auto delayed = delayLine.read(delaySamples);
+            const auto detuned = shifter.processSample(delayed, detuneRatio);
+
+            channelData[sample] = dry * (1.0f - mix) + detuned * mix;
+        }
+    }
+}
+
+void SimpleEQAudioProcessor::applyDelay(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings)
+{
+    if (chainSettings.delayBypassed)
+        return;
+
+    const auto mix = juce::jlimit(0.0f, 1.0f, chainSettings.delayMix);
+    if (mix <= 0.0f)
+        return;
+
+    const auto sampleRate = static_cast<float>(juce::jmax(1.0, getSampleRate()));
+    const auto maxDelaySamples = static_cast<float>(DelayLine::size - 2);
+    const auto timeLSamples = juce::jlimit(0.0f, maxDelaySamples,
+                                            chainSettings.delayTimeLMs * sampleRate / 1000.0f);
+    const auto timeRSamples = juce::jlimit(0.0f, maxDelaySamples,
+                                            chainSettings.delayTimeRMs * sampleRate / 1000.0f);
+    const auto feedback = juce::jlimit(0.0f, 0.95f, chainSettings.delayFeedback);
+
+    const auto delays = chainSettings.delayModeIsDual
+        ? std::array<float, 2> { timeLSamples, timeRSamples }
+        : std::array<float, 2> { timeLSamples, timeLSamples };
+
+    // For a mono source the right channel arrives silent, which would keep the
+    // ch1 delay line permanently at 0. Feed ch1's delay line from the left
+    // channel so the right-channel delay still works in Dual mode.
+    auto* ch0Data = buffer.getReadPointer(0);
+
+    for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
+    {
+        const auto channelIndex = static_cast<size_t>(juce::jmin(channel, 1));
+        auto* channelData = buffer.getWritePointer(channel);
+        auto& line = delayDelayLines[channelIndex];
+        const auto delaySamples = delays[channelIndex];
+
+        const auto* feed = (channel == 1) ? ch0Data : channelData;
+
+        for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
+        {
+            const auto dry = channelData[sample];
+            const auto wet = line.read(delaySamples);
+            const auto nextWet = feed[sample] + wet * feedback;
+            line.push(nextWet);
+            channelData[sample] = dry * (1.0f - mix) + wet * mix;
         }
     }
 }
@@ -636,6 +978,16 @@ juce::AudioProcessorValueTreeState::ParameterLayout SimpleEQAudioProcessor::crea
                                                            juce::NormalisableRange<float>(-24.f, 24.f, 0.1f, 1.f),
                                                            0.f));
 
+    layout.add(std::make_unique<juce::AudioParameterFloat>("Tuner Reference",
+                                                           "Tuner Reference",
+                                                           juce::NormalisableRange<float>(430.f, 450.f, 0.1f, 1.f),
+                                                           440.f));
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>("Gate Threshold",
+                                                           "Gate Threshold",
+                                                           juce::NormalisableRange<float>(-60.f, 0.f, 0.1f, 1.f),
+                                                           -60.f));
+
     layout.add(std::make_unique<juce::AudioParameterFloat>("Compressor Amount",
                                                            "Compressor Amount",
                                                            juce::NormalisableRange<float>(0.f, 24.f, 0.1f, 1.f),
@@ -650,6 +1002,51 @@ juce::AudioProcessorValueTreeState::ParameterLayout SimpleEQAudioProcessor::crea
                                                            "Compressor Level",
                                                            juce::NormalisableRange<float>(-12.f, 24.f, 0.1f, 1.f),
                                                            0.f));
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>("Octave Transpose",
+                                                           "Octave Transpose",
+                                                           juce::NormalisableRange<float>(-12.f, 12.f, 1.f, 1.f),
+                                                           0.0f));
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>("Doubler Mix",
+                                                           "Doubler Mix",
+                                                           juce::NormalisableRange<float>(0.f, 1.f, 0.01f, 1.f),
+                                                           0.0f));
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>("Doubler Delay",
+                                                           "Doubler Delay",
+                                                           juce::NormalisableRange<float>(0.f, 100.f, 0.5f, 1.f),
+                                                           20.0f));
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>("Doubler Detune",
+                                                           "Doubler Detune",
+                                                           juce::NormalisableRange<float>(-50.f, 50.f, 1.f, 1.f),
+                                                           5.0f));
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>("Delay Mix",
+                                                           "Delay Mix",
+                                                           juce::NormalisableRange<float>(0.f, 1.f, 0.01f, 1.f),
+                                                           0.35f));
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>("Delay Time L",
+                                                           "Delay Time L",
+                                                           juce::NormalisableRange<float>(0.f, 2000.f, 1.f, 1.f),
+                                                           350.0f));
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>("Delay Time R",
+                                                           "Delay Time R",
+                                                           juce::NormalisableRange<float>(0.f, 2000.f, 1.f, 1.f),
+                                                           350.0f));
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>("Delay Feedback",
+                                                           "Delay Feedback",
+                                                           juce::NormalisableRange<float>(0.f, 0.95f, 0.01f, 1.f),
+                                                           0.35f));
+
+    layout.add(std::make_unique<juce::AudioParameterChoice>("Delay Mode",
+                                                            "Delay Mode",
+                                                            juce::StringArray { "Single", "Dual" },
+                                                            0));
 
     layout.add(std::make_unique<juce::AudioParameterFloat>("Output Gain",
                                                            "Output Gain",
@@ -724,7 +1121,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout SimpleEQAudioProcessor::crea
     layout.add(std::make_unique<juce::AudioParameterBool>("Distortion Bypassed", "Distortion Bypassed", false));
     layout.add(std::make_unique<juce::AudioParameterBool>("Fuzz Bypassed", "Fuzz Bypassed", false));
     layout.add(std::make_unique<juce::AudioParameterBool>("Compressor Bypassed", "Compressor Bypassed", false));
+    layout.add(std::make_unique<juce::AudioParameterBool>("Octave Bypassed", "Octave Bypassed", false));
+    layout.add(std::make_unique<juce::AudioParameterBool>("Doubler Bypassed", "Doubler Bypassed", false));
+    layout.add(std::make_unique<juce::AudioParameterBool>("Delay Bypassed", "Delay Bypassed", false));
     layout.add(std::make_unique<juce::AudioParameterBool>("Reverb Bypassed", "Reverb Bypassed", false));
+    layout.add(std::make_unique<juce::AudioParameterBool>("Tuner Bypassed", "Tuner Bypassed", false));
+    layout.add(std::make_unique<juce::AudioParameterBool>("Gate Bypassed", "Gate Bypassed", false));
     layout.add(std::make_unique<juce::AudioParameterBool>("Analyzer Enabled", "Analyzer Enabled", true));
 
     return layout;
