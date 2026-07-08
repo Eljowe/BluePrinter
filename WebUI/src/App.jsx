@@ -5,9 +5,24 @@ import Pedalboard from "./pedals/Pedalboard";
 
 const PARAM_IDS = {
   input: "Input Gain",
+  tunerBypassed: "Tuner Bypassed",
+  gateThreshold: "Gate Threshold",
+  gateBypassed: "Gate Bypassed",
   compressorAmount: "Compressor Amount",
   compressorTone: "Compressor Tone",
   compressorLevel: "Compressor Level",
+  octaveTranspose: "Octave Transpose",
+  octaveBypassed: "Octave Bypassed",
+  doublerMix: "Doubler Mix",
+  doublerDelay: "Doubler Delay",
+  doublerDetune: "Doubler Detune",
+  doublerBypassed: "Doubler Bypassed",
+  delayMix: "Delay Mix",
+  delayTimeL: "Delay Time L",
+  delayTimeR: "Delay Time R",
+  delayFeedback: "Delay Feedback",
+  delayModeIsDual: "Delay Mode",
+  delayBypassed: "Delay Bypassed",
   drive: "Distortion Drive",
   driveTone: "Distortion Tone",
   driveLevel: "Distortion Level",
@@ -39,6 +54,15 @@ const PARAM_IDS = {
 const FRONTEND_EVENT = "frontendSetParameter";
 const BACKEND_EVENT = "backendParameters";
 
+const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+
+function noteIndexToName(noteIndex) {
+  if (noteIndex == null || noteIndex < 0) return "";
+  const pitchClass = ((noteIndex % 12) + 12) % 12;
+  const octave = Math.floor(noteIndex / 12) - 1;
+  return `${NOTE_NAMES[pitchClass]}${octave}`;
+}
+
 function getBackend() {
   return window.__JUCE__?.backend;
 }
@@ -55,9 +79,22 @@ function readInitialParametersFromJuce() {
 
   return {
     inputGain: Number(first.inputGain ?? 0),
+    tunerReference: Number(first.tunerReference ?? 440),
+    tunerBypassed: Boolean(first.tunerBypassed),
+    gateThreshold: Number(first.gateThreshold ?? -60),
+    gateBypassed: Boolean(first.gateBypassed),
     compressorAmount: Number(first.compressorAmount ?? 0),
     compressorTone: Number(first.compressorTone ?? 0),
     compressorLevel: Number(first.compressorLevel ?? 0),
+    octaveTranspose: Number(first.octaveTranspose ?? 0),
+    doublerMix: Number(first.doublerMix ?? 0),
+    doublerDelay: Number(first.doublerDelay ?? 20),
+    doublerDetune: Number(first.doublerDetune ?? 5),
+    delayMix: Number(first.delayMix ?? 0.35),
+    delayTimeL: Number(first.delayTimeL ?? 350),
+    delayTimeR: Number(first.delayTimeR ?? 350),
+    delayFeedback: Number(first.delayFeedback ?? 0.35),
+    delayModeIsDual: Boolean(first.delayModeIsDual),
     drive: Number(first.drive ?? 6),
     driveTone: Number(first.driveTone ?? 0.7),
     driveLevel: Number(first.driveLevel ?? 0),
@@ -82,6 +119,9 @@ function readInitialParametersFromJuce() {
     driveBypassed: Boolean(first.driveBypassed),
     fuzzBypassed: Boolean(first.fuzzBypassed),
     compressorBypassed: Boolean(first.compressorBypassed),
+    octaveBypassed: Boolean(first.octaveBypassed),
+    doublerBypassed: Boolean(first.doublerBypassed),
+    delayBypassed: Boolean(first.delayBypassed),
     reverbBypassed: Boolean(first.reverbBypassed),
     responseCurve: Array.isArray(first.responseCurve) ? first.responseCurve.map(Number) : [],
     leftSpectrum: Array.isArray(first.leftSpectrum) ? first.leftSpectrum.map(Number) : [],
@@ -115,6 +155,15 @@ export default function App() {
 
   const [activeTab, setActiveTab] = useState("fx");
   const [inGain, setInGain] = useState(initial?.inputGain ?? 0);
+  const [tunerBypassed, setTunerBypassed] = useState(initial?.tunerBypassed ?? false);
+  const [gateThreshold, setGateThreshold] = useState(initial?.gateThreshold ?? -60);
+  const [gateBypassed, setGateBypassed] = useState(initial?.gateBypassed ?? false);
+  const [tunerNoteIndex, setTunerNoteIndex] = useState(-1);
+  const [tunerCents, setTunerCents] = useState(0);
+  const [tunerFrequency, setTunerFrequency] = useState(0);
+  const [tunerLevel, setTunerLevel] = useState(-60);
+
+  const tunerNote = tunerNoteIndex >= 0 ? noteIndexToName(tunerNoteIndex) : "";
   const [drive, setDrive] = useState(initial?.drive ?? 6);
   const [driveTone, setDriveTone] = useState(initial?.driveTone ?? 0.7);
   const [driveLevel, setDriveLevel] = useState(initial?.driveLevel ?? 0);
@@ -124,6 +173,15 @@ export default function App() {
   const [compressorAmount, setCompressorAmount] = useState(initial?.compressorAmount ?? 0);
   const [compressorTone, setCompressorTone] = useState(initial?.compressorTone ?? 0);
   const [compressorLevel, setCompressorLevel] = useState(initial?.compressorLevel ?? 0);
+  const [octaveTranspose, setOctaveTranspose] = useState(initial?.octaveTranspose ?? 0);
+  const [doublerMix, setDoublerMix] = useState(initial?.doublerMix ?? 0);
+  const [doublerDelay, setDoublerDelay] = useState(initial?.doublerDelay ?? 20);
+  const [doublerDetune, setDoublerDetune] = useState(initial?.doublerDetune ?? 5);
+  const [delayMix, setDelayMix] = useState(initial?.delayMix ?? 0.35);
+  const [delayTimeL, setDelayTimeL] = useState(initial?.delayTimeL ?? 350);
+  const [delayTimeR, setDelayTimeR] = useState(initial?.delayTimeR ?? 350);
+  const [delayFeedback, setDelayFeedback] = useState(initial?.delayFeedback ?? 0.35);
+  const [delayModeIsDual, setDelayModeIsDual] = useState(initial?.delayModeIsDual ?? false);
   const [outGain, setOutGain] = useState(initial?.outputGain ?? 0);
   const [lowCutFreq, setLowCutFreq] = useState(initial?.lowCutFreq ?? 20);
   const [highCutFreq, setHighCutFreq] = useState(initial?.highCutFreq ?? 20000);
@@ -138,6 +196,9 @@ export default function App() {
   const [driveBypassed, setDriveBypassed] = useState(initial?.driveBypassed ?? false);
   const [fuzzBypassed, setFuzzBypassed] = useState(initial?.fuzzBypassed ?? false);
   const [compressorBypassed, setCompressorBypassed] = useState(initial?.compressorBypassed ?? false);
+  const [octaveBypassed, setOctaveBypassed] = useState(initial?.octaveBypassed ?? false);
+  const [doublerBypassed, setDoublerBypassed] = useState(initial?.doublerBypassed ?? false);
+  const [delayBypassed, setDelayBypassed] = useState(initial?.delayBypassed ?? false);
   const [reverbSize, setReverbSize] = useState(initial?.reverbSize ?? 0.5);
   const [reverbDamping, setReverbDamping] = useState(initial?.reverbDamping ?? 0.5);
   const [reverbMix, setReverbMix] = useState(initial?.reverbMix ?? 0);
@@ -159,9 +220,27 @@ export default function App() {
     const token = backend.addEventListener(BACKEND_EVENT, (payload) => {
       if (typeof payload !== "object" || payload == null) return;
       if (payload.inputGain !== undefined) setInGain(Number(payload.inputGain));
+      if (payload.tunerBypassed !== undefined) setTunerBypassed(Boolean(payload.tunerBypassed));
+      if (payload.gateThreshold !== undefined) setGateThreshold(Number(payload.gateThreshold));
+      if (payload.gateBypassed !== undefined) setGateBypassed(Boolean(payload.gateBypassed));
+      if (payload.tuner && typeof payload.tuner === "object") {
+        if (payload.tuner.frequency !== undefined) setTunerFrequency(Number(payload.tuner.frequency));
+        if (payload.tuner.cents !== undefined) setTunerCents(Number(payload.tuner.cents));
+        if (payload.tuner.noteIndex !== undefined) setTunerNoteIndex(Number(payload.tuner.noteIndex));
+        if (payload.tuner.level !== undefined) setTunerLevel(Number(payload.tuner.level));
+      }
       if (payload.compressorAmount !== undefined) setCompressorAmount(Number(payload.compressorAmount));
       if (payload.compressorTone !== undefined) setCompressorTone(Number(payload.compressorTone));
       if (payload.compressorLevel !== undefined) setCompressorLevel(Number(payload.compressorLevel));
+      if (payload.octaveTranspose !== undefined) setOctaveTranspose(Number(payload.octaveTranspose));
+      if (payload.doublerMix !== undefined) setDoublerMix(Number(payload.doublerMix));
+      if (payload.doublerDelay !== undefined) setDoublerDelay(Number(payload.doublerDelay));
+      if (payload.doublerDetune !== undefined) setDoublerDetune(Number(payload.doublerDetune));
+      if (payload.delayMix !== undefined) setDelayMix(Number(payload.delayMix));
+      if (payload.delayTimeL !== undefined) setDelayTimeL(Number(payload.delayTimeL));
+      if (payload.delayTimeR !== undefined) setDelayTimeR(Number(payload.delayTimeR));
+      if (payload.delayFeedback !== undefined) setDelayFeedback(Number(payload.delayFeedback));
+      if (payload.delayModeIsDual !== undefined) setDelayModeIsDual(Boolean(payload.delayModeIsDual));
       if (payload.drive !== undefined) setDrive(Number(payload.drive));
       if (payload.driveTone !== undefined) setDriveTone(Number(payload.driveTone));
       if (payload.driveLevel !== undefined) setDriveLevel(Number(payload.driveLevel));
@@ -182,6 +261,9 @@ export default function App() {
       if (payload.driveBypassed !== undefined) setDriveBypassed(Boolean(payload.driveBypassed));
       if (payload.fuzzBypassed !== undefined) setFuzzBypassed(Boolean(payload.fuzzBypassed));
       if (payload.compressorBypassed !== undefined) setCompressorBypassed(Boolean(payload.compressorBypassed));
+      if (payload.octaveBypassed !== undefined) setOctaveBypassed(Boolean(payload.octaveBypassed));
+      if (payload.doublerBypassed !== undefined) setDoublerBypassed(Boolean(payload.doublerBypassed));
+      if (payload.delayBypassed !== undefined) setDelayBypassed(Boolean(payload.delayBypassed));
       if (payload.reverbSize !== undefined) setReverbSize(Number(payload.reverbSize));
       if (payload.reverbDamping !== undefined) setReverbDamping(Number(payload.reverbDamping));
       if (payload.reverbMix !== undefined) setReverbMix(Number(payload.reverbMix));
@@ -268,6 +350,13 @@ export default function App() {
 
       {activeTab === "fx" ? (
         <Pedalboard
+          tunerBypassed={tunerBypassed}
+          tunerNote={tunerNote}
+          tunerCents={tunerCents}
+          tunerFrequency={tunerFrequency}
+          tunerLevel={tunerLevel}
+          gateThreshold={gateThreshold}
+          gateBypassed={gateBypassed}
           drive={drive}
           driveTone={driveTone}
           driveLevel={driveLevel}
@@ -280,11 +369,37 @@ export default function App() {
           compressorBypassed={compressorBypassed}
           compressorTone={compressorTone}
           compressorLevel={compressorLevel}
+          octaveTranspose={octaveTranspose}
+          octaveBypassed={octaveBypassed}
+          doublerMix={doublerMix}
+          doublerDelay={doublerDelay}
+          doublerDetune={doublerDetune}
+          doublerBypassed={doublerBypassed}
+          delayMix={delayMix}
+          delayTimeL={delayTimeL}
+          delayTimeR={delayTimeR}
+          delayFeedback={delayFeedback}
+          delayModeIsDual={delayModeIsDual}
+          delayBypassed={delayBypassed}
           reverbSize={reverbSize}
           reverbDamping={reverbDamping}
           reverbMix={reverbMix}
           reverbWidth={reverbWidth}
           reverbBypassed={reverbBypassed}
+          onTunerToggle={() => {
+            const next = !tunerBypassed;
+            setTunerBypassed(next);
+            emitParameterChange(PARAM_IDS.tunerBypassed, next ? 1 : 0);
+          }}
+          onGateThresholdChange={(next) => {
+            setGateThreshold(next);
+            emitParameterChange(PARAM_IDS.gateThreshold, next);
+          }}
+          onGateToggle={() => {
+            const next = !gateBypassed;
+            setGateBypassed(next);
+            emitParameterChange(PARAM_IDS.gateBypassed, next ? 1 : 0);
+          }}
           onDriveChange={(next) => {
             setDrive(next);
             emitParameterChange(PARAM_IDS.drive, next);
@@ -335,6 +450,58 @@ export default function App() {
             const next = !compressorBypassed;
             setCompressorBypassed(next);
             emitParameterChange(PARAM_IDS.compressorBypassed, next ? 1 : 0);
+          }}
+          onOctaveTransposeChange={(next) => {
+            setOctaveTranspose(next);
+            emitParameterChange(PARAM_IDS.octaveTranspose, next);
+          }}
+          onDoublerMixChange={(next) => {
+            setDoublerMix(next);
+            emitParameterChange(PARAM_IDS.doublerMix, next);
+          }}
+          onDoublerDelayChange={(next) => {
+            setDoublerDelay(next);
+            emitParameterChange(PARAM_IDS.doublerDelay, next);
+          }}
+          onDoublerDetuneChange={(next) => {
+            setDoublerDetune(next);
+            emitParameterChange(PARAM_IDS.doublerDetune, next);
+          }}
+          onOctaveToggle={() => {
+            const next = !octaveBypassed;
+            setOctaveBypassed(next);
+            emitParameterChange(PARAM_IDS.octaveBypassed, next ? 1 : 0);
+          }}
+          onDoublerToggle={() => {
+            const next = !doublerBypassed;
+            setDoublerBypassed(next);
+            emitParameterChange(PARAM_IDS.doublerBypassed, next ? 1 : 0);
+          }}
+          onDelayMixChange={(next) => {
+            setDelayMix(next);
+            emitParameterChange(PARAM_IDS.delayMix, next);
+          }}
+          onDelayTimeLChange={(next) => {
+            setDelayTimeL(next);
+            emitParameterChange(PARAM_IDS.delayTimeL, next);
+          }}
+          onDelayTimeRChange={(next) => {
+            setDelayTimeR(next);
+            emitParameterChange(PARAM_IDS.delayTimeR, next);
+          }}
+          onDelayFeedbackChange={(next) => {
+            setDelayFeedback(next);
+            emitParameterChange(PARAM_IDS.delayFeedback, next);
+          }}
+          onDelayModeToggle={() => {
+            const next = !delayModeIsDual;
+            setDelayModeIsDual(next);
+            emitParameterChange(PARAM_IDS.delayModeIsDual, next ? 1 : 0);
+          }}
+          onDelayToggle={() => {
+            const next = !delayBypassed;
+            setDelayBypassed(next);
+            emitParameterChange(PARAM_IDS.delayBypassed, next ? 1 : 0);
           }}
           onReverbSizeChange={(next) => {
             setReverbSize(next);

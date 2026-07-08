@@ -33,9 +33,25 @@ private:
     static juce::var makeFloatArrayVar(const std::vector<float>& values);
 
     static constexpr const char* paramInputGain = "Input Gain";
+    static constexpr const char* paramTunerReference = "Tuner Reference";
+    static constexpr const char* paramTunerBypassed = "Tuner Bypassed";
+    static constexpr const char* paramGateThreshold = "Gate Threshold";
+    static constexpr const char* paramGateBypassed = "Gate Bypassed";
     static constexpr const char* paramCompressorAmount = "Compressor Amount";
     static constexpr const char* paramCompressorTone = "Compressor Tone";
     static constexpr const char* paramCompressorLevel = "Compressor Level";
+    static constexpr const char* paramOctaveTranspose = "Octave Transpose";
+    static constexpr const char* paramOctaveBypassed = "Octave Bypassed";
+    static constexpr const char* paramDoublerMix = "Doubler Mix";
+    static constexpr const char* paramDoublerDelay = "Doubler Delay";
+    static constexpr const char* paramDoublerDetune = "Doubler Detune";
+    static constexpr const char* paramDoublerBypassed = "Doubler Bypassed";
+    static constexpr const char* paramDelayMix = "Delay Mix";
+    static constexpr const char* paramDelayTimeL = "Delay Time L";
+    static constexpr const char* paramDelayTimeR = "Delay Time R";
+    static constexpr const char* paramDelayFeedback = "Delay Feedback";
+    static constexpr const char* paramDelayMode = "Delay Mode";
+    static constexpr const char* paramDelayBypassed = "Delay Bypassed";
     static constexpr const char* paramDrive = "Distortion Drive";
     static constexpr const char* paramDistortionTone = "Distortion Tone";
     static constexpr const char* paramDistortionLevel = "Distortion Level";

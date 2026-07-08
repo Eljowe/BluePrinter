@@ -51,76 +51,111 @@ export default function EqPanel({
 }) {
   return (
     <section className="panel-shell eq-shell">
-      <p className="section-title">Analyzer</p>
+      <div className="eq-header">
+        <p className="section-title">Analyzer</p>
+        <div className="eq-analyzer-toggle">
+          <BypassButton
+            label="Analyzer"
+            enabled={!analyzerEnabled}
+            onToggle={onAnalyzerToggle}
+            className="pedal-power"
+          />
+          <span className="eq-analyzer-label">{analyzerEnabled ? "On" : "Off"}</span>
+        </div>
+      </div>
       <AnalyzerGraph
         responseCurve={responseCurve}
         leftSpectrum={analyzerEnabled ? leftSpectrum : []}
         rightSpectrum={analyzerEnabled ? rightSpectrum : []}
       />
 
-      <div className="eq-main-grid">
-        <Knob
-          label="Low Cut"
-          min={20}
-          max={20000}
-          value={lowCutFreq}
-          onChange={onLowCutFreqChange}
-          unit="Hz"
-          step="1"
-          accent="blue"
-        />
-        <Knob
-          label="Peak Freq"
-          min={20}
-          max={20000}
-          value={peakFreq}
-          onChange={onPeakFreqChange}
-          unit="Hz"
-          step="1"
-          accent="blue"
-        />
-        <Knob
-          label="Peak Gain"
-          min={-24}
-          max={24}
-          value={peakGain}
-          onChange={onPeakGainChange}
-          unit="dB"
-          accent="blue"
-        />
-        <Knob
-          label="Peak Q"
-          min={0.1}
-          max={10}
-          value={peakQuality}
-          onChange={onPeakQualityChange}
-          unit="Q"
-          step="0.05"
-          accent="blue"
-        />
-        <Knob
-          label="High Cut"
-          min={20}
-          max={20000}
-          value={highCutFreq}
-          onChange={onHighCutFreqChange}
-          unit="Hz"
-          step="1"
-          accent="blue"
-        />
-      </div>
+      <div className="fx-pedal-grid eq-bands-grid">
+        <article className={`fx-pedal-card ${lowCutBypassed ? "is-bypassed" : ""}`.trim()}>
+          <p className="fx-pedal-title">Low Cut</p>
+          <div className="knob-grid knob-grid-2">
+            <Knob
+              label="Freq"
+              min={20}
+              max={20000}
+              value={lowCutFreq}
+              onChange={onLowCutFreqChange}
+              unit="Hz"
+              step="1"
+              accent="blue"
+            />
+            <SlopeKnob label="Slope" value={lowCutSlope} onChange={onLowCutSlopeChange} />
+          </div>
+          <BypassButton
+            label="Low Cut"
+            enabled={lowCutBypassed}
+            onToggle={onLowCutBypassToggle}
+            className="pedal-power"
+          />
+        </article>
 
-      <div className="eq-extra-grid">
-        <SlopeKnob label="Low Slope" value={lowCutSlope} onChange={onLowCutSlopeChange} />
-        <SlopeKnob label="High Slope" value={highCutSlope} onChange={onHighCutSlopeChange} />
+        <article className={`fx-pedal-card ${peakBypassed ? "is-bypassed" : ""}`.trim()}>
+          <p className="fx-pedal-title">Peak</p>
+          <Knob
+            label="Freq"
+            min={20}
+            max={20000}
+            value={peakFreq}
+            onChange={onPeakFreqChange}
+            unit="Hz"
+            step="1"
+            accent="blue"
+          />
+          <div className="knob-grid knob-grid-2">
+            <Knob
+              label="Gain"
+              min={-24}
+              max={24}
+              value={peakGain}
+              onChange={onPeakGainChange}
+              unit="dB"
+              accent="blue"
+            />
+            <Knob
+              label="Q"
+              min={0.1}
+              max={10}
+              value={peakQuality}
+              onChange={onPeakQualityChange}
+              unit="Q"
+              step="0.05"
+              accent="blue"
+            />
+          </div>
+          <BypassButton
+            label="Peak"
+            enabled={peakBypassed}
+            onToggle={onPeakBypassToggle}
+            className="pedal-power"
+          />
+        </article>
 
-        <div className="bypass-row">
-          <BypassButton label="Low Cut" enabled={lowCutBypassed} onToggle={onLowCutBypassToggle} />
-          <BypassButton label="Peak" enabled={peakBypassed} onToggle={onPeakBypassToggle} />
-          <BypassButton label="High Cut" enabled={highCutBypassed} onToggle={onHighCutBypassToggle} />
-        </div>
-
-        <BypassButton label="Analyzer" enabled={!analyzerEnabled} onToggle={onAnalyzerToggle} />
+        <article className={`fx-pedal-card ${highCutBypassed ? "is-bypassed" : ""}`.trim()}>
+          <p className="fx-pedal-title">High Cut</p>
+          <div className="knob-grid knob-grid-2">
+            <Knob
+              label="Freq"
+              min={20}
+              max={20000}
+              value={highCutFreq}
+              onChange={onHighCutFreqChange}
+              unit="Hz"
+              step="1"
+              accent="blue"
+            />
+            <SlopeKnob label="Slope" value={highCutSlope} onChange={onHighCutSlopeChange} />
+          </div>
+          <BypassButton
+            label="High Cut"
+            enabled={highCutBypassed}
+            onToggle={onHighCutBypassToggle}
+            className="pedal-power"
+          />
+        </article>
       </div>
     </section>
   );
