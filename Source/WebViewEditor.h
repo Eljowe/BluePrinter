@@ -58,17 +58,8 @@ private:
     static constexpr const char* paramFuzzDrive = "Fuzz Drive";
     static constexpr const char* paramFuzzTone = "Fuzz Tone";
     static constexpr const char* paramFuzzLevel = "Fuzz Level";
+public:
     static constexpr const char* paramOutputGain = "Output Gain";
-    static constexpr const char* paramLowCutFreq = "LowCut Freq";
-    static constexpr const char* paramHighCutFreq = "HighCut Freq";
-    static constexpr const char* paramPeakFreq = "Peak Freq";
-    static constexpr const char* paramPeakGain = "Peak Gain";
-    static constexpr const char* paramPeakQuality = "Peak Quality";
-    static constexpr const char* paramLowCutSlope = "LowCut Slope";
-    static constexpr const char* paramHighCutSlope = "HighCut Slope";
-    static constexpr const char* paramLowCutBypassed = "LowCut Bypassed";
-    static constexpr const char* paramPeakBypassed = "Peak Bypassed";
-    static constexpr const char* paramHighCutBypassed = "HighCut Bypassed";
     static constexpr const char* paramDriveBypassed = "Distortion Bypassed";
     static constexpr const char* paramFuzzBypassed = "Fuzz Bypassed";
     static constexpr const char* paramCompressorBypassed = "Compressor Bypassed";

@@ -8,8 +8,6 @@
 
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
-
-#include <fstream>
 #include "WebViewEditor.h"
 
 //==============================================================================
@@ -107,9 +105,11 @@ void SimpleEQAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     
     spec.sampleRate = sampleRate;
     
-    leftChain.prepare(spec);
-    rightChain.prepare(spec);
-    
+    for (auto& f : leftGraphicEq)
+        f.prepare(spec);
+    for (auto& f : rightGraphicEq)
+        f.prepare(spec);
+
     updateFilters();
     
     leftChannelFifo.prepare(samplesPerBlock);
@@ -135,6 +135,7 @@ void SimpleEQAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
         line.prepare();
     for (auto& line : delayDelayLines)
         line.prepare();
+
     for (auto& shifter : doublerPitchShifters)
     {
         shifter.prepare();
@@ -209,6 +210,12 @@ void SimpleEQAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
 
     auto chainSettings = getChainSettings(apvts);
 
+    // In Mono Input mode, duplicate the left channel onto the right so a
+    // mono source (guitar) plays out of both speakers and the delay/reverb
+    // get a proper stereo image to work with.
+    if (chainSettings.monoInput && buffer.getNumChannels() > 1)
+        buffer.copyFrom(1, 0, buffer.getReadPointer(0), buffer.getNumSamples());
+
     applyGain(buffer, chainSettings.inputGainInDecibels);
 
     applyTuner(buffer, chainSettings);
@@ -236,27 +243,23 @@ void SimpleEQAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     applyCompressor(buffer, chainSettings);
 
     updateFilters();
-    
+
     juce::dsp::AudioBlock<float> block(buffer);
-    
-//    buffer.clear();
-//
-//    for( int i = 0; i < buffer.getNumSamples(); ++i )
-//    {
-//        buffer.setSample(0, i, osc.processSample(0));
-//    }
-//
-//    juce::dsp::ProcessContextReplacing<float> stereoContext(block);
-//    osc.process(stereoContext);
-    
+
     auto leftBlock = block.getSingleChannelBlock(0);
     auto rightBlock = block.getSingleChannelBlock(1);
-    
+
     juce::dsp::ProcessContextReplacing<float> leftContext(leftBlock);
     juce::dsp::ProcessContextReplacing<float> rightContext(rightBlock);
-    
-    leftChain.process(leftContext);
-    rightChain.process(rightContext);
+
+    if (!chainSettings.graphicEqBypassed)
+    {
+        for (size_t i = 0; i < leftGraphicEq.size(); ++i)
+        {
+            leftGraphicEq[i].process(leftContext);
+            rightGraphicEq[i].process(rightContext);
+        }
+    }
 
     applyOctave(buffer, chainSettings);
 
@@ -271,6 +274,11 @@ void SimpleEQAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     applyReverb(buffer, chainSettings);
 
     applyGain(buffer, chainSettings.outputGainInDecibels);
+
+    // Global mute: silence the entire output. Applied last so it overrides
+    // every effect in the chain.
+    if (chainSettings.mute)
+        buffer.clear();
 
     bool didOutputClip = false;
     float outputPeak = 0.0f;
@@ -308,15 +316,6 @@ void SimpleEQAudioProcessor::applyTuner(juce::AudioBuffer<float>& buffer, const 
     if (numChannels <= 0 || numSamples <= 0)
         return;
 
-    if (chainSettings.tunerBypassed)
-    {
-        tunerDetectedFrequencyHz.store(0.0f, std::memory_order_release);
-        tunerDetectedCents.store(0.0f, std::memory_order_release);
-        tunerDetectedNoteIndex.store(-1, std::memory_order_release);
-        tunerDetectedLevel.store(-60.0f, std::memory_order_release);
-        return;
-    }
-
     const auto windowSize = static_cast<int>(tunerYinBuffer.size());
     if (windowSize <= 0)
         return;
@@ -343,7 +342,14 @@ void SimpleEQAudioProcessor::applyTuner(juce::AudioBuffer<float>& buffer, const 
             return;
         }
 
-        const auto tauMax = windowSize / 2;
+        // Autocorrelation-based pitch detection. YIN is tuned for voice and
+        // doesn't cope well with guitar (where the fundamental is often
+        // weaker than the 2nd harmonic), so we use plain normalized
+        // autocorrelation and pick the lag with the highest peak, then apply
+        // octave correction to prefer the lower octave when the signal
+        // looks like it's landed on a harmonic.
+        const auto fs = static_cast<float>(tunerAnalysisSampleRate);
+        const int tauMax = windowSize / 2;
         std::vector<float> yin(static_cast<size_t>(tauMax), 0.0f);
         for (int tau = 1; tau < tauMax; ++tau)
         {
@@ -398,6 +404,27 @@ void SimpleEQAudioProcessor::applyTuner(juce::AudioBuffer<float>& buffer, const 
             const auto denom = 2.0f * (2.0f * s1 - s2 - s0);
             if (std::abs(denom) > 1.0e-9f)
                 betterTau += (s2 - s0) / denom;
+        }
+
+        // Octave correction for guitar. If doubling the period (halving
+        // the frequency) gives a comparable YIN value, the detected period
+        // is likely a harmonic — prefer the lower octave.
+        const auto tauOctaveDown = tauEstimate * 2;
+        if (tauOctaveDown < tauMax
+            && yin[static_cast<size_t>(tauEstimate)] < 0.15f
+            && yin[static_cast<size_t>(tauOctaveDown)] < 0.4f)
+        {
+            auto octaveTau = static_cast<float>(tauOctaveDown);
+            if (tauOctaveDown + 1 < tauMax && tauOctaveDown - 1 > 0)
+            {
+                const auto s0o = yin[static_cast<size_t>(tauOctaveDown - 1)];
+                const auto s1o = yin[static_cast<size_t>(tauOctaveDown)];
+                const auto s2o = yin[static_cast<size_t>(tauOctaveDown + 1)];
+                const auto denomO = 2.0f * (2.0f * s1o - s2o - s0o);
+                if (std::abs(denomO) > 1.0e-9f)
+                    octaveTau += (s2o - s0o) / denomO;
+            }
+            betterTau = octaveTau;
         }
 
         const auto frequency = static_cast<float>(tunerAnalysisSampleRate) / betterTau;
@@ -538,12 +565,7 @@ void SimpleEQAudioProcessor::setStateInformation (const void* data, int sizeInBy
 ChainSettings getChainSettings(juce::AudioProcessorValueTreeState& apvts)
 {
     ChainSettings settings;
-    
-    settings.lowCutFreq = apvts.getRawParameterValue("LowCut Freq")->load();
-    settings.highCutFreq = apvts.getRawParameterValue("HighCut Freq")->load();
-    settings.peakFreq = apvts.getRawParameterValue("Peak Freq")->load();
-    settings.peakGainInDecibels = apvts.getRawParameterValue("Peak Gain")->load();
-    settings.peakQuality = apvts.getRawParameterValue("Peak Quality")->load();
+
     settings.inputGainInDecibels = apvts.getRawParameterValue("Input Gain")->load();
     settings.tunerReferencePitchHz = apvts.getRawParameterValue("Tuner Reference")->load();
     settings.gateThresholdInDecibels = apvts.getRawParameterValue("Gate Threshold")->load();
@@ -570,23 +592,27 @@ ChainSettings getChainSettings(juce::AudioProcessorValueTreeState& apvts)
     settings.fuzzDriveInDecibels = apvts.getRawParameterValue("Fuzz Drive")->load();
     settings.fuzzTone = apvts.getRawParameterValue("Fuzz Tone")->load();
     settings.fuzzLevelInDecibels = apvts.getRawParameterValue("Fuzz Level")->load();
-    settings.lowCutSlope = static_cast<Slope>(apvts.getRawParameterValue("LowCut Slope")->load());
-    settings.highCutSlope = static_cast<Slope>(apvts.getRawParameterValue("HighCut Slope")->load());
+
+    for (size_t i = 0; i < settings.graphicEqBandDb.size(); ++i)
+    {
+        const auto name = "EQ Band " + juce::String(static_cast<int>(i));
+        settings.graphicEqBandDb[i] = apvts.getRawParameterValue(name)->load();
+    }
 
     settings.reverbSize = apvts.getRawParameterValue("Reverb Size")->load();
     settings.reverbDamping = apvts.getRawParameterValue("Reverb Damping")->load();
     settings.reverbMix = apvts.getRawParameterValue("Reverb Mix")->load();
     settings.reverbWidth = apvts.getRawParameterValue("Reverb Width")->load();
 
-    settings.lowCutBypassed = apvts.getRawParameterValue("LowCut Bypassed")->load() > 0.5f;
-    settings.peakBypassed = apvts.getRawParameterValue("Peak Bypassed")->load() > 0.5f;
-    settings.highCutBypassed = apvts.getRawParameterValue("HighCut Bypassed")->load() > 0.5f;
+    settings.graphicEqBypassed = apvts.getRawParameterValue("EQ Bypassed")->load() > 0.5f;
     settings.distortionBypassed = apvts.getRawParameterValue("Distortion Bypassed")->load() > 0.5f;
     settings.fuzzBypassed = apvts.getRawParameterValue("Fuzz Bypassed")->load() > 0.5f;
     settings.compressorBypassed = apvts.getRawParameterValue("Compressor Bypassed")->load() > 0.5f;
     settings.octaveBypassed = apvts.getRawParameterValue("Octave Bypassed")->load() > 0.5f;
     settings.doublerBypassed = apvts.getRawParameterValue("Doubler Bypassed")->load() > 0.5f;
     settings.delayBypassed = apvts.getRawParameterValue("Delay Bypassed")->load() > 0.5f;
+    settings.monoInput = apvts.getRawParameterValue("Mono Input")->load() > 0.5f;
+    settings.mute = apvts.getRawParameterValue("Mute")->load() > 0.5f;
     settings.reverbBypassed = apvts.getRawParameterValue("Reverb Bypassed")->load() > 0.5f;
     settings.tunerBypassed = apvts.getRawParameterValue("Tuner Bypassed")->load() > 0.5f;
     settings.gateBypassed = apvts.getRawParameterValue("Gate Bypassed")->load() > 0.5f;
@@ -761,6 +787,7 @@ void SimpleEQAudioProcessor::applyDelay(juce::AudioBuffer<float>& buffer, const 
     }
 }
 
+
 void SimpleEQAudioProcessor::applyDistortion(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings)
 {
     if (chainSettings.distortionBypassed)
@@ -884,94 +911,54 @@ void SimpleEQAudioProcessor::applyReverb(juce::AudioBuffer<float>& buffer, const
     reverb.process(context);
 }
 
-Coefficients makePeakFilter(const ChainSettings& chainSettings, double sampleRate)
-{
-    return juce::dsp::IIR::Coefficients<float>::makePeakFilter(sampleRate,
-                                                               chainSettings.peakFreq,
-                                                               chainSettings.peakQuality,
-                                                               juce::Decibels::decibelsToGain(chainSettings.peakGainInDecibels));
-}
+// ISO-standard 1-octave graphic EQ centre frequencies, 31.25 Hz .. 16 kHz.
+static constexpr std::array<float, 10> graphicEqFrequencies {
+    31.25f, 62.5f, 125.0f, 250.0f, 500.0f,
+    1000.0f, 2000.0f, 4000.0f, 8000.0f, 16000.0f
+};
 
-void SimpleEQAudioProcessor::updatePeakFilter(const ChainSettings &chainSettings)
-{
-    auto peakCoefficients = makePeakFilter(chainSettings, getSampleRate());
-    
-    leftChain.setBypassed<ChainPositions::Peak>(chainSettings.peakBypassed);
-    rightChain.setBypassed<ChainPositions::Peak>(chainSettings.peakBypassed);
-    
-    updateCoefficients(leftChain.get<ChainPositions::Peak>().coefficients, peakCoefficients);
-    updateCoefficients(rightChain.get<ChainPositions::Peak>().coefficients, peakCoefficients);
-}
+// Constant-Q for 1-octave spacing: Q = 1 / sin(pi/4) ~= 1.4142.
+static constexpr float graphicEqQ = 1.41421356f;
 
 void updateCoefficients(Coefficients &old, const Coefficients &replacements)
 {
     *old = *replacements;
 }
 
-void SimpleEQAudioProcessor::updateLowCutFilters(const ChainSettings &chainSettings)
+void SimpleEQAudioProcessor::updateGraphicEq(const ChainSettings& chainSettings)
 {
-    auto cutCoefficients = makeLowCutFilter(chainSettings, getSampleRate());
-    auto& leftLowCut = leftChain.get<ChainPositions::LowCut>();
-    auto& rightLowCut = rightChain.get<ChainPositions::LowCut>();
-    
-    leftChain.setBypassed<ChainPositions::LowCut>(chainSettings.lowCutBypassed);
-    rightChain.setBypassed<ChainPositions::LowCut>(chainSettings.lowCutBypassed);
-    
-    updateCutFilter(rightLowCut, cutCoefficients, chainSettings.lowCutSlope);
-    updateCutFilter(leftLowCut, cutCoefficients, chainSettings.lowCutSlope);
-}
+    const auto sampleRate = getSampleRate();
+    const bool bypassed = chainSettings.graphicEqBypassed;
 
-void SimpleEQAudioProcessor::updateHighCutFilters(const ChainSettings &chainSettings)
-{
-    auto highCutCoefficients = makeHighCutFilter(chainSettings, getSampleRate());
-    
-    auto& leftHighCut = leftChain.get<ChainPositions::HighCut>();
-    auto& rightHighCut = rightChain.get<ChainPositions::HighCut>();
-    
-    leftChain.setBypassed<ChainPositions::HighCut>(chainSettings.highCutBypassed);
-    rightChain.setBypassed<ChainPositions::HighCut>(chainSettings.highCutBypassed);
-    
-    updateCutFilter(leftHighCut, highCutCoefficients, chainSettings.highCutSlope);
-    updateCutFilter(rightHighCut, highCutCoefficients, chainSettings.highCutSlope);
+    for (size_t i = 0; i < graphicEqFrequencies.size(); ++i)
+    {
+        const auto gainDb = bypassed ? 0.0f : chainSettings.graphicEqBandDb[i];
+        const auto coeffs = juce::dsp::IIR::Coefficients<float>::makePeakFilter(
+            sampleRate, graphicEqFrequencies[i], graphicEqQ,
+            juce::Decibels::decibelsToGain(gainDb));
+
+        updateCoefficients(leftGraphicEq[i].coefficients, coeffs);
+        updateCoefficients(rightGraphicEq[i].coefficients, coeffs);
+    }
 }
 
 void SimpleEQAudioProcessor::updateFilters()
 {
-    auto chainSettings = getChainSettings(apvts);
-    
-    updateLowCutFilters(chainSettings);
-    updatePeakFilter(chainSettings);
-    updateHighCutFilters(chainSettings);
+    updateGraphicEq(getChainSettings(apvts));
 }
 
 juce::AudioProcessorValueTreeState::ParameterLayout SimpleEQAudioProcessor::createParameterLayout()
 {
     juce::AudioProcessorValueTreeState::ParameterLayout layout;
     
-    layout.add(std::make_unique<juce::AudioParameterFloat>("LowCut Freq",
-                                                           "LowCut Freq",
-                                                           juce::NormalisableRange<float>(20.f, 20000.f, 1.f, 0.25f),
-                                                           20.f));
-    
-    layout.add(std::make_unique<juce::AudioParameterFloat>("HighCut Freq",
-                                                           "HighCut Freq",
-                                                           juce::NormalisableRange<float>(20.f, 20000.f, 1.f, 0.25f),
-                                                           20000.f));
-    
-    layout.add(std::make_unique<juce::AudioParameterFloat>("Peak Freq",
-                                                           "Peak Freq",
-                                                           juce::NormalisableRange<float>(20.f, 20000.f, 1.f, 0.25f),
-                                                           750.f));
-    
-    layout.add(std::make_unique<juce::AudioParameterFloat>("Peak Gain",
-                                                           "Peak Gain",
-                                                           juce::NormalisableRange<float>(-24.f, 24.f, 0.5f, 1.f),
-                                                           0.0f));
-    
-    layout.add(std::make_unique<juce::AudioParameterFloat>("Peak Quality",
-                                                           "Peak Quality",
-                                                           juce::NormalisableRange<float>(0.1f, 10.f, 0.05f, 1.f),
-                                                           1.f));
+    for (size_t i = 0; i < 10; ++i)
+    {
+        const auto name = "EQ Band " + juce::String(static_cast<int>(i));
+        layout.add(std::make_unique<juce::AudioParameterFloat>(name,
+                                                               name,
+                                                               juce::NormalisableRange<float>(-12.f, 12.f, 0.1f, 1.f),
+                                                               0.0f));
+    }
 
     layout.add(std::make_unique<juce::AudioParameterFloat>("Input Gain",
                                                            "Input Gain",
@@ -1103,27 +1090,15 @@ juce::AudioProcessorValueTreeState::ParameterLayout SimpleEQAudioProcessor::crea
                                                            juce::NormalisableRange<float>(0.f, 1.f, 0.01f, 1.f),
                                                            1.0f));
 
-    juce::StringArray stringArray;
-    for( int i = 0; i < 4; ++i )
-    {
-        juce::String str;
-        str << (12 + i*12);
-        str << " db/Oct";
-        stringArray.add(str);
-    }
-    
-    layout.add(std::make_unique<juce::AudioParameterChoice>("LowCut Slope", "LowCut Slope", stringArray, 0));
-    layout.add(std::make_unique<juce::AudioParameterChoice>("HighCut Slope", "HighCut Slope", stringArray, 0));
-    
-    layout.add(std::make_unique<juce::AudioParameterBool>("LowCut Bypassed", "LowCut Bypassed", false));
-    layout.add(std::make_unique<juce::AudioParameterBool>("Peak Bypassed", "Peak Bypassed", false));
-    layout.add(std::make_unique<juce::AudioParameterBool>("HighCut Bypassed", "HighCut Bypassed", false));
+    layout.add(std::make_unique<juce::AudioParameterBool>("EQ Bypassed", "EQ Bypassed", false));
     layout.add(std::make_unique<juce::AudioParameterBool>("Distortion Bypassed", "Distortion Bypassed", false));
     layout.add(std::make_unique<juce::AudioParameterBool>("Fuzz Bypassed", "Fuzz Bypassed", false));
     layout.add(std::make_unique<juce::AudioParameterBool>("Compressor Bypassed", "Compressor Bypassed", false));
     layout.add(std::make_unique<juce::AudioParameterBool>("Octave Bypassed", "Octave Bypassed", false));
     layout.add(std::make_unique<juce::AudioParameterBool>("Doubler Bypassed", "Doubler Bypassed", false));
     layout.add(std::make_unique<juce::AudioParameterBool>("Delay Bypassed", "Delay Bypassed", false));
+    layout.add(std::make_unique<juce::AudioParameterBool>("Mono Input", "Mono Input", false));
+    layout.add(std::make_unique<juce::AudioParameterBool>("Mute", "Mute", false));
     layout.add(std::make_unique<juce::AudioParameterBool>("Reverb Bypassed", "Reverb Bypassed", false));
     layout.add(std::make_unique<juce::AudioParameterBool>("Tuner Bypassed", "Tuner Bypassed", false));
     layout.add(std::make_unique<juce::AudioParameterBool>("Gate Bypassed", "Gate Bypassed", false));

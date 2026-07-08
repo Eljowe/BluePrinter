@@ -77,27 +77,35 @@ export default function Pedalboard({
         <article className={`fx-pedal-card ${tunerBypassed ? "is-bypassed" : ""}`.trim()}>
           <p className="fx-pedal-title">Tuner</p>
           <div className="tuner-display">
-            <div className={`tuner-note ${tunerNote ? "" : "is-muted"}`.trim()}>
-              {tunerNote || "—"}
+            <div className={`tuner-note ${tunerBypassed || !tunerNote ? "is-muted" : ""}`.trim()}>
+              {tunerBypassed ? "—" : (tunerNote || "—")}
             </div>
             <div className="tuner-cents-track">
               <div className="tuner-cents-center" />
               <div
-                className={`tuner-cents-needle ${Math.abs(tunerCents) > 15 ? "is-very-off" : ""}`.trim()}
-                style={{ left: `${50 + Math.max(-50, Math.min(50, tunerCents))}%` }}
+                className="tuner-cents-needle"
+                style={{
+                  left: `${tunerBypassed
+                    ? 50
+                    : 50 + Math.max(-50, Math.min(50, tunerCents))}%`,
+                }}
               />
             </div>
             <div className="tuner-cents-readout">
-              {tunerNote
-                ? `${tunerCents > 0 ? "+" : ""}${tunerCents.toFixed(1)} ¢ · ${tunerFrequency.toFixed(1)} Hz`
-                : tunerBypassed
-                  ? "Tuner bypassed"
+              {tunerBypassed
+                ? "Off"
+                : tunerNote
+                  ? `${tunerCents > 0 ? "+" : ""}${tunerCents.toFixed(1)} ¢ · ${tunerFrequency.toFixed(1)} Hz`
                   : "Play a note"}
             </div>
             <div className="tuner-level-bar">
               <div
                 className="tuner-level-fill"
-                style={{ width: `${Math.max(0, Math.min(100, ((tunerLevel + 60) / 60) * 100))}%` }}
+                style={{
+                  width: `${tunerBypassed
+                    ? 0
+                    : Math.max(0, Math.min(100, ((tunerLevel + 60) / 60) * 100))}%`,
+                }}
               />
             </div>
           </div>
@@ -450,8 +458,8 @@ export default function Pedalboard({
             enabled={delayBypassed}
             className="pedal-power"
             onToggle={onDelayToggle}
-          />
-        </article>
+           />
+         </article>
       </div>
     </section>
   );

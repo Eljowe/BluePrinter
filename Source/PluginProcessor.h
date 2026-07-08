@@ -281,7 +281,6 @@ private:
 
 struct ChainSettings
 {
-    float peakFreq { 0 }, peakGainInDecibels{ 0 }, peakQuality {1.f};
     float inputGainInDecibels { 0.f };
     float tunerReferencePitchHz { 440.f };
     float gateThresholdInDecibels { -60.f };
@@ -304,16 +303,16 @@ struct ChainSettings
     float fuzzDriveInDecibels { 0.f };
     float fuzzTone { 0.7f };
     float fuzzLevelInDecibels { 0.f };
-    float lowCutFreq { 0 }, highCutFreq { 0 };
+
+    // 10-band graphic EQ gains, in dB. Index 0 = 31 Hz, index 9 = 16 kHz.
+    std::array<float, 10> graphicEqBandDb { 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f };
 
     float reverbSize { 0.5f };
     float reverbDamping { 0.5f };
     float reverbMix { 0.0f };
     float reverbWidth { 1.0f };
 
-    Slope lowCutSlope { Slope::Slope_12 }, highCutSlope { Slope::Slope_12 };
-
-    bool lowCutBypassed { false }, peakBypassed { false }, highCutBypassed { false };
+    bool graphicEqBypassed { false };
     bool distortionBypassed { false }, compressorBypassed { false };
     bool fuzzBypassed { false };
     bool reverbBypassed { false };
@@ -322,15 +321,15 @@ struct ChainSettings
     bool octaveBypassed { false };
     bool doublerBypassed { false };
     bool delayBypassed { false };
+    bool monoInput { false };
+    bool mute { false };
 };
 
 ChainSettings getChainSettings(juce::AudioProcessorValueTreeState& apvts);
 
 using Filter = juce::dsp::IIR::Filter<float>;
 
-using CutFilter = juce::dsp::ProcessorChain<Filter, Filter, Filter, Filter>;
-
-using MonoChain = juce::dsp::ProcessorChain<CutFilter, Filter, CutFilter>;
+using GraphicEQ = std::array<Filter, 10>;
 
 enum ChainPositions
 {
@@ -342,8 +341,6 @@ enum ChainPositions
 using Coefficients = Filter::CoefficientsPtr;
 void updateCoefficients(Coefficients& old, const Coefficients& replacements);
 
-Coefficients makePeakFilter(const ChainSettings& chainSettings, double sampleRate);
-
 template<int Index, typename ChainType, typename CoefficientType>
 void update(ChainType& chain, const CoefficientType& coefficients)
 {
@@ -351,50 +348,6 @@ void update(ChainType& chain, const CoefficientType& coefficients)
     chain.template setBypassed<Index>(false);
 }
 
-template<typename ChainType, typename CoefficientType>
-void updateCutFilter(ChainType& chain,
-                     const CoefficientType& coefficients,
-                     const Slope& slope)
-{
-    chain.template setBypassed<0>(true);
-    chain.template setBypassed<1>(true);
-    chain.template setBypassed<2>(true);
-    chain.template setBypassed<3>(true);
-    
-    switch( slope )
-    {
-        case Slope_48:
-        {
-            update<3>(chain, coefficients);
-        }
-        case Slope_36:
-        {
-            update<2>(chain, coefficients);
-        }
-        case Slope_24:
-        {
-            update<1>(chain, coefficients);
-        }
-        case Slope_12:
-        {
-            update<0>(chain, coefficients);
-        }
-    }
-}
-
-inline auto makeLowCutFilter(const ChainSettings& chainSettings, double sampleRate )
-{
-    return juce::dsp::FilterDesign<float>::designIIRHighpassHighOrderButterworthMethod(chainSettings.lowCutFreq,
-                                                                                       sampleRate,
-                                                                                       2 * (chainSettings.lowCutSlope + 1));
-}
-
-inline auto makeHighCutFilter(const ChainSettings& chainSettings, double sampleRate )
-{
-    return juce::dsp::FilterDesign<float>::designIIRLowpassHighOrderButterworthMethod(chainSettings.highCutFreq,
-                                                                                      sampleRate,
-                                                                                      2 * (chainSettings.highCutSlope + 1));
-}
 //==============================================================================
 /**
 */
@@ -485,9 +438,9 @@ public:
     SingleChannelSampleFifo<BlockType> leftChannelFifo { Channel::Left };
     SingleChannelSampleFifo<BlockType> rightChannelFifo { Channel::Right };
 private:
-    MonoChain leftChain, rightChain;
-    
-    void updatePeakFilter(const ChainSettings& chainSettings);
+    GraphicEQ leftGraphicEq, rightGraphicEq;
+
+    void updateGraphicEq(const ChainSettings& chainSettings);
     void applyCompressor(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings);
     void applyOctave(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings);
     void applyDoubler(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings);
@@ -500,12 +453,6 @@ private:
     void applyGate(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings);
     void pushPeakLevel(std::atomic<float>& targetPeak, float peakValue);
 
-    
-    
-    
-    void updateLowCutFilters(const ChainSettings& chainSettings);
-    void updateHighCutFilters(const ChainSettings& chainSettings);
-    
     void updateFilters();
 
     std::atomic<bool> inputClippingDetected { false };

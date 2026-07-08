@@ -23,6 +23,7 @@ const PARAM_IDS = {
   delayFeedback: "Delay Feedback",
   delayModeIsDual: "Delay Mode",
   delayBypassed: "Delay Bypassed",
+  monoInput: "Mono Input",
   drive: "Distortion Drive",
   driveTone: "Distortion Tone",
   driveLevel: "Distortion Level",
@@ -30,16 +31,9 @@ const PARAM_IDS = {
   fuzzTone: "Fuzz Tone",
   fuzzLevel: "Fuzz Level",
   output: "Output Gain",
-  lowCutFreq: "LowCut Freq",
-  highCutFreq: "HighCut Freq",
-  peakFreq: "Peak Freq",
-  peakGain: "Peak Gain",
-  peakQuality: "Peak Quality",
-  lowCutSlope: "LowCut Slope",
-  highCutSlope: "HighCut Slope",
-  lowCutBypassed: "LowCut Bypassed",
-  peakBypassed: "Peak Bypassed",
-  highCutBypassed: "HighCut Bypassed",
+  mute: "Mute",
+  eqBands: Array.from({ length: 10 }, (_, i) => `EQ Band ${i}`),
+  eqBypassed: "EQ Bypassed",
   driveBypassed: "Distortion Bypassed",
   fuzzBypassed: "Fuzz Bypassed",
   compressorBypassed: "Compressor Bypassed",
@@ -95,6 +89,7 @@ function readInitialParametersFromJuce() {
     delayTimeR: Number(first.delayTimeR ?? 350),
     delayFeedback: Number(first.delayFeedback ?? 0.35),
     delayModeIsDual: Boolean(first.delayModeIsDual),
+    monoInput: Boolean(first.monoInput),
     drive: Number(first.drive ?? 6),
     driveTone: Number(first.driveTone ?? 0.7),
     driveLevel: Number(first.driveLevel ?? 0),
@@ -102,19 +97,13 @@ function readInitialParametersFromJuce() {
     fuzzTone: Number(first.fuzzTone ?? 0.7),
     fuzzLevel: Number(first.fuzzLevel ?? 0),
     outputGain: Number(first.outputGain ?? 0),
-    lowCutFreq: Number(first.lowCutFreq ?? 20),
-    highCutFreq: Number(first.highCutFreq ?? 20000),
-    peakFreq: Number(first.peakFreq ?? 750),
-    peakGain: Number(first.peakGain ?? 0),
-    peakQuality: Number(first.peakQuality ?? 1),
-    lowCutSlope: Number(first.lowCutSlope ?? 0),
-    highCutSlope: Number(first.highCutSlope ?? 0),
+    mute: Boolean(first.mute),
+    eqBands: Array.isArray(first.eqBands) ? first.eqBands.map((v) => Number(v)) : Array(10).fill(0),
+    eqBypassed: Boolean(first.eqBypassed),
     reverbSize: Number(first.reverbSize ?? 0.5),
     reverbDamping: Number(first.reverbDamping ?? 0.5),
     reverbMix: Number(first.reverbMix ?? 0),
     reverbWidth: Number(first.reverbWidth ?? 1),
-    lowCutBypassed: Boolean(first.lowCutBypassed),
-    peakBypassed: Boolean(first.peakBypassed),
     highCutBypassed: Boolean(first.highCutBypassed),
     driveBypassed: Boolean(first.driveBypassed),
     fuzzBypassed: Boolean(first.fuzzBypassed),
@@ -183,16 +172,10 @@ export default function App() {
   const [delayFeedback, setDelayFeedback] = useState(initial?.delayFeedback ?? 0.35);
   const [delayModeIsDual, setDelayModeIsDual] = useState(initial?.delayModeIsDual ?? false);
   const [outGain, setOutGain] = useState(initial?.outputGain ?? 0);
-  const [lowCutFreq, setLowCutFreq] = useState(initial?.lowCutFreq ?? 20);
-  const [highCutFreq, setHighCutFreq] = useState(initial?.highCutFreq ?? 20000);
-  const [peakFreq, setPeakFreq] = useState(initial?.peakFreq ?? 750);
-  const [peakGain, setPeakGain] = useState(initial?.peakGain ?? 0);
-  const [peakQuality, setPeakQuality] = useState(initial?.peakQuality ?? 1);
-  const [lowCutSlope, setLowCutSlope] = useState(initial?.lowCutSlope ?? 0);
-  const [highCutSlope, setHighCutSlope] = useState(initial?.highCutSlope ?? 0);
-  const [lowCutBypassed, setLowCutBypassed] = useState(initial?.lowCutBypassed ?? false);
-  const [peakBypassed, setPeakBypassed] = useState(initial?.peakBypassed ?? false);
-  const [highCutBypassed, setHighCutBypassed] = useState(initial?.highCutBypassed ?? false);
+  const [monoInput, setMonoInput] = useState(initial?.monoInput ?? false);
+  const [mute, setMute] = useState(initial?.mute ?? false);
+  const [eqBands, setEqBands] = useState(Array.isArray(initial?.eqBands) ? initial.eqBands : Array(10).fill(0));
+  const [eqBypassed, setEqBypassed] = useState(initial?.eqBypassed ?? false);
   const [driveBypassed, setDriveBypassed] = useState(initial?.driveBypassed ?? false);
   const [fuzzBypassed, setFuzzBypassed] = useState(initial?.fuzzBypassed ?? false);
   const [compressorBypassed, setCompressorBypassed] = useState(initial?.compressorBypassed ?? false);
@@ -241,6 +224,7 @@ export default function App() {
       if (payload.delayTimeR !== undefined) setDelayTimeR(Number(payload.delayTimeR));
       if (payload.delayFeedback !== undefined) setDelayFeedback(Number(payload.delayFeedback));
       if (payload.delayModeIsDual !== undefined) setDelayModeIsDual(Boolean(payload.delayModeIsDual));
+      if (payload.monoInput !== undefined) setMonoInput(Boolean(payload.monoInput));
       if (payload.drive !== undefined) setDrive(Number(payload.drive));
       if (payload.driveTone !== undefined) setDriveTone(Number(payload.driveTone));
       if (payload.driveLevel !== undefined) setDriveLevel(Number(payload.driveLevel));
@@ -248,16 +232,12 @@ export default function App() {
       if (payload.fuzzTone !== undefined) setFuzzTone(Number(payload.fuzzTone));
       if (payload.fuzzLevel !== undefined) setFuzzLevel(Number(payload.fuzzLevel));
       if (payload.outputGain !== undefined) setOutGain(Number(payload.outputGain));
-      if (payload.lowCutFreq !== undefined) setLowCutFreq(Number(payload.lowCutFreq));
-      if (payload.highCutFreq !== undefined) setHighCutFreq(Number(payload.highCutFreq));
-      if (payload.peakFreq !== undefined) setPeakFreq(Number(payload.peakFreq));
-      if (payload.peakGain !== undefined) setPeakGain(Number(payload.peakGain));
-      if (payload.peakQuality !== undefined) setPeakQuality(Number(payload.peakQuality));
-      if (payload.lowCutSlope !== undefined) setLowCutSlope(Number(payload.lowCutSlope));
-      if (payload.highCutSlope !== undefined) setHighCutSlope(Number(payload.highCutSlope));
-      if (payload.lowCutBypassed !== undefined) setLowCutBypassed(Boolean(payload.lowCutBypassed));
-      if (payload.peakBypassed !== undefined) setPeakBypassed(Boolean(payload.peakBypassed));
-      if (payload.highCutBypassed !== undefined) setHighCutBypassed(Boolean(payload.highCutBypassed));
+      if (payload.monoInput !== undefined) setMonoInput(Boolean(payload.monoInput));
+      if (payload.mute !== undefined) setMute(Boolean(payload.mute));
+      if (Array.isArray(payload.eqBands)) {
+        setEqBands(payload.eqBands.map((v) => Number(v)));
+      }
+      if (payload.eqBypassed !== undefined) setEqBypassed(Boolean(payload.eqBypassed));
       if (payload.driveBypassed !== undefined) setDriveBypassed(Boolean(payload.driveBypassed));
       if (payload.fuzzBypassed !== undefined) setFuzzBypassed(Boolean(payload.fuzzBypassed));
       if (payload.compressorBypassed !== undefined) setCompressorBypassed(Boolean(payload.compressorBypassed));
@@ -316,6 +296,43 @@ export default function App() {
 
         <div className="io-dock">
           <div className="io-row">
+            <div className="io-mode-toggle">
+              <button
+                type="button"
+                className={`io-mode-segment ${monoInput ? "active" : ""}`.trim()}
+                onClick={() => {
+                  if (!monoInput) emitParameterChange(PARAM_IDS.monoInput, 1);
+                }}
+                aria-label="Mono input"
+                title="Mono Input"
+              >
+                M
+              </button>
+              <button
+                type="button"
+                className={`io-mode-segment ${!monoInput ? "active" : ""}`.trim()}
+                onClick={() => {
+                  if (monoInput) emitParameterChange(PARAM_IDS.monoInput, 0);
+                }}
+                aria-label="Stereo input"
+                title="Stereo Input"
+              >
+                S
+              </button>
+            </div>
+            <button
+              type="button"
+              className={`io-mute-button ${mute ? "active" : ""}`.trim()}
+              onClick={() => {
+                const next = !mute;
+                setMute(next);
+                emitParameterChange(PARAM_IDS.mute, next ? 1 : 0);
+              }}
+              aria-label={mute ? "Unmute" : "Mute"}
+              title={mute ? "Muted" : "Mute"}
+            >
+              M
+            </button>
             <MiniPeak className="io-meter" label="Input" level={inputPeak} clipping={inputClipping} />
             <Knob
               className="io-compact"
@@ -531,58 +548,20 @@ export default function App() {
           leftSpectrum={leftSpectrum}
           rightSpectrum={rightSpectrum}
           analyzerEnabled={analyzerEnabled}
-          lowCutFreq={lowCutFreq}
-          peakFreq={peakFreq}
-          peakGain={peakGain}
-          peakQuality={peakQuality}
-          highCutFreq={highCutFreq}
-          lowCutSlope={lowCutSlope}
-          highCutSlope={highCutSlope}
-          lowCutBypassed={lowCutBypassed}
-          peakBypassed={peakBypassed}
-          highCutBypassed={highCutBypassed}
-          onLowCutFreqChange={(next) => {
-            setLowCutFreq(next);
-            emitParameterChange(PARAM_IDS.lowCutFreq, next);
+          eqBands={eqBands}
+          eqBypassed={eqBypassed}
+          onEqBandChange={(index, next) => {
+            setEqBands((prev) => {
+              const next2 = [...prev];
+              next2[index] = next;
+              return next2;
+            });
+            emitParameterChange(PARAM_IDS.eqBands[index], next);
           }}
-          onPeakFreqChange={(next) => {
-            setPeakFreq(next);
-            emitParameterChange(PARAM_IDS.peakFreq, next);
-          }}
-          onPeakGainChange={(next) => {
-            setPeakGain(next);
-            emitParameterChange(PARAM_IDS.peakGain, next);
-          }}
-          onPeakQualityChange={(next) => {
-            setPeakQuality(next);
-            emitParameterChange(PARAM_IDS.peakQuality, next);
-          }}
-          onHighCutFreqChange={(next) => {
-            setHighCutFreq(next);
-            emitParameterChange(PARAM_IDS.highCutFreq, next);
-          }}
-          onLowCutSlopeChange={(next) => {
-            setLowCutSlope(next);
-            emitParameterChange(PARAM_IDS.lowCutSlope, next);
-          }}
-          onHighCutSlopeChange={(next) => {
-            setHighCutSlope(next);
-            emitParameterChange(PARAM_IDS.highCutSlope, next);
-          }}
-          onLowCutBypassToggle={() => {
-            const next = !lowCutBypassed;
-            setLowCutBypassed(next);
-            emitParameterChange(PARAM_IDS.lowCutBypassed, next ? 1 : 0);
-          }}
-          onPeakBypassToggle={() => {
-            const next = !peakBypassed;
-            setPeakBypassed(next);
-            emitParameterChange(PARAM_IDS.peakBypassed, next ? 1 : 0);
-          }}
-          onHighCutBypassToggle={() => {
-            const next = !highCutBypassed;
-            setHighCutBypassed(next);
-            emitParameterChange(PARAM_IDS.highCutBypassed, next ? 1 : 0);
+          onEqBypassToggle={() => {
+            const next = !eqBypassed;
+            setEqBypassed(next);
+            emitParameterChange(PARAM_IDS.eqBypassed, next ? 1 : 0);
           }}
           onAnalyzerToggle={() => {
             const next = !analyzerEnabled;
