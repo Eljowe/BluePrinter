@@ -26,6 +26,7 @@ private:
     void emitParameterSnapshotToFrontend();
     juce::var makeParameterSnapshot();
     std::vector<float> buildSpectrumFromFifo(SingleChannelSampleFifo<SimpleEQAudioProcessor::BlockType>& fifo,
+                                             juce::AudioBuffer<float>& monoBuffer,
                                              std::vector<float>& fftScratch,
                                              std::vector<float>& fftResult);
     std::vector<float> buildResponseCurve() const;
@@ -33,7 +34,14 @@ private:
 
     static constexpr const char* paramInputGain = "Input Gain";
     static constexpr const char* paramCompressorAmount = "Compressor Amount";
+    static constexpr const char* paramCompressorTone = "Compressor Tone";
+    static constexpr const char* paramCompressorLevel = "Compressor Level";
     static constexpr const char* paramDrive = "Distortion Drive";
+    static constexpr const char* paramDistortionTone = "Distortion Tone";
+    static constexpr const char* paramDistortionLevel = "Distortion Level";
+    static constexpr const char* paramFuzzDrive = "Fuzz Drive";
+    static constexpr const char* paramFuzzTone = "Fuzz Tone";
+    static constexpr const char* paramFuzzLevel = "Fuzz Level";
     static constexpr const char* paramOutputGain = "Output Gain";
     static constexpr const char* paramLowCutFreq = "LowCut Freq";
     static constexpr const char* paramHighCutFreq = "HighCut Freq";
@@ -46,7 +54,14 @@ private:
     static constexpr const char* paramPeakBypassed = "Peak Bypassed";
     static constexpr const char* paramHighCutBypassed = "HighCut Bypassed";
     static constexpr const char* paramDriveBypassed = "Distortion Bypassed";
+    static constexpr const char* paramFuzzBypassed = "Fuzz Bypassed";
     static constexpr const char* paramCompressorBypassed = "Compressor Bypassed";
+    static constexpr const char* paramReverbSize = "Reverb Size";
+    static constexpr const char* paramReverbDamping = "Reverb Damping";
+    static constexpr const char* paramReverbMix = "Reverb Mix";
+    static constexpr const char* paramReverbWidth = "Reverb Width";
+    static constexpr const char* paramReverbBypassed = "Reverb Bypassed";
+    static constexpr const char* paramAnalyzerEnabled = "Analyzer Enabled";
 
     SimpleEQAudioProcessor& audioProcessor;
     juce::WebBrowserComponent webView;
@@ -57,13 +72,16 @@ private:
     static constexpr int fftOrder = 11;
     static constexpr int fftSize = 1 << fftOrder;
     static constexpr int spectrumPoints = 96;
+    static constexpr float spectrumNegativeInfinity = -48.0f;
 
     juce::dsp::FFT analyzerFft { fftOrder };
-    juce::dsp::WindowingFunction<float> analyzerWindow { fftSize, juce::dsp::WindowingFunction<float>::hann };
+    juce::dsp::WindowingFunction<float> analyzerWindow { fftSize, juce::dsp::WindowingFunction<float>::blackmanHarris };
+    juce::AudioBuffer<float> leftMonoBuffer { 1, fftSize };
+    juce::AudioBuffer<float> rightMonoBuffer { 1, fftSize };
     std::vector<float> leftFftScratch = std::vector<float>(fftSize * 2, 0.0f);
     std::vector<float> rightFftScratch = std::vector<float>(fftSize * 2, 0.0f);
-    std::vector<float> leftFftResult = std::vector<float>(spectrumPoints, -120.0f);
-    std::vector<float> rightFftResult = std::vector<float>(spectrumPoints, -120.0f);
+    std::vector<float> leftFftResult = std::vector<float>(spectrumPoints, spectrumNegativeInfinity);
+    std::vector<float> rightFftResult = std::vector<float>(spectrumPoints, spectrumNegativeInfinity);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SimpleEQWebViewEditor)
 };

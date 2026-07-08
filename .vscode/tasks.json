@@ -2,13 +2,39 @@
   "version": "2.0.0",
   "tasks": [
     {
+      "label": "Install WebUI dependencies",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-Command",
+        "if (Test-Path WebUI\\node_modules) { Write-Host 'WebUI\\node_modules already present, skipping install.' } else { Push-Location WebUI; npm install; Pop-Location }"
+      ],
+      "isBackground": false,
+      "problemMatcher": []
+    },
+    {
+      "label": "Build WebUI",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-Command",
+        "Push-Location WebUI; npm run build; Pop-Location"
+      ],
+      "isBackground": false,
+      "problemMatcher": [],
+      "dependsOn": "Install WebUI dependencies"
+    },
+    {
       "label": "Build SimpleEQ Debug",
       "type": "shell",
       "command": "cmake",
       "args": ["--build", "build", "--config", "Debug"],
       "isBackground": false,
       "problemMatcher": ["$msCompile"],
-      "group": "build"
+      "group": "build",
+      "dependsOn": "Build WebUI"
     },
     {
       "label": "Rebuild SimpleEQ Debug",
@@ -17,7 +43,8 @@
       "args": ["-NoProfile", "-Command", "cmake --build build --config Debug --clean-first"],
       "isBackground": false,
       "problemMatcher": ["$msCompile"],
-      "group": "build"
+      "group": "build",
+      "dependsOn": "Build WebUI"
     },
     {
       "label": "Run SimpleEQ Debug",
@@ -30,7 +57,8 @@
       ],
       "isBackground": false,
       "problemMatcher": ["$msCompile"],
-      "group": "test"
+      "group": "test",
+      "dependsOn": "Build WebUI"
     }
   ]
 }

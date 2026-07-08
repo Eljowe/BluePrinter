@@ -158,14 +158,28 @@ struct ChainSettings
     float peakFreq { 0 }, peakGainInDecibels{ 0 }, peakQuality {1.f};
     float inputGainInDecibels { 0.f };
     float compressorAmount { 0.f };
+    float compressorTone { 0.f };
+    float compressorLevelInDecibels { 0.f };
     float outputGainInDecibels { 0.f };
     float distortionDriveInDecibels { 0.f };
+    float distortionTone { 0.7f };
+    float distortionLevelInDecibels { 0.f };
+    float fuzzDriveInDecibels { 0.f };
+    float fuzzTone { 0.7f };
+    float fuzzLevelInDecibels { 0.f };
     float lowCutFreq { 0 }, highCutFreq { 0 };
-    
+
+    float reverbSize { 0.5f };
+    float reverbDamping { 0.5f };
+    float reverbMix { 0.0f };
+    float reverbWidth { 1.0f };
+
     Slope lowCutSlope { Slope::Slope_12 }, highCutSlope { Slope::Slope_12 };
-    
+
     bool lowCutBypassed { false }, peakBypassed { false }, highCutBypassed { false };
     bool distortionBypassed { false }, compressorBypassed { false };
+    bool fuzzBypassed { false };
+    bool reverbBypassed { false };
 };
 
 ChainSettings getChainSettings(juce::AudioProcessorValueTreeState& apvts);
@@ -314,6 +328,8 @@ private:
     void updatePeakFilter(const ChainSettings& chainSettings);
     void applyCompressor(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings);
     void applyDistortion(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings);
+    void applyFuzz(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings);
+    void applyReverb(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings);
     void applyGain(juce::AudioBuffer<float>& buffer, float gainDecibels);
     void pushPeakLevel(std::atomic<float>& targetPeak, float peakValue);
 
@@ -331,8 +347,15 @@ private:
     std::atomic<float> outputPeakLevel { 0.0f };
 
     std::array<float, 2> compressorGainReductionDb { 0.0f, 0.0f };
+    std::array<float, 2> compressorSidechainHpfX1 { 0.0f, 0.0f };
+    std::array<float, 2> compressorSidechainHpfY1 { 0.0f, 0.0f };
+    float compressorSidechainHpfCoeff { 0.0f };
     std::array<float, 2> distortionToneState { 0.0f, 0.0f };
-    
+    std::array<float, 2> fuzzToneState { 0.0f, 0.0f };
+
+    juce::dsp::Reverb reverb;
+    juce::dsp::Reverb::Parameters reverbParameters;
+
     juce::dsp::Oscillator<float> osc;
     //==============================================================================
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SimpleEQAudioProcessor)

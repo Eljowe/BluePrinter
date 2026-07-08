@@ -112,12 +112,16 @@ void SimpleEQAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     
     leftChannelFifo.prepare(samplesPerBlock);
     rightChannelFifo.prepare(samplesPerBlock);
-    
+
     osc.initialise([](float x) { return std::sin(x); });
-    
+
     spec.numChannels = getTotalNumOutputChannels();
     osc.prepare(spec);
     osc.setFrequency(440);
+
+    reverbParameters = {};
+    reverb.setParameters(reverbParameters);
+    reverb.prepare(spec);
 
     inputClippingDetected.store(false, std::memory_order_release);
     outputClippingDetected.store(false, std::memory_order_release);
@@ -223,6 +227,10 @@ void SimpleEQAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
 
     applyDistortion(buffer, chainSettings);
 
+    applyFuzz(buffer, chainSettings);
+
+    applyReverb(buffer, chainSettings);
+
     applyGain(buffer, chainSettings.outputGainInDecibels);
 
     bool didOutputClip = false;
@@ -318,17 +326,31 @@ ChainSettings getChainSettings(juce::AudioProcessorValueTreeState& apvts)
     settings.peakQuality = apvts.getRawParameterValue("Peak Quality")->load();
     settings.inputGainInDecibels = apvts.getRawParameterValue("Input Gain")->load();
     settings.compressorAmount = apvts.getRawParameterValue("Compressor Amount")->load();
+    settings.compressorTone = apvts.getRawParameterValue("Compressor Tone")->load();
+    settings.compressorLevelInDecibels = apvts.getRawParameterValue("Compressor Level")->load();
     settings.outputGainInDecibels = apvts.getRawParameterValue("Output Gain")->load();
     settings.distortionDriveInDecibels = apvts.getRawParameterValue("Distortion Drive")->load();
+    settings.distortionTone = apvts.getRawParameterValue("Distortion Tone")->load();
+    settings.distortionLevelInDecibels = apvts.getRawParameterValue("Distortion Level")->load();
+    settings.fuzzDriveInDecibels = apvts.getRawParameterValue("Fuzz Drive")->load();
+    settings.fuzzTone = apvts.getRawParameterValue("Fuzz Tone")->load();
+    settings.fuzzLevelInDecibels = apvts.getRawParameterValue("Fuzz Level")->load();
     settings.lowCutSlope = static_cast<Slope>(apvts.getRawParameterValue("LowCut Slope")->load());
     settings.highCutSlope = static_cast<Slope>(apvts.getRawParameterValue("HighCut Slope")->load());
-    
+
+    settings.reverbSize = apvts.getRawParameterValue("Reverb Size")->load();
+    settings.reverbDamping = apvts.getRawParameterValue("Reverb Damping")->load();
+    settings.reverbMix = apvts.getRawParameterValue("Reverb Mix")->load();
+    settings.reverbWidth = apvts.getRawParameterValue("Reverb Width")->load();
+
     settings.lowCutBypassed = apvts.getRawParameterValue("LowCut Bypassed")->load() > 0.5f;
     settings.peakBypassed = apvts.getRawParameterValue("Peak Bypassed")->load() > 0.5f;
     settings.highCutBypassed = apvts.getRawParameterValue("HighCut Bypassed")->load() > 0.5f;
     settings.distortionBypassed = apvts.getRawParameterValue("Distortion Bypassed")->load() > 0.5f;
+    settings.fuzzBypassed = apvts.getRawParameterValue("Fuzz Bypassed")->load() > 0.5f;
     settings.compressorBypassed = apvts.getRawParameterValue("Compressor Bypassed")->load() > 0.5f;
-    
+    settings.reverbBypassed = apvts.getRawParameterValue("Reverb Bypassed")->load() > 0.5f;
+
     return settings;
 }
 
@@ -339,7 +361,11 @@ void SimpleEQAudioProcessor::applyCompressor(juce::AudioBuffer<float>& buffer, c
 
     const auto amount = juce::jlimit(0.0f, 24.0f, chainSettings.compressorAmount);
     if (amount <= 0.0f)
+    {
+        const auto makeup = juce::Decibels::decibelsToGain(chainSettings.compressorLevelInDecibels);
+        buffer.applyGain(makeup);
         return;
+    }
 
     const auto amountNorm = amount / 24.0f;
 
@@ -347,19 +373,36 @@ void SimpleEQAudioProcessor::applyCompressor(juce::AudioBuffer<float>& buffer, c
     const auto ratio = juce::jmap(amountNorm, 0.0f, 1.0f, 1.2f, 8.0f);
     const auto attackMs = juce::jmap(amountNorm, 0.0f, 1.0f, 20.0f, 2.5f);
     const auto releaseMs = juce::jmap(amountNorm, 0.0f, 1.0f, 220.0f, 65.0f);
+    const auto makeupGain = juce::Decibels::decibelsToGain(chainSettings.compressorLevelInDecibels);
 
     const auto sampleRate = juce::jmax(1.0, getSampleRate());
     const auto attackCoeff = std::exp(-1.0f / (0.001f * attackMs * static_cast<float>(sampleRate)));
     const auto releaseCoeff = std::exp(-1.0f / (0.001f * releaseMs * static_cast<float>(sampleRate)));
 
+    const auto toneNorm = juce::jlimit(0.0f, 1.0f, chainSettings.compressorTone);
+    const auto sidechainCutoffHz = juce::jmap(toneNorm, 0.0f, 1.0f, 20.0f, 500.0f);
+    const auto rc = 1.0f / (2.0f * juce::MathConstants<float>::pi * sidechainCutoffHz);
+    const auto dt = 1.0f / static_cast<float>(sampleRate);
+    compressorSidechainHpfCoeff = rc / (rc + dt);
+
     for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
     {
+        const auto channelIndex = static_cast<size_t>(juce::jmin(channel, 1));
         auto* channelData = buffer.getWritePointer(channel);
-        auto& gainReductionDb = compressorGainReductionDb[static_cast<size_t>(juce::jmin(channel, 1))];
+        auto& gainReductionDb = compressorGainReductionDb[channelIndex];
+        auto& hpfX1 = compressorSidechainHpfX1[channelIndex];
+        auto& hpfY1 = compressorSidechainHpfY1[channelIndex];
+        const auto hpfA = compressorSidechainHpfCoeff;
 
         for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
         {
-            const auto detectorInput = std::abs(channelData[sample]) + 1.0e-9f;
+            const auto rawSample = channelData[sample];
+            const auto detectorInputRaw = std::abs(rawSample) + 1.0e-9f;
+
+            hpfY1 = hpfA * (hpfY1 + detectorInputRaw - hpfX1);
+            hpfX1 = detectorInputRaw;
+            const auto detectorInput = hpfY1 + 1.0e-9f;
+
             const auto detectorDb = juce::Decibels::gainToDecibels(detectorInput, -120.0f);
             const auto overDb = juce::jmax(0.0f, detectorDb - thresholdDb);
 
@@ -370,8 +413,8 @@ void SimpleEQAudioProcessor::applyCompressor(juce::AudioBuffer<float>& buffer, c
             const auto smoothingCoeff = targetReductionDb > gainReductionDb ? attackCoeff : releaseCoeff;
             gainReductionDb = smoothingCoeff * gainReductionDb + (1.0f - smoothingCoeff) * targetReductionDb;
 
-            const auto gain = juce::Decibels::decibelsToGain(-gainReductionDb);
-            channelData[sample] *= gain;
+            const auto gain = juce::Decibels::decibelsToGain(-gainReductionDb) * makeupGain;
+            channelData[sample] = rawSample * gain;
         }
     }
 }
@@ -387,9 +430,11 @@ void SimpleEQAudioProcessor::applyDistortion(juce::AudioBuffer<float>& buffer, c
     const auto preGain = juce::Decibels::decibelsToGain(3.0f + driveDb * 0.85f);
     const auto wetMix = juce::jmap(driveNorm, 0.0f, 1.0f, 0.30f, 0.92f);
     const auto autoGain = juce::jlimit(0.30f, 1.0f, std::pow(preGain, -0.28f));
+    const auto levelGain = juce::Decibels::decibelsToGain(chainSettings.distortionLevelInDecibels);
 
     const auto sampleRate = juce::jmax(1.0, getSampleRate());
-    const auto cutoffHz = juce::jmap(driveNorm, 0.0f, 1.0f, 12000.0f, 4500.0f);
+    const auto toneNorm = juce::jlimit(0.0f, 1.0f, chainSettings.distortionTone);
+    const auto cutoffHz = juce::jmap(toneNorm, 0.0f, 1.0f, 1000.0f, 10000.0f);
     const auto smoothing = 1.0f - std::exp(-2.0f * juce::MathConstants<float>::pi * cutoffHz / static_cast<float>(sampleRate));
 
     auto softClip = [](float x)
@@ -416,11 +461,85 @@ void SimpleEQAudioProcessor::applyDistortion(juce::AudioBuffer<float>& buffer, c
             auto wet = (0.78f * tanhShape + 0.22f * cubicShape) * autoGain;
 
             toneState += smoothing * (wet - toneState);
-            wet = toneState;
+            wet = toneState * levelGain;
 
             channelData[sample] = juce::jlimit(-1.5f, 1.5f, juce::jmap(wetMix, dry, wet));
         }
     }
+}
+
+void SimpleEQAudioProcessor::applyFuzz(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings)
+{
+    if (chainSettings.fuzzBypassed)
+        return;
+
+    const auto driveDb = chainSettings.fuzzDriveInDecibels;
+    const auto driveNorm = juce::jlimit(0.0f, 1.0f, driveDb / 24.0f);
+
+    const auto preGain = juce::Decibels::decibelsToGain(4.0f + driveDb * 1.1f);
+    const auto wetMix = juce::jmap(driveNorm, 0.0f, 1.0f, 0.50f, 1.0f);
+    const auto octaveBlend = juce::jmap(driveNorm, 0.0f, 1.0f, 0.0f, 0.35f);
+    const auto autoGain = juce::jlimit(0.20f, 1.0f, std::pow(preGain, -0.35f));
+    const auto levelGain = juce::Decibels::decibelsToGain(chainSettings.fuzzLevelInDecibels);
+
+    constexpr float positiveThreshold = 0.6f;
+    constexpr float negativeThreshold = 0.4f;
+
+    const auto sampleRate = juce::jmax(1.0, getSampleRate());
+    const auto toneNorm = juce::jlimit(0.0f, 1.0f, chainSettings.fuzzTone);
+    const auto cutoffHz = juce::jmap(toneNorm, 0.0f, 1.0f, 1000.0f, 10000.0f);
+    const auto smoothing = 1.0f - std::exp(-2.0f * juce::MathConstants<float>::pi * cutoffHz / static_cast<float>(sampleRate));
+
+    for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
+    {
+        auto* channelData = buffer.getWritePointer(channel);
+        auto& toneState = fuzzToneState[static_cast<size_t>(juce::jmin(channel, 1))];
+
+        for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
+        {
+            const auto dry = channelData[sample];
+            const auto driven = dry * preGain;
+
+            const auto asymmetric = driven >= 0.0f
+                                        ? std::min(driven, positiveThreshold)
+                                        : std::max(driven, -negativeThreshold);
+
+            const auto rectified = std::abs(asymmetric) * 0.6f;
+            auto wet = ((1.0f - octaveBlend) * asymmetric + octaveBlend * rectified) * autoGain;
+
+            toneState += smoothing * (wet - toneState);
+            wet = toneState * levelGain;
+
+            channelData[sample] = juce::jlimit(-1.5f, 1.5f, juce::jmap(wetMix, dry, wet));
+        }
+    }
+}
+
+void SimpleEQAudioProcessor::applyReverb(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings)
+{
+    if (chainSettings.reverbBypassed)
+        return;
+
+    const auto size = juce::jlimit(0.0f, 1.0f, chainSettings.reverbSize);
+    const auto damping = juce::jlimit(0.0f, 1.0f, chainSettings.reverbDamping);
+    const auto width = juce::jlimit(0.0f, 1.0f, chainSettings.reverbWidth);
+    const auto mix = juce::jlimit(0.0f, 1.0f, chainSettings.reverbMix);
+
+    if (mix <= 0.0f)
+        return;
+
+    reverbParameters.roomSize = size;
+    reverbParameters.damping = damping;
+    reverbParameters.width = width;
+    reverbParameters.wetLevel = mix;
+    reverbParameters.dryLevel = 1.0f - (mix * 0.5f);
+    reverbParameters.freezeMode = 0.0f;
+
+    reverb.setParameters(reverbParameters);
+
+    juce::dsp::AudioBlock<float> block(buffer);
+    juce::dsp::ProcessContextReplacing<float> context(block);
+    reverb.process(context);
 }
 
 Coefficients makePeakFilter(const ChainSettings& chainSettings, double sampleRate)
@@ -522,6 +641,16 @@ juce::AudioProcessorValueTreeState::ParameterLayout SimpleEQAudioProcessor::crea
                                                            juce::NormalisableRange<float>(0.f, 24.f, 0.1f, 1.f),
                                                            0.f));
 
+    layout.add(std::make_unique<juce::AudioParameterFloat>("Compressor Tone",
+                                                           "Compressor Tone",
+                                                           juce::NormalisableRange<float>(0.f, 1.f, 0.01f, 1.f),
+                                                           0.0f));
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>("Compressor Level",
+                                                           "Compressor Level",
+                                                           juce::NormalisableRange<float>(-12.f, 24.f, 0.1f, 1.f),
+                                                           0.f));
+
     layout.add(std::make_unique<juce::AudioParameterFloat>("Output Gain",
                                                            "Output Gain",
                                                            juce::NormalisableRange<float>(-24.f, 24.f, 0.1f, 1.f),
@@ -531,7 +660,52 @@ juce::AudioProcessorValueTreeState::ParameterLayout SimpleEQAudioProcessor::crea
                                                            "Distortion Drive",
                                                            juce::NormalisableRange<float>(0.f, 24.f, 0.1f, 1.f),
                                                            0.f));
-    
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>("Distortion Tone",
+                                                           "Distortion Tone",
+                                                           juce::NormalisableRange<float>(0.f, 1.f, 0.01f, 1.f),
+                                                           0.7f));
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>("Distortion Level",
+                                                           "Distortion Level",
+                                                           juce::NormalisableRange<float>(-24.f, 12.f, 0.1f, 1.f),
+                                                           0.f));
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>("Fuzz Drive",
+                                                           "Fuzz Drive",
+                                                           juce::NormalisableRange<float>(0.f, 24.f, 0.1f, 1.f),
+                                                           0.f));
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>("Fuzz Tone",
+                                                           "Fuzz Tone",
+                                                           juce::NormalisableRange<float>(0.f, 1.f, 0.01f, 1.f),
+                                                           0.7f));
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>("Fuzz Level",
+                                                           "Fuzz Level",
+                                                           juce::NormalisableRange<float>(-24.f, 12.f, 0.1f, 1.f),
+                                                           0.f));
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>("Reverb Size",
+                                                           "Reverb Size",
+                                                           juce::NormalisableRange<float>(0.f, 1.f, 0.01f, 1.f),
+                                                           0.5f));
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>("Reverb Damping",
+                                                           "Reverb Damping",
+                                                           juce::NormalisableRange<float>(0.f, 1.f, 0.01f, 1.f),
+                                                           0.5f));
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>("Reverb Mix",
+                                                           "Reverb Mix",
+                                                           juce::NormalisableRange<float>(0.f, 1.f, 0.01f, 1.f),
+                                                           0.0f));
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>("Reverb Width",
+                                                           "Reverb Width",
+                                                           juce::NormalisableRange<float>(0.f, 1.f, 0.01f, 1.f),
+                                                           1.0f));
+
     juce::StringArray stringArray;
     for( int i = 0; i < 4; ++i )
     {
@@ -548,9 +722,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout SimpleEQAudioProcessor::crea
     layout.add(std::make_unique<juce::AudioParameterBool>("Peak Bypassed", "Peak Bypassed", false));
     layout.add(std::make_unique<juce::AudioParameterBool>("HighCut Bypassed", "HighCut Bypassed", false));
     layout.add(std::make_unique<juce::AudioParameterBool>("Distortion Bypassed", "Distortion Bypassed", false));
+    layout.add(std::make_unique<juce::AudioParameterBool>("Fuzz Bypassed", "Fuzz Bypassed", false));
     layout.add(std::make_unique<juce::AudioParameterBool>("Compressor Bypassed", "Compressor Bypassed", false));
+    layout.add(std::make_unique<juce::AudioParameterBool>("Reverb Bypassed", "Reverb Bypassed", false));
     layout.add(std::make_unique<juce::AudioParameterBool>("Analyzer Enabled", "Analyzer Enabled", true));
-    
+
     return layout;
 }
 

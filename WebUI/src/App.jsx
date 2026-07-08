@@ -1,9 +1,19 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { Knob } from "./components/controls";
+import EqPanel from "./eq/EqPanel";
+import Pedalboard from "./pedals/Pedalboard";
 
 const PARAM_IDS = {
   input: "Input Gain",
   compressorAmount: "Compressor Amount",
+  compressorTone: "Compressor Tone",
+  compressorLevel: "Compressor Level",
   drive: "Distortion Drive",
+  driveTone: "Distortion Tone",
+  driveLevel: "Distortion Level",
+  fuzzDrive: "Fuzz Drive",
+  fuzzTone: "Fuzz Tone",
+  fuzzLevel: "Fuzz Level",
   output: "Output Gain",
   lowCutFreq: "LowCut Freq",
   highCutFreq: "HighCut Freq",
@@ -16,7 +26,14 @@ const PARAM_IDS = {
   peakBypassed: "Peak Bypassed",
   highCutBypassed: "HighCut Bypassed",
   driveBypassed: "Distortion Bypassed",
+  fuzzBypassed: "Fuzz Bypassed",
   compressorBypassed: "Compressor Bypassed",
+  reverbSize: "Reverb Size",
+  reverbDamping: "Reverb Damping",
+  reverbMix: "Reverb Mix",
+  reverbWidth: "Reverb Width",
+  reverbBypassed: "Reverb Bypassed",
+  analyzerEnabled: "Analyzer Enabled",
 };
 
 const FRONTEND_EVENT = "frontendSetParameter";
@@ -39,7 +56,14 @@ function readInitialParametersFromJuce() {
   return {
     inputGain: Number(first.inputGain ?? 0),
     compressorAmount: Number(first.compressorAmount ?? 0),
+    compressorTone: Number(first.compressorTone ?? 0),
+    compressorLevel: Number(first.compressorLevel ?? 0),
     drive: Number(first.drive ?? 6),
+    driveTone: Number(first.driveTone ?? 0.7),
+    driveLevel: Number(first.driveLevel ?? 0),
+    fuzzDrive: Number(first.fuzzDrive ?? 0),
+    fuzzTone: Number(first.fuzzTone ?? 0.7),
+    fuzzLevel: Number(first.fuzzLevel ?? 0),
     outputGain: Number(first.outputGain ?? 0),
     lowCutFreq: Number(first.lowCutFreq ?? 20),
     highCutFreq: Number(first.highCutFreq ?? 20000),
@@ -48,217 +72,26 @@ function readInitialParametersFromJuce() {
     peakQuality: Number(first.peakQuality ?? 1),
     lowCutSlope: Number(first.lowCutSlope ?? 0),
     highCutSlope: Number(first.highCutSlope ?? 0),
+    reverbSize: Number(first.reverbSize ?? 0.5),
+    reverbDamping: Number(first.reverbDamping ?? 0.5),
+    reverbMix: Number(first.reverbMix ?? 0),
+    reverbWidth: Number(first.reverbWidth ?? 1),
     lowCutBypassed: Boolean(first.lowCutBypassed),
     peakBypassed: Boolean(first.peakBypassed),
     highCutBypassed: Boolean(first.highCutBypassed),
     driveBypassed: Boolean(first.driveBypassed),
+    fuzzBypassed: Boolean(first.fuzzBypassed),
     compressorBypassed: Boolean(first.compressorBypassed),
+    reverbBypassed: Boolean(first.reverbBypassed),
     responseCurve: Array.isArray(first.responseCurve) ? first.responseCurve.map(Number) : [],
     leftSpectrum: Array.isArray(first.leftSpectrum) ? first.leftSpectrum.map(Number) : [],
     rightSpectrum: Array.isArray(first.rightSpectrum) ? first.rightSpectrum.map(Number) : [],
+    analyzerEnabled: Boolean(first.analyzerEnabled),
     inputPeak: Number(first.inputPeak ?? 0),
     outputPeak: Number(first.outputPeak ?? 0),
     inputClipping: Boolean(first.inputClipping),
     outputClipping: Boolean(first.outputClipping),
   };
-}
-
-function clamp(value, min, max) {
-  return Math.min(max, Math.max(min, value));
-}
-
-function snapToStep(value, min, step) {
-  const stepValue = Number(step);
-  if (!Number.isFinite(stepValue) || stepValue <= 0) return value;
-
-  const snapped = Math.round((value - min) / stepValue) * stepValue + min;
-  const precision = (String(step).split(".")[1] || "").length;
-  return Number(snapped.toFixed(precision));
-}
-
-function buildPath(points, minValue, maxValue) {
-  if (!Array.isArray(points) || points.length === 0) return "";
-
-  const clampValue = (value, fallback) => {
-    const numericValue = Number.isFinite(value) ? value : fallback;
-    return Math.min(maxValue, Math.max(minValue, numericValue));
-  };
-
-  let lastValid = minValue;
-  return points
-    .map((value, index) => {
-      const x = points.length === 1 ? 0 : (index / (points.length - 1)) * 100;
-      const clamped = clampValue(value, lastValid);
-      lastValid = clamped;
-      const normalizedY = (clamped - minValue) / (maxValue - minValue);
-      const y = (1 - normalizedY) * 100;
-      return `${index === 0 ? "M" : "L"}${x.toFixed(2)},${y.toFixed(2)}`;
-    })
-    .join(" ");
-}
-
-function Knob({ label, min, max, value, onChange, unit, step = "0.1", className = "", accent = "orange" }) {
-  const normalized = (value - min) / (max - min);
-  const rotation = -140 + normalized * 280;
-  const dragState = useRef(null);
-  const range = max - min;
-
-  const updateValue = (next) => {
-    const clamped = clamp(next, min, max);
-    onChange(snapToStep(clamped, min, step));
-  };
-
-  const beginDrag = (event) => {
-    event.preventDefault();
-    dragState.current = {
-      pointerId: event.pointerId,
-      startY: event.clientY,
-      startX: event.clientX,
-      startValue: value,
-    };
-    event.currentTarget.setPointerCapture?.(event.pointerId);
-  };
-
-  const continueDrag = (event) => {
-    if (!dragState.current || dragState.current.pointerId !== event.pointerId) return;
-    const deltaY = dragState.current.startY - event.clientY;
-    const deltaX = event.clientX - dragState.current.startX;
-    const delta = deltaY + deltaX * 0.5;
-    const sensitivity = range / 180;
-    updateValue(dragState.current.startValue + delta * sensitivity);
-  };
-
-  const endDrag = (event) => {
-    if (!dragState.current || dragState.current.pointerId !== event.pointerId) return;
-    event.currentTarget.releasePointerCapture?.(event.pointerId);
-    dragState.current = null;
-  };
-
-  const handleWheel = (event) => {
-    event.preventDefault();
-    const direction = event.deltaY < 0 ? 1 : -1;
-    const fineStep = Number(step) || range / 100;
-    updateValue(value + direction * fineStep);
-  };
-
-  const handleKeyDown = (event) => {
-    const fineStep = Number(step) || range / 100;
-    const coarseStep = fineStep * 10;
-
-    switch (event.key) {
-      case "ArrowUp":
-      case "ArrowRight":
-        event.preventDefault();
-        updateValue(value + fineStep);
-        break;
-      case "ArrowDown":
-      case "ArrowLeft":
-        event.preventDefault();
-        updateValue(value - fineStep);
-        break;
-      case "PageUp":
-        event.preventDefault();
-        updateValue(value + coarseStep);
-        break;
-      case "PageDown":
-        event.preventDefault();
-        updateValue(value - coarseStep);
-        break;
-      case "Home":
-        event.preventDefault();
-        updateValue(min);
-        break;
-      case "End":
-        event.preventDefault();
-        updateValue(max);
-        break;
-      default:
-        break;
-    }
-  };
-
-  return (
-    <div className={`knob-wrap knob-${accent} ${className}`.trim()}>
-      <div
-        className="knob-shell"
-        role="slider"
-        tabIndex={0}
-        aria-label={label}
-        aria-valuemin={min}
-        aria-valuemax={max}
-        aria-valuenow={value}
-        onPointerDown={beginDrag}
-        onPointerMove={continueDrag}
-        onPointerUp={endDrag}
-        onPointerCancel={endDrag}
-        onWheel={handleWheel}
-        onKeyDown={handleKeyDown}
-      >
-        <div className="knob-face" style={{ transform: `rotate(${rotation}deg)` }}>
-          <div className="knob-pointer" />
-        </div>
-      </div>
-      <div className="knob-label">{label}</div>
-      <div className="knob-value">
-        {value.toFixed(1)} {unit}
-      </div>
-    </div>
-  );
-}
-
-function SlopeKnob({ label, value, onChange }) {
-  const snapped = Math.round(value);
-  const slopeLabel = `${12 + snapped * 12} dB/Oct`;
-
-  return (
-    <div className="eq-extra-item">
-      <Knob
-        label={label}
-        min={0}
-        max={3}
-        step="1"
-        value={snapped}
-        onChange={(next) => onChange(Math.round(next))}
-        unit=""
-        accent="blue"
-      />
-      <div className="eq-extra-value">{slopeLabel}</div>
-    </div>
-  );
-}
-
-function BypassButton({ label, enabled, onToggle, className = "" }) {
-  return (
-    <button className={`bypass-button ${enabled ? "active" : ""} ${className}`.trim()} type="button" onClick={onToggle}>
-      <span>{label}</span>
-      <strong>{enabled ? "Off" : "On"}</strong>
-    </button>
-  );
-}
-
-function Meter({ label, level, clipping }) {
-  const normalizedLevel = clamp(level, 0, 1.25);
-  const fillHeight = `${Math.min(100, normalizedLevel * 100)}%`;
-
-  return (
-    <div className="meter-card">
-      <div className="meter-header">
-        <span className="meter-label">{label}</span>
-        <span className={`clip-pill ${clipping ? "active" : ""}`}>Clip</span>
-      </div>
-      <div className="meter-body">
-        <div className="meter-track">
-          <div className="meter-fill" style={{ height: fillHeight }} />
-        </div>
-        <div className="meter-scale">
-          <span>0</span>
-          <span>-6</span>
-          <span>-12</span>
-          <span>-24</span>
-        </div>
-      </div>
-    </div>
-  );
 }
 
 function MiniPeak({ label, level, clipping, className = "" }) {
@@ -277,67 +110,20 @@ function MiniPeak({ label, level, clipping, className = "" }) {
   );
 }
 
-function AnalyzerGraph({ responseCurve, leftSpectrum, rightSpectrum }) {
-  const responsePath = useMemo(() => buildPath(responseCurve, -24, 24), [responseCurve]);
-  const leftSpectrumPath = useMemo(() => buildPath(leftSpectrum, -120, 0), [leftSpectrum]);
-  const rightSpectrumPath = useMemo(() => buildPath(rightSpectrum, -120, 0), [rightSpectrum]);
-  const frequencyTicks = useMemo(() => {
-    const tickFrequencies = [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000];
-    const minLog = Math.log10(20);
-    const maxLog = Math.log10(20000);
-
-    return tickFrequencies.map((frequency) => {
-      const x = ((Math.log10(frequency) - minLog) / (maxLog - minLog)) * 100;
-      const label = frequency >= 1000 ? `${frequency / 1000}k` : `${frequency}`;
-      return { frequency, x, label };
-    });
-  }, []);
-
-  return (
-    <div className="analyzer-panel">
-      <svg className="analyzer-svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="EQ FFT Analyzer">
-        <g className="analyzer-grid">
-          <line x1="0" y1="10" x2="100" y2="10" />
-          <line x1="0" y1="30" x2="100" y2="30" />
-          <line x1="0" y1="50" x2="100" y2="50" />
-          <line x1="0" y1="70" x2="100" y2="70" />
-          <line x1="0" y1="90" x2="100" y2="90" />
-        </g>
-        {rightSpectrumPath ? <path className="analyzer-path analyzer-path-right" d={rightSpectrumPath} /> : null}
-        {leftSpectrumPath ? <path className="analyzer-path analyzer-path-left" d={leftSpectrumPath} /> : null}
-        {responsePath ? <path className="analyzer-path analyzer-path-response" d={responsePath} /> : null}
-      </svg>
-      <div className="analyzer-freq-axis" aria-label="Analyzer Frequency Axis">
-        {frequencyTicks.map((tick, index) => {
-          const edgeClass = index === 0 ? "is-start" : index === frequencyTicks.length - 1 ? "is-end" : "";
-
-          return (
-            <span
-              key={tick.frequency}
-              className={`analyzer-freq-label ${edgeClass}`.trim()}
-              style={{ left: `${tick.x}%` }}
-            >
-              {tick.label}
-            </span>
-          );
-        })}
-      </div>
-      <div className="analyzer-legend">
-        <span className="legend-item legend-left">L FFT</span>
-        <span className="legend-item legend-right">R FFT</span>
-        <span className="legend-item legend-response">EQ Curve</span>
-      </div>
-    </div>
-  );
-}
-
 export default function App() {
   const initial = useMemo(() => readInitialParametersFromJuce(), []);
 
   const [activeTab, setActiveTab] = useState("fx");
   const [inGain, setInGain] = useState(initial?.inputGain ?? 0);
   const [drive, setDrive] = useState(initial?.drive ?? 6);
+  const [driveTone, setDriveTone] = useState(initial?.driveTone ?? 0.7);
+  const [driveLevel, setDriveLevel] = useState(initial?.driveLevel ?? 0);
+  const [fuzzDrive, setFuzzDrive] = useState(initial?.fuzzDrive ?? 0);
+  const [fuzzTone, setFuzzTone] = useState(initial?.fuzzTone ?? 0.7);
+  const [fuzzLevel, setFuzzLevel] = useState(initial?.fuzzLevel ?? 0);
   const [compressorAmount, setCompressorAmount] = useState(initial?.compressorAmount ?? 0);
+  const [compressorTone, setCompressorTone] = useState(initial?.compressorTone ?? 0);
+  const [compressorLevel, setCompressorLevel] = useState(initial?.compressorLevel ?? 0);
   const [outGain, setOutGain] = useState(initial?.outputGain ?? 0);
   const [lowCutFreq, setLowCutFreq] = useState(initial?.lowCutFreq ?? 20);
   const [highCutFreq, setHighCutFreq] = useState(initial?.highCutFreq ?? 20000);
@@ -350,10 +136,17 @@ export default function App() {
   const [peakBypassed, setPeakBypassed] = useState(initial?.peakBypassed ?? false);
   const [highCutBypassed, setHighCutBypassed] = useState(initial?.highCutBypassed ?? false);
   const [driveBypassed, setDriveBypassed] = useState(initial?.driveBypassed ?? false);
+  const [fuzzBypassed, setFuzzBypassed] = useState(initial?.fuzzBypassed ?? false);
   const [compressorBypassed, setCompressorBypassed] = useState(initial?.compressorBypassed ?? false);
+  const [reverbSize, setReverbSize] = useState(initial?.reverbSize ?? 0.5);
+  const [reverbDamping, setReverbDamping] = useState(initial?.reverbDamping ?? 0.5);
+  const [reverbMix, setReverbMix] = useState(initial?.reverbMix ?? 0);
+  const [reverbWidth, setReverbWidth] = useState(initial?.reverbWidth ?? 1);
+  const [reverbBypassed, setReverbBypassed] = useState(initial?.reverbBypassed ?? false);
   const [responseCurve, setResponseCurve] = useState(initial?.responseCurve ?? []);
   const [leftSpectrum, setLeftSpectrum] = useState(initial?.leftSpectrum ?? []);
   const [rightSpectrum, setRightSpectrum] = useState(initial?.rightSpectrum ?? []);
+  const [analyzerEnabled, setAnalyzerEnabled] = useState(initial?.analyzerEnabled ?? true);
   const [inputPeak, setInputPeak] = useState(initial?.inputPeak ?? 0);
   const [outputPeak, setOutputPeak] = useState(initial?.outputPeak ?? 0);
   const [inputClipping, setInputClipping] = useState(initial?.inputClipping ?? false);
@@ -367,7 +160,14 @@ export default function App() {
       if (typeof payload !== "object" || payload == null) return;
       if (payload.inputGain !== undefined) setInGain(Number(payload.inputGain));
       if (payload.compressorAmount !== undefined) setCompressorAmount(Number(payload.compressorAmount));
+      if (payload.compressorTone !== undefined) setCompressorTone(Number(payload.compressorTone));
+      if (payload.compressorLevel !== undefined) setCompressorLevel(Number(payload.compressorLevel));
       if (payload.drive !== undefined) setDrive(Number(payload.drive));
+      if (payload.driveTone !== undefined) setDriveTone(Number(payload.driveTone));
+      if (payload.driveLevel !== undefined) setDriveLevel(Number(payload.driveLevel));
+      if (payload.fuzzDrive !== undefined) setFuzzDrive(Number(payload.fuzzDrive));
+      if (payload.fuzzTone !== undefined) setFuzzTone(Number(payload.fuzzTone));
+      if (payload.fuzzLevel !== undefined) setFuzzLevel(Number(payload.fuzzLevel));
       if (payload.outputGain !== undefined) setOutGain(Number(payload.outputGain));
       if (payload.lowCutFreq !== undefined) setLowCutFreq(Number(payload.lowCutFreq));
       if (payload.highCutFreq !== undefined) setHighCutFreq(Number(payload.highCutFreq));
@@ -380,7 +180,14 @@ export default function App() {
       if (payload.peakBypassed !== undefined) setPeakBypassed(Boolean(payload.peakBypassed));
       if (payload.highCutBypassed !== undefined) setHighCutBypassed(Boolean(payload.highCutBypassed));
       if (payload.driveBypassed !== undefined) setDriveBypassed(Boolean(payload.driveBypassed));
+      if (payload.fuzzBypassed !== undefined) setFuzzBypassed(Boolean(payload.fuzzBypassed));
       if (payload.compressorBypassed !== undefined) setCompressorBypassed(Boolean(payload.compressorBypassed));
+      if (payload.reverbSize !== undefined) setReverbSize(Number(payload.reverbSize));
+      if (payload.reverbDamping !== undefined) setReverbDamping(Number(payload.reverbDamping));
+      if (payload.reverbMix !== undefined) setReverbMix(Number(payload.reverbMix));
+      if (payload.reverbWidth !== undefined) setReverbWidth(Number(payload.reverbWidth));
+      if (payload.reverbBypassed !== undefined) setReverbBypassed(Boolean(payload.reverbBypassed));
+      if (payload.analyzerEnabled !== undefined) setAnalyzerEnabled(Boolean(payload.analyzerEnabled));
       if (Array.isArray(payload.responseCurve)) setResponseCurve(payload.responseCurve.map(Number));
       if (Array.isArray(payload.leftSpectrum)) setLeftSpectrum(payload.leftSpectrum.map(Number));
       if (Array.isArray(payload.rightSpectrum)) setRightSpectrum(payload.rightSpectrum.map(Number));
@@ -460,187 +267,162 @@ export default function App() {
       </header>
 
       {activeTab === "fx" ? (
-        <section className="panel-shell fx-shell">
-          <p className="section-title">Pedalboard</p>
-          <div className="fx-pedal-grid">
-            <article className={`fx-pedal-card ${driveBypassed ? "is-bypassed" : ""}`.trim()}>
-              <p className="fx-pedal-title">Drive</p>
-              <Knob
-                className="pedal-compact"
-                label="Drive"
-                min={0}
-                max={24}
-                value={drive}
-                onChange={(next) => {
-                  setDrive(next);
-                  emitParameterChange(PARAM_IDS.drive, next);
-                }}
-                unit="dB"
-                accent="orange"
-              />
-              <BypassButton
-                label="Power"
-                enabled={driveBypassed}
-                className="pedal-power"
-                onToggle={() => {
-                  const next = !driveBypassed;
-                  setDriveBypassed(next);
-                  emitParameterChange(PARAM_IDS.driveBypassed, next ? 1 : 0);
-                }}
-              />
-            </article>
-
-            <article
-              className={`fx-pedal-card fx-pedal-card-secondary ${compressorBypassed ? "is-bypassed" : ""}`.trim()}
-            >
-              <p className="fx-pedal-title">Compressor</p>
-              <Knob
-                className="pedal-compact"
-                label="Comp"
-                min={0}
-                max={24}
-                value={compressorAmount}
-                onChange={(next) => {
-                  setCompressorAmount(next);
-                  emitParameterChange(PARAM_IDS.compressorAmount, next);
-                }}
-                unit="dB"
-                accent="blue"
-              />
-              <BypassButton
-                label="Power"
-                enabled={compressorBypassed}
-                className="pedal-power"
-                onToggle={() => {
-                  const next = !compressorBypassed;
-                  setCompressorBypassed(next);
-                  emitParameterChange(PARAM_IDS.compressorBypassed, next ? 1 : 0);
-                }}
-              />
-            </article>
-          </div>
-        </section>
+        <Pedalboard
+          drive={drive}
+          driveTone={driveTone}
+          driveLevel={driveLevel}
+          driveBypassed={driveBypassed}
+          fuzzDrive={fuzzDrive}
+          fuzzTone={fuzzTone}
+          fuzzLevel={fuzzLevel}
+          fuzzBypassed={fuzzBypassed}
+          compressorAmount={compressorAmount}
+          compressorBypassed={compressorBypassed}
+          compressorTone={compressorTone}
+          compressorLevel={compressorLevel}
+          reverbSize={reverbSize}
+          reverbDamping={reverbDamping}
+          reverbMix={reverbMix}
+          reverbWidth={reverbWidth}
+          reverbBypassed={reverbBypassed}
+          onDriveChange={(next) => {
+            setDrive(next);
+            emitParameterChange(PARAM_IDS.drive, next);
+          }}
+          onDriveToneChange={(next) => {
+            setDriveTone(next);
+            emitParameterChange(PARAM_IDS.driveTone, next);
+          }}
+          onDriveLevelChange={(next) => {
+            setDriveLevel(next);
+            emitParameterChange(PARAM_IDS.driveLevel, next);
+          }}
+          onDriveToggle={() => {
+            const next = !driveBypassed;
+            setDriveBypassed(next);
+            emitParameterChange(PARAM_IDS.driveBypassed, next ? 1 : 0);
+          }}
+          onFuzzDriveChange={(next) => {
+            setFuzzDrive(next);
+            emitParameterChange(PARAM_IDS.fuzzDrive, next);
+          }}
+          onFuzzToneChange={(next) => {
+            setFuzzTone(next);
+            emitParameterChange(PARAM_IDS.fuzzTone, next);
+          }}
+          onFuzzLevelChange={(next) => {
+            setFuzzLevel(next);
+            emitParameterChange(PARAM_IDS.fuzzLevel, next);
+          }}
+          onFuzzToggle={() => {
+            const next = !fuzzBypassed;
+            setFuzzBypassed(next);
+            emitParameterChange(PARAM_IDS.fuzzBypassed, next ? 1 : 0);
+          }}
+          onCompressorChange={(next) => {
+            setCompressorAmount(next);
+            emitParameterChange(PARAM_IDS.compressorAmount, next);
+          }}
+          onCompressorToneChange={(next) => {
+            setCompressorTone(next);
+            emitParameterChange(PARAM_IDS.compressorTone, next);
+          }}
+          onCompressorLevelChange={(next) => {
+            setCompressorLevel(next);
+            emitParameterChange(PARAM_IDS.compressorLevel, next);
+          }}
+          onCompressorToggle={() => {
+            const next = !compressorBypassed;
+            setCompressorBypassed(next);
+            emitParameterChange(PARAM_IDS.compressorBypassed, next ? 1 : 0);
+          }}
+          onReverbSizeChange={(next) => {
+            setReverbSize(next);
+            emitParameterChange(PARAM_IDS.reverbSize, next);
+          }}
+          onReverbDampingChange={(next) => {
+            setReverbDamping(next);
+            emitParameterChange(PARAM_IDS.reverbDamping, next);
+          }}
+          onReverbMixChange={(next) => {
+            setReverbMix(next);
+            emitParameterChange(PARAM_IDS.reverbMix, next);
+          }}
+          onReverbWidthChange={(next) => {
+            setReverbWidth(next);
+            emitParameterChange(PARAM_IDS.reverbWidth, next);
+          }}
+          onReverbToggle={() => {
+            const next = !reverbBypassed;
+            setReverbBypassed(next);
+            emitParameterChange(PARAM_IDS.reverbBypassed, next ? 1 : 0);
+          }}
+        />
       ) : (
-        <section className="panel-shell eq-shell">
-          <p className="section-title">Analyzer</p>
-          <AnalyzerGraph responseCurve={responseCurve} leftSpectrum={leftSpectrum} rightSpectrum={rightSpectrum} />
-
-          <div className="eq-main-grid">
-            <Knob
-              label="Low Cut"
-              min={20}
-              max={20000}
-              value={lowCutFreq}
-              onChange={(next) => {
-                setLowCutFreq(next);
-                emitParameterChange(PARAM_IDS.lowCutFreq, next);
-              }}
-              unit="Hz"
-              step="1"
-              accent="blue"
-            />
-            <Knob
-              label="Peak Freq"
-              min={20}
-              max={20000}
-              value={peakFreq}
-              onChange={(next) => {
-                setPeakFreq(next);
-                emitParameterChange(PARAM_IDS.peakFreq, next);
-              }}
-              unit="Hz"
-              step="1"
-              accent="blue"
-            />
-            <Knob
-              label="Peak Gain"
-              min={-24}
-              max={24}
-              value={peakGain}
-              onChange={(next) => {
-                setPeakGain(next);
-                emitParameterChange(PARAM_IDS.peakGain, next);
-              }}
-              unit="dB"
-              accent="blue"
-            />
-            <Knob
-              label="Peak Q"
-              min={0.1}
-              max={10}
-              value={peakQuality}
-              onChange={(next) => {
-                setPeakQuality(next);
-                emitParameterChange(PARAM_IDS.peakQuality, next);
-              }}
-              unit="Q"
-              step="0.05"
-              accent="blue"
-            />
-            <Knob
-              label="High Cut"
-              min={20}
-              max={20000}
-              value={highCutFreq}
-              onChange={(next) => {
-                setHighCutFreq(next);
-                emitParameterChange(PARAM_IDS.highCutFreq, next);
-              }}
-              unit="Hz"
-              step="1"
-              accent="blue"
-            />
-          </div>
-
-          <div className="eq-extra-grid">
-            <SlopeKnob
-              label="Low Slope"
-              value={lowCutSlope}
-              onChange={(next) => {
-                setLowCutSlope(next);
-                emitParameterChange(PARAM_IDS.lowCutSlope, next);
-              }}
-            />
-            <SlopeKnob
-              label="High Slope"
-              value={highCutSlope}
-              onChange={(next) => {
-                setHighCutSlope(next);
-                emitParameterChange(PARAM_IDS.highCutSlope, next);
-              }}
-            />
-
-            <div className="bypass-row">
-              <BypassButton
-                label="Low Cut"
-                enabled={lowCutBypassed}
-                onToggle={() => {
-                  const next = !lowCutBypassed;
-                  setLowCutBypassed(next);
-                  emitParameterChange(PARAM_IDS.lowCutBypassed, next ? 1 : 0);
-                }}
-              />
-              <BypassButton
-                label="Peak"
-                enabled={peakBypassed}
-                onToggle={() => {
-                  const next = !peakBypassed;
-                  setPeakBypassed(next);
-                  emitParameterChange(PARAM_IDS.peakBypassed, next ? 1 : 0);
-                }}
-              />
-              <BypassButton
-                label="High Cut"
-                enabled={highCutBypassed}
-                onToggle={() => {
-                  const next = !highCutBypassed;
-                  setHighCutBypassed(next);
-                  emitParameterChange(PARAM_IDS.highCutBypassed, next ? 1 : 0);
-                }}
-              />
-            </div>
-          </div>
-        </section>
+        <EqPanel
+          responseCurve={responseCurve}
+          leftSpectrum={leftSpectrum}
+          rightSpectrum={rightSpectrum}
+          analyzerEnabled={analyzerEnabled}
+          lowCutFreq={lowCutFreq}
+          peakFreq={peakFreq}
+          peakGain={peakGain}
+          peakQuality={peakQuality}
+          highCutFreq={highCutFreq}
+          lowCutSlope={lowCutSlope}
+          highCutSlope={highCutSlope}
+          lowCutBypassed={lowCutBypassed}
+          peakBypassed={peakBypassed}
+          highCutBypassed={highCutBypassed}
+          onLowCutFreqChange={(next) => {
+            setLowCutFreq(next);
+            emitParameterChange(PARAM_IDS.lowCutFreq, next);
+          }}
+          onPeakFreqChange={(next) => {
+            setPeakFreq(next);
+            emitParameterChange(PARAM_IDS.peakFreq, next);
+          }}
+          onPeakGainChange={(next) => {
+            setPeakGain(next);
+            emitParameterChange(PARAM_IDS.peakGain, next);
+          }}
+          onPeakQualityChange={(next) => {
+            setPeakQuality(next);
+            emitParameterChange(PARAM_IDS.peakQuality, next);
+          }}
+          onHighCutFreqChange={(next) => {
+            setHighCutFreq(next);
+            emitParameterChange(PARAM_IDS.highCutFreq, next);
+          }}
+          onLowCutSlopeChange={(next) => {
+            setLowCutSlope(next);
+            emitParameterChange(PARAM_IDS.lowCutSlope, next);
+          }}
+          onHighCutSlopeChange={(next) => {
+            setHighCutSlope(next);
+            emitParameterChange(PARAM_IDS.highCutSlope, next);
+          }}
+          onLowCutBypassToggle={() => {
+            const next = !lowCutBypassed;
+            setLowCutBypassed(next);
+            emitParameterChange(PARAM_IDS.lowCutBypassed, next ? 1 : 0);
+          }}
+          onPeakBypassToggle={() => {
+            const next = !peakBypassed;
+            setPeakBypassed(next);
+            emitParameterChange(PARAM_IDS.peakBypassed, next ? 1 : 0);
+          }}
+          onHighCutBypassToggle={() => {
+            const next = !highCutBypassed;
+            setHighCutBypassed(next);
+            emitParameterChange(PARAM_IDS.highCutBypassed, next ? 1 : 0);
+          }}
+          onAnalyzerToggle={() => {
+            const next = !analyzerEnabled;
+            setAnalyzerEnabled(next);
+            emitParameterChange(PARAM_IDS.analyzerEnabled, next ? 1 : 0);
+          }}
+        />
       )}
 
       <footer className="status-bar">

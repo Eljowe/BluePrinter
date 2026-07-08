@@ -23,7 +23,14 @@ juce::String getMimeTypeForExtension(const juce::String& extension)
 
 juce::var makeSnapshotVar(float inputGain,
                           float compressorAmount,
+                          float compressorTone,
+                          float compressorLevel,
                           float drive,
+                          float distortionTone,
+                          float distortionLevel,
+                          float fuzzDrive,
+                          float fuzzTone,
+                          float fuzzLevel,
                           float outputGain,
                           float lowCutFreq,
                           float highCutFreq,
@@ -32,11 +39,18 @@ juce::var makeSnapshotVar(float inputGain,
                           float peakQuality,
                           float lowCutSlope,
                           float highCutSlope,
+                          float reverbSize,
+                          float reverbDamping,
+                          float reverbMix,
+                          float reverbWidth,
                           bool lowCutBypassed,
                           bool peakBypassed,
                           bool highCutBypassed,
                           bool driveBypassed,
+                          bool fuzzBypassed,
                           bool compressorBypassed,
+                          bool reverbBypassed,
+                          bool analyzerEnabled,
                           float inputPeak,
                           float outputPeak,
                           bool inputClipping,
@@ -48,7 +62,14 @@ juce::var makeSnapshotVar(float inputGain,
     auto payload = std::make_unique<juce::DynamicObject>();
     payload->setProperty("inputGain", inputGain);
     payload->setProperty("compressorAmount", compressorAmount);
+    payload->setProperty("compressorTone", compressorTone);
+    payload->setProperty("compressorLevel", compressorLevel);
     payload->setProperty("drive", drive);
+    payload->setProperty("distortionTone", distortionTone);
+    payload->setProperty("distortionLevel", distortionLevel);
+    payload->setProperty("fuzzDrive", fuzzDrive);
+    payload->setProperty("fuzzTone", fuzzTone);
+    payload->setProperty("fuzzLevel", fuzzLevel);
     payload->setProperty("outputGain", outputGain);
     payload->setProperty("lowCutFreq", lowCutFreq);
     payload->setProperty("highCutFreq", highCutFreq);
@@ -57,11 +78,18 @@ juce::var makeSnapshotVar(float inputGain,
     payload->setProperty("peakQuality", peakQuality);
     payload->setProperty("lowCutSlope", lowCutSlope);
     payload->setProperty("highCutSlope", highCutSlope);
+    payload->setProperty("reverbSize", reverbSize);
+    payload->setProperty("reverbDamping", reverbDamping);
+    payload->setProperty("reverbMix", reverbMix);
+    payload->setProperty("reverbWidth", reverbWidth);
     payload->setProperty("lowCutBypassed", lowCutBypassed);
     payload->setProperty("peakBypassed", peakBypassed);
     payload->setProperty("highCutBypassed", highCutBypassed);
     payload->setProperty("driveBypassed", driveBypassed);
+    payload->setProperty("fuzzBypassed", fuzzBypassed);
     payload->setProperty("compressorBypassed", compressorBypassed);
+    payload->setProperty("reverbBypassed", reverbBypassed);
+    payload->setProperty("analyzerEnabled", analyzerEnabled);
     payload->setProperty("inputPeak", inputPeak);
     payload->setProperty("outputPeak", outputPeak);
     payload->setProperty("inputClipping", inputClipping);
@@ -110,7 +138,14 @@ juce::WebBrowserComponent::Options makeWebViewOptions(SimpleEQAudioProcessor& pr
 {
     auto input = processor.apvts.getRawParameterValue("Input Gain")->load();
     auto compressorAmount = processor.apvts.getRawParameterValue("Compressor Amount")->load();
+    auto compressorTone = processor.apvts.getRawParameterValue("Compressor Tone")->load();
+    auto compressorLevel = processor.apvts.getRawParameterValue("Compressor Level")->load();
     auto drive = processor.apvts.getRawParameterValue("Distortion Drive")->load();
+    auto distortionTone = processor.apvts.getRawParameterValue("Distortion Tone")->load();
+    auto distortionLevel = processor.apvts.getRawParameterValue("Distortion Level")->load();
+    auto fuzzDrive = processor.apvts.getRawParameterValue("Fuzz Drive")->load();
+    auto fuzzTone = processor.apvts.getRawParameterValue("Fuzz Tone")->load();
+    auto fuzzLevel = processor.apvts.getRawParameterValue("Fuzz Level")->load();
     auto output = processor.apvts.getRawParameterValue("Output Gain")->load();
     auto lowCutFreq = processor.apvts.getRawParameterValue("LowCut Freq")->load();
     auto highCutFreq = processor.apvts.getRawParameterValue("HighCut Freq")->load();
@@ -123,7 +158,14 @@ juce::WebBrowserComponent::Options makeWebViewOptions(SimpleEQAudioProcessor& pr
     auto peakBypassed = processor.apvts.getRawParameterValue("Peak Bypassed")->load() > 0.5f;
     auto highCutBypassed = processor.apvts.getRawParameterValue("HighCut Bypassed")->load() > 0.5f;
     auto driveBypassed = processor.apvts.getRawParameterValue("Distortion Bypassed")->load() > 0.5f;
+    auto fuzzBypassed = processor.apvts.getRawParameterValue("Fuzz Bypassed")->load() > 0.5f;
     auto compressorBypassed = processor.apvts.getRawParameterValue("Compressor Bypassed")->load() > 0.5f;
+    auto reverbSize = processor.apvts.getRawParameterValue("Reverb Size")->load();
+    auto reverbDamping = processor.apvts.getRawParameterValue("Reverb Damping")->load();
+    auto reverbMix = processor.apvts.getRawParameterValue("Reverb Mix")->load();
+    auto reverbWidth = processor.apvts.getRawParameterValue("Reverb Width")->load();
+    auto reverbBypassed = processor.apvts.getRawParameterValue("Reverb Bypassed")->load() > 0.5f;
+    auto analyzerEnabled = processor.apvts.getRawParameterValue("Analyzer Enabled")->load() > 0.5f;
 
     const auto userDataFolder = juce::File::getSpecialLocation(juce::File::tempDirectory)
                                     .getChildFile("SimpleEQWebView2Data");
@@ -174,7 +216,14 @@ juce::WebBrowserComponent::Options makeWebViewOptions(SimpleEQAudioProcessor& pr
         })
         .withInitialisationData("parameters", makeSnapshotVar(input,
                                     compressorAmount,
+                                    compressorTone,
+                                    compressorLevel,
                                     drive,
+                                    distortionTone,
+                                    distortionLevel,
+                                    fuzzDrive,
+                                    fuzzTone,
+                                    fuzzLevel,
                                     output,
                                     lowCutFreq,
                                     highCutFreq,
@@ -183,11 +232,18 @@ juce::WebBrowserComponent::Options makeWebViewOptions(SimpleEQAudioProcessor& pr
                                     peakQuality,
                                     lowCutSlope,
                                     highCutSlope,
+                                    reverbSize,
+                                    reverbDamping,
+                                    reverbMix,
+                                    reverbWidth,
                                     lowCutBypassed,
                                     peakBypassed,
                                     highCutBypassed,
                                     driveBypassed,
+                                    fuzzBypassed,
                                     compressorBypassed,
+                                    reverbBypassed,
+                                    analyzerEnabled,
                                     0.0f,
                                     0.0f,
                                     false,
@@ -234,7 +290,14 @@ SimpleEQWebViewEditor::SimpleEQWebViewEditor(SimpleEQAudioProcessor& p)
 
     audioProcessor.apvts.addParameterListener(paramInputGain, this);
     audioProcessor.apvts.addParameterListener(paramCompressorAmount, this);
+    audioProcessor.apvts.addParameterListener(paramCompressorTone, this);
+    audioProcessor.apvts.addParameterListener(paramCompressorLevel, this);
     audioProcessor.apvts.addParameterListener(paramDrive, this);
+    audioProcessor.apvts.addParameterListener(paramDistortionTone, this);
+    audioProcessor.apvts.addParameterListener(paramDistortionLevel, this);
+    audioProcessor.apvts.addParameterListener(paramFuzzDrive, this);
+    audioProcessor.apvts.addParameterListener(paramFuzzTone, this);
+    audioProcessor.apvts.addParameterListener(paramFuzzLevel, this);
     audioProcessor.apvts.addParameterListener(paramOutputGain, this);
     audioProcessor.apvts.addParameterListener(paramLowCutFreq, this);
     audioProcessor.apvts.addParameterListener(paramHighCutFreq, this);
@@ -247,9 +310,16 @@ SimpleEQWebViewEditor::SimpleEQWebViewEditor(SimpleEQAudioProcessor& p)
     audioProcessor.apvts.addParameterListener(paramPeakBypassed, this);
     audioProcessor.apvts.addParameterListener(paramHighCutBypassed, this);
     audioProcessor.apvts.addParameterListener(paramDriveBypassed, this);
+    audioProcessor.apvts.addParameterListener(paramFuzzBypassed, this);
     audioProcessor.apvts.addParameterListener(paramCompressorBypassed, this);
+    audioProcessor.apvts.addParameterListener(paramReverbSize, this);
+    audioProcessor.apvts.addParameterListener(paramReverbDamping, this);
+    audioProcessor.apvts.addParameterListener(paramReverbMix, this);
+    audioProcessor.apvts.addParameterListener(paramReverbWidth, this);
+    audioProcessor.apvts.addParameterListener(paramReverbBypassed, this);
+    audioProcessor.apvts.addParameterListener(paramAnalyzerEnabled, this);
 
-    startTimerHz(24);
+    startTimerHz(60);
 
     setSize(960, 640);
 }
@@ -260,7 +330,14 @@ SimpleEQWebViewEditor::~SimpleEQWebViewEditor()
     stopTimer();
     audioProcessor.apvts.removeParameterListener(paramInputGain, this);
     audioProcessor.apvts.removeParameterListener(paramCompressorAmount, this);
+    audioProcessor.apvts.removeParameterListener(paramCompressorTone, this);
+    audioProcessor.apvts.removeParameterListener(paramCompressorLevel, this);
     audioProcessor.apvts.removeParameterListener(paramDrive, this);
+    audioProcessor.apvts.removeParameterListener(paramDistortionTone, this);
+    audioProcessor.apvts.removeParameterListener(paramDistortionLevel, this);
+    audioProcessor.apvts.removeParameterListener(paramFuzzDrive, this);
+    audioProcessor.apvts.removeParameterListener(paramFuzzTone, this);
+    audioProcessor.apvts.removeParameterListener(paramFuzzLevel, this);
     audioProcessor.apvts.removeParameterListener(paramOutputGain, this);
     audioProcessor.apvts.removeParameterListener(paramLowCutFreq, this);
     audioProcessor.apvts.removeParameterListener(paramHighCutFreq, this);
@@ -273,7 +350,14 @@ SimpleEQWebViewEditor::~SimpleEQWebViewEditor()
     audioProcessor.apvts.removeParameterListener(paramPeakBypassed, this);
     audioProcessor.apvts.removeParameterListener(paramHighCutBypassed, this);
     audioProcessor.apvts.removeParameterListener(paramDriveBypassed, this);
+    audioProcessor.apvts.removeParameterListener(paramFuzzBypassed, this);
     audioProcessor.apvts.removeParameterListener(paramCompressorBypassed, this);
+    audioProcessor.apvts.removeParameterListener(paramReverbSize, this);
+    audioProcessor.apvts.removeParameterListener(paramReverbDamping, this);
+    audioProcessor.apvts.removeParameterListener(paramReverbMix, this);
+    audioProcessor.apvts.removeParameterListener(paramReverbWidth, this);
+    audioProcessor.apvts.removeParameterListener(paramReverbBypassed, this);
+    audioProcessor.apvts.removeParameterListener(paramAnalyzerEnabled, this);
 }
 
 void SimpleEQWebViewEditor::paint(juce::Graphics& g)
@@ -315,7 +399,14 @@ void SimpleEQWebViewEditor::parameterChanged(const juce::String& parameterID, fl
 
     if (parameterID != paramInputGain
         && parameterID != paramCompressorAmount
+        && parameterID != paramCompressorTone
+        && parameterID != paramCompressorLevel
         && parameterID != paramDrive
+        && parameterID != paramDistortionTone
+        && parameterID != paramDistortionLevel
+        && parameterID != paramFuzzDrive
+        && parameterID != paramFuzzTone
+        && parameterID != paramFuzzLevel
         && parameterID != paramOutputGain
         && parameterID != paramLowCutFreq
         && parameterID != paramHighCutFreq
@@ -328,7 +419,14 @@ void SimpleEQWebViewEditor::parameterChanged(const juce::String& parameterID, fl
         && parameterID != paramPeakBypassed
         && parameterID != paramHighCutBypassed
         && parameterID != paramDriveBypassed
-        && parameterID != paramCompressorBypassed)
+        && parameterID != paramFuzzBypassed
+        && parameterID != paramCompressorBypassed
+        && parameterID != paramReverbSize
+        && parameterID != paramReverbDamping
+        && parameterID != paramReverbMix
+        && parameterID != paramReverbWidth
+        && parameterID != paramReverbBypassed
+        && parameterID != paramAnalyzerEnabled)
         return;
 
     parameterUpdatePending.store(true, std::memory_order_release);
@@ -357,7 +455,14 @@ juce::var SimpleEQWebViewEditor::makeParameterSnapshot()
 {
     auto input = audioProcessor.apvts.getRawParameterValue(paramInputGain)->load();
     auto compressorAmount = audioProcessor.apvts.getRawParameterValue(paramCompressorAmount)->load();
+    auto compressorTone = audioProcessor.apvts.getRawParameterValue(paramCompressorTone)->load();
+    auto compressorLevel = audioProcessor.apvts.getRawParameterValue(paramCompressorLevel)->load();
     auto drive = audioProcessor.apvts.getRawParameterValue(paramDrive)->load();
+    auto distortionTone = audioProcessor.apvts.getRawParameterValue(paramDistortionTone)->load();
+    auto distortionLevel = audioProcessor.apvts.getRawParameterValue(paramDistortionLevel)->load();
+    auto fuzzDrive = audioProcessor.apvts.getRawParameterValue(paramFuzzDrive)->load();
+    auto fuzzTone = audioProcessor.apvts.getRawParameterValue(paramFuzzTone)->load();
+    auto fuzzLevel = audioProcessor.apvts.getRawParameterValue(paramFuzzLevel)->load();
     auto output = audioProcessor.apvts.getRawParameterValue(paramOutputGain)->load();
     auto lowCutFreq = audioProcessor.apvts.getRawParameterValue(paramLowCutFreq)->load();
     auto highCutFreq = audioProcessor.apvts.getRawParameterValue(paramHighCutFreq)->load();
@@ -370,18 +475,32 @@ juce::var SimpleEQWebViewEditor::makeParameterSnapshot()
     auto peakBypassed = audioProcessor.apvts.getRawParameterValue(paramPeakBypassed)->load() > 0.5f;
     auto highCutBypassed = audioProcessor.apvts.getRawParameterValue(paramHighCutBypassed)->load() > 0.5f;
     auto driveBypassed = audioProcessor.apvts.getRawParameterValue(paramDriveBypassed)->load() > 0.5f;
+    auto fuzzBypassed = audioProcessor.apvts.getRawParameterValue(paramFuzzBypassed)->load() > 0.5f;
     auto compressorBypassed = audioProcessor.apvts.getRawParameterValue(paramCompressorBypassed)->load() > 0.5f;
+    auto reverbSize = audioProcessor.apvts.getRawParameterValue(paramReverbSize)->load();
+    auto reverbDamping = audioProcessor.apvts.getRawParameterValue(paramReverbDamping)->load();
+    auto reverbMix = audioProcessor.apvts.getRawParameterValue(paramReverbMix)->load();
+    auto reverbWidth = audioProcessor.apvts.getRawParameterValue(paramReverbWidth)->load();
+    auto reverbBypassed = audioProcessor.apvts.getRawParameterValue(paramReverbBypassed)->load() > 0.5f;
+    auto analyzerEnabled = audioProcessor.apvts.getRawParameterValue(paramAnalyzerEnabled)->load() > 0.5f;
     auto inputPeak = audioProcessor.consumeInputPeakLevel();
     auto outputPeak = audioProcessor.consumeOutputPeakLevel();
     auto inputClipping = audioProcessor.consumeInputClippingFlag();
     auto outputClipping = audioProcessor.consumeOutputClippingFlag();
     auto responseCurve = buildResponseCurve();
-    auto leftSpectrum = buildSpectrumFromFifo(audioProcessor.leftChannelFifo, leftFftScratch, leftFftResult);
-    auto rightSpectrum = buildSpectrumFromFifo(audioProcessor.rightChannelFifo, rightFftScratch, rightFftResult);
+    auto leftSpectrum = buildSpectrumFromFifo(audioProcessor.leftChannelFifo, leftMonoBuffer, leftFftScratch, leftFftResult);
+    auto rightSpectrum = buildSpectrumFromFifo(audioProcessor.rightChannelFifo, rightMonoBuffer, rightFftScratch, rightFftResult);
 
     return makeSnapshotVar(input,
                            compressorAmount,
+                           compressorTone,
+                           compressorLevel,
                            drive,
+                           distortionTone,
+                           distortionLevel,
+                           fuzzDrive,
+                           fuzzTone,
+                           fuzzLevel,
                            output,
                            lowCutFreq,
                            highCutFreq,
@@ -390,11 +509,18 @@ juce::var SimpleEQWebViewEditor::makeParameterSnapshot()
                            peakQuality,
                            lowCutSlope,
                            highCutSlope,
+                           reverbSize,
+                           reverbDamping,
+                           reverbMix,
+                           reverbWidth,
                            lowCutBypassed,
                            peakBypassed,
                            highCutBypassed,
                            driveBypassed,
+                           fuzzBypassed,
                            compressorBypassed,
+                           reverbBypassed,
+                           analyzerEnabled,
                            inputPeak,
                            outputPeak,
                            inputClipping,
@@ -415,68 +541,74 @@ juce::var SimpleEQWebViewEditor::makeFloatArrayVar(const std::vector<float>& val
 }
 
 std::vector<float> SimpleEQWebViewEditor::buildSpectrumFromFifo(SingleChannelSampleFifo<SimpleEQAudioProcessor::BlockType>& fifo,
+                                                                 juce::AudioBuffer<float>& monoBuffer,
                                                                  std::vector<float>& fftScratch,
                                                                  std::vector<float>& fftResult)
 {
-    SimpleEQAudioProcessor::BlockType buffer;
-    bool hasData = false;
+    SimpleEQAudioProcessor::BlockType tempIncomingBuffer;
+    bool hasNewData = false;
 
     while (fifo.getNumCompleteBuffersAvailable() > 0)
     {
-        if (fifo.getAudioBuffer(buffer))
-            hasData = true;
+        if (fifo.getAudioBuffer(tempIncomingBuffer))
+        {
+            hasNewData = true;
+
+            const auto incomingSize = tempIncomingBuffer.getNumSamples();
+            const auto size = juce::jmin(incomingSize, monoBuffer.getNumSamples());
+
+            if (size < monoBuffer.getNumSamples())
+            {
+                juce::FloatVectorOperations::copy(monoBuffer.getWritePointer(0, 0),
+                                                  monoBuffer.getReadPointer(0, size),
+                                                  monoBuffer.getNumSamples() - size);
+            }
+
+            juce::FloatVectorOperations::copy(monoBuffer.getWritePointer(0, monoBuffer.getNumSamples() - size),
+                                              tempIncomingBuffer.getReadPointer(0, incomingSize - size),
+                                              size);
+        }
     }
 
-    if (!hasData)
+    if (!hasNewData)
         return fftResult;
 
     std::fill(fftScratch.begin(), fftScratch.end(), 0.0f);
-
-    const auto sampleCount = juce::jmin(fftSize, buffer.getNumSamples());
-    const auto* input = buffer.getReadPointer(0);
-    std::copy(input, input + sampleCount, fftScratch.begin());
+    std::copy(monoBuffer.getReadPointer(0),
+              monoBuffer.getReadPointer(0) + fftSize,
+              fftScratch.begin());
 
     analyzerWindow.multiplyWithWindowingTable(fftScratch.data(), fftSize);
     analyzerFft.performFrequencyOnlyForwardTransform(fftScratch.data());
 
-    const auto sampleRate = juce::jmax(1.0, audioProcessor.getSampleRate());
     const auto numBins = fftSize / 2;
+    for (int i = 0; i < numBins; ++i)
+    {
+        auto v = fftScratch[i];
+        if (!std::isinf(v) && !std::isnan(v))
+            v /= static_cast<float>(numBins);
+        else
+            v = 0.0f;
 
-    constexpr float releaseAlpha = 0.45f;
-    constexpr float bandHalfWidth = 0.3f;
+        fftScratch[i] = juce::Decibels::gainToDecibels(v, spectrumNegativeInfinity);
+    }
+
+    const auto sampleRate = juce::jmax(1.0, audioProcessor.getSampleRate());
+    const auto binWidth = sampleRate / static_cast<double>(fftSize);
 
     for (int i = 0; i < spectrumPoints; ++i)
     {
-        const auto denom = spectrumPoints == 1 ? 1.0f : static_cast<float>(spectrumPoints - 1);
-        const auto leftNorm = juce::jlimit(0.0f, 1.0f, (static_cast<float>(i) - bandHalfWidth) / denom);
-        const auto rightNorm = juce::jlimit(0.0f, 1.0f, (static_cast<float>(i) + bandHalfWidth) / denom);
+        const auto normalizedX = spectrumPoints == 1 ? 0.0f : static_cast<float>(i) / static_cast<float>(spectrumPoints - 1);
+        const auto frequency = juce::mapToLog10(normalizedX, 20.0f, 20000.0f);
+        const auto binNum = juce::jlimit(0, numBins - 1, static_cast<int>(std::round(frequency / binWidth)));
 
-        const auto leftFrequency = juce::mapToLog10(leftNorm, 20.0f, 20000.0f);
-        const auto rightFrequency = juce::mapToLog10(rightNorm, 20.0f, 20000.0f);
-
-        const auto binStart = juce::jlimit(0,
-                                           numBins - 1,
-                                           static_cast<int>(std::floor(leftFrequency * fftSize / sampleRate)));
-        const auto binEnd = juce::jlimit(0,
-                                         numBins - 1,
-                                         static_cast<int>(std::ceil(rightFrequency * fftSize / sampleRate)));
-
-        auto maxBinMagnitude = 0.0f;
-        for (int bin = binStart; bin <= juce::jmax(binStart, binEnd); ++bin)
-            maxBinMagnitude = juce::jmax(maxBinMagnitude, fftScratch[bin]);
-
-        auto magnitude = maxBinMagnitude / static_cast<float>(numBins);
-        if (!std::isfinite(magnitude) || magnitude < 0.0f)
-            magnitude = 0.0f;
-
-        const auto targetDb = juce::Decibels::gainToDecibels(magnitude, -120.0f);
+        const auto targetDb = fftScratch[binNum];
         auto& currentDb = fftResult[static_cast<size_t>(i)];
 
-        // Instant rise with slower fall keeps harmonic spikes sharp and readable.
         if (targetDb >= currentDb)
             currentDb = targetDb;
         else
-            currentDb = releaseAlpha * currentDb + (1.0f - releaseAlpha) * targetDb;
+            currentDb = 0.75f * currentDb + 0.25f * targetDb;
     }
 
     return fftResult;
