@@ -716,28 +716,38 @@ void SimpleEQAudioProcessor::applyDoubler(juce::AudioBuffer<float>& buffer, cons
     if (mix <= 0.0f)
         return;
 
+    const auto numChannels = buffer.getNumChannels();
+    const auto numSamples = buffer.getNumSamples();
+    if (numChannels <= 0 || numSamples <= 0)
+        return;
+
     const auto sampleRate = static_cast<float>(juce::jmax(1.0, getSampleRate()));
-    const auto delaySamples = juce::jlimit(0.0f, static_cast<float>(DelayLine::size - 2),
-                                            chainSettings.doublerDelayMs * sampleRate / 1000.0f);
+    const auto baseDelaySamples = juce::jlimit(0.0f, static_cast<float>(DelayLine::size - 2),
+                                               chainSettings.doublerDelayMs * sampleRate / 1000.0f);
     const auto detuneRatio = std::pow(2.0f, chainSettings.doublerDetuneCents / 1200.0f);
 
-    for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
+    // Classic Haas doubler. The L channel is read, pushed through a short delay,
+    // and pitch-shifted to make one "doubled voice". That voice is added to the
+    // R channel; L passes through dry. For a mono buffer the voice is added to
+    // the only channel so the effect is still audible.
+    auto& delayLine = doublerDelayLines[0];
+    auto& shifter = doublerPitchShifters[0];
+
+    const auto* leftRead = buffer.getReadPointer(0);
+    auto* leftWrite = buffer.getWritePointer(0);
+    auto* rightWrite = numChannels > 1 ? buffer.getWritePointer(1) : nullptr;
+
+    for (int sample = 0; sample < numSamples; ++sample)
     {
-        const auto channelIndex = static_cast<size_t>(juce::jmin(channel, 1));
-        auto* channelData = buffer.getWritePointer(channel);
-        auto& delayLine = doublerDelayLines[channelIndex];
-        auto& shifter = doublerPitchShifters[channelIndex];
+        const auto source = leftRead[sample];
+        delayLine.push(source);
+        const auto delayed = delayLine.read(baseDelaySamples);
+        const auto doubled = shifter.processSample(delayed, detuneRatio);
 
-        for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
-        {
-            const auto dry = channelData[sample];
-
-            delayLine.push(dry);
-            const auto delayed = delayLine.read(delaySamples);
-            const auto detuned = shifter.processSample(delayed, detuneRatio);
-
-            channelData[sample] = dry * (1.0f - mix) + detuned * mix;
-        }
+        if (rightWrite != nullptr)
+            rightWrite[sample] += doubled * mix;
+        else
+            leftWrite[sample] += doubled * mix;
     }
 }
 
@@ -998,17 +1008,17 @@ juce::AudioProcessorValueTreeState::ParameterLayout SimpleEQAudioProcessor::crea
     layout.add(std::make_unique<juce::AudioParameterFloat>("Doubler Mix",
                                                            "Doubler Mix",
                                                            juce::NormalisableRange<float>(0.f, 1.f, 0.01f, 1.f),
-                                                           0.0f));
+                                                           0.6f));
 
     layout.add(std::make_unique<juce::AudioParameterFloat>("Doubler Delay",
                                                            "Doubler Delay",
                                                            juce::NormalisableRange<float>(0.f, 100.f, 0.5f, 1.f),
-                                                           20.0f));
+                                                           18.0f));
 
     layout.add(std::make_unique<juce::AudioParameterFloat>("Doubler Detune",
                                                            "Doubler Detune",
                                                            juce::NormalisableRange<float>(-50.f, 50.f, 1.f, 1.f),
-                                                           5.0f));
+                                                           6.0f));
 
     layout.add(std::make_unique<juce::AudioParameterFloat>("Delay Mix",
                                                            "Delay Mix",
