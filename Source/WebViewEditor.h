@@ -41,6 +41,9 @@ private:
     static constexpr const char* paramCompressorTone = "Compressor Tone";
     static constexpr const char* paramCompressorLevel = "Compressor Level";
     static constexpr const char* paramOctaveTranspose = "Octave Transpose";
+    static constexpr const char* paramOctaveMix = "Octave Mix";
+    static constexpr const char* paramOctaveTone = "Octave Tone";
+    static constexpr const char* paramOctaveMonoDetector = "Octave Mono Detector";
     static constexpr const char* paramOctaveBypassed = "Octave Bypassed";
     static constexpr const char* paramDoublerMix = "Doubler Mix";
     static constexpr const char* paramDoublerDelay = "Doubler Delay";
@@ -49,6 +52,7 @@ private:
     static constexpr const char* paramTremoloSpeed = "Tremolo Speed";
     static constexpr const char* paramTremoloDepth = "Tremolo Depth";
     static constexpr const char* paramTremoloLfo = "Tremolo LFO";
+    static constexpr const char* paramTremoloStereoPhase = "Tremolo Stereo Phase";
     static constexpr const char* paramTremoloBypassed = "Tremolo Bypassed";
     static constexpr const char* paramDelayMix = "Delay Mix";
     static constexpr const char* paramDelayTimeL = "Delay Time L";
@@ -56,14 +60,24 @@ private:
     static constexpr const char* paramDelayFeedback = "Delay Feedback";
     static constexpr const char* paramDelayMode = "Delay Mode";
     static constexpr const char* paramDelayBypassed = "Delay Bypassed";
+    static constexpr const char* paramOverdriveDrive = "Overdrive Drive";
+    static constexpr const char* paramOverdriveTone = "Overdrive Tone";
+    static constexpr const char* paramOverdriveLevel = "Overdrive Level";
     static constexpr const char* paramDrive = "Distortion Drive";
     static constexpr const char* paramDistortionTone = "Distortion Tone";
     static constexpr const char* paramDistortionLevel = "Distortion Level";
     static constexpr const char* paramFuzzDrive = "Fuzz Drive";
     static constexpr const char* paramFuzzTone = "Fuzz Tone";
     static constexpr const char* paramFuzzLevel = "Fuzz Level";
+    static constexpr const char* paramSynthFuzzMix = "Synth Fuzz Mix";
+    static constexpr const char* paramSynthFuzzDelay = "Synth Fuzz Delay";
+    static constexpr const char* paramSynthFuzzDetune = "Synth Fuzz Detune";
+    static constexpr const char* paramSynthFuzzDrive = "Synth Fuzz Drive";
+    static constexpr const char* paramSynthFuzzLevel = "Synth Fuzz Level";
+    static constexpr const char* paramSynthFuzzBypassed = "Synth Fuzz Bypassed";
 public:
     static constexpr const char* paramOutputGain = "Output Gain";
+    static constexpr const char* paramOverdriveBypassed = "Overdrive Bypassed";
     static constexpr const char* paramDriveBypassed = "Distortion Bypassed";
     static constexpr const char* paramFuzzBypassed = "Fuzz Bypassed";
     static constexpr const char* paramCompressorBypassed = "Compressor Bypassed";

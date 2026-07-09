@@ -155,6 +155,10 @@ enum Slope
 
 //==============================================================================
 // Two-voice, time-domain granular pitch shifter with Hann-windowed overlap-add.
+// Octave stage constants live just below the GranularPitchShifter
+// class so they can reference its grain length without a forward
+// declaration.
+
 // Voices are phase-staggered by half a grain; on each phase wrap the read
 // pointer jumps back so the voice always reads the most recent grainLength /
 // pitchRatio input samples. Sum of two half-offset Hann windows is 1, so
@@ -240,6 +244,20 @@ private:
     float lpfState[2] { 0.0f, 0.0f };
 };
 
+// Octave stage constants. kOctaveTransposeMinSemitones / Max must match
+// the Octave Transpose APVTS parameter range in PluginProcessor.cpp
+// (see the layout.add call for "Octave Transpose"). The worst-case
+// lookback below is derived from the lower end of the range so the
+// two cannot drift apart: if the APVTS range is widened, the new
+// pitchRatio extremes are 2^(newMin/12)*0.5 .. 2^(newMax/12)*0.5, and
+// the worst-case lookback is grainLength / min(pitchRatio). Update
+// these three constants together.
+constexpr float kOctaveTransposeMinSemitones = -12.0f;
+constexpr float kOctaveTransposeMaxSemitones =  12.0f;
+// At the extreme low end, pitchRatio = 2^(min/12) * 0.5 = 0.25 and the
+// shifter's grain lookback is grainLength / 0.25 = 4 * grainLength.
+constexpr int   kOctaveWorstCaseLookback = GranularPitchShifter::grainLength * 4; // 4096
+
 //==============================================================================
 // Simple fractional delay line. Buffer size must be a power of two.
 class DelayLine
@@ -288,18 +306,31 @@ struct ChainSettings
     float compressorTone { 0.f };
     float compressorLevelInDecibels { 0.f };
     float octaveTransposeSemitones { 0.0f };
+    float octaveMix { 0.0f };
+    float octaveLevelInDecibels { 0.0f };
+    float octaveTone { 0.5f };
+    bool  octaveMonoDetector { true };
     float doublerMix { 0.0f };
     float doublerDelayMs { 20.0f };
     float doublerDetuneCents { 5.0f };
+    float synthFuzzMix { 0.0f };
+    float synthFuzzDelayMs { 18.0f };
+    float synthFuzzDetuneCents { 6.0f };
+    float synthFuzzDrive { 1.0f };
+    float synthFuzzLevelInDecibels { 0.0f };
     float tremoloSpeedHz { 5.0f };
     float tremoloDepth { 0.5f };
     int   tremoloLfoIndex { 0 };
+    bool  tremoloStereoPhase { true };
     float delayMix { 0.35f };
     float delayTimeLMs { 350.0f };
     float delayTimeRMs { 350.0f };
     float delayFeedback { 0.35f };
     bool  delayModeIsDual { false };
     float outputGainInDecibels { 0.f };
+    float overdriveDriveInDecibels { 0.f };
+    float overdriveTone { 0.5f };
+    float overdriveLevelInDecibels { 0.f };
     float distortionDriveInDecibels { 0.f };
     float distortionTone { 0.7f };
     float distortionLevelInDecibels { 0.f };
@@ -316,6 +347,7 @@ struct ChainSettings
     float reverbWidth { 1.0f };
 
     bool graphicEqBypassed { false };
+    bool overdriveBypassed { false };
     bool distortionBypassed { false }, compressorBypassed { false };
     bool fuzzBypassed { false };
     bool reverbBypassed { false };
@@ -323,6 +355,7 @@ struct ChainSettings
     bool gateBypassed { false };
     bool octaveBypassed { false };
     bool doublerBypassed { false };
+    bool synthFuzzBypassed { false };
     bool tremoloBypassed { false };
     bool delayBypassed { false };
     bool monoInput { false };
@@ -361,6 +394,12 @@ public:
     //==============================================================================
     SimpleEQAudioProcessor();
     ~SimpleEQAudioProcessor() override;
+
+    // Recompute and report the total latency. Called from prepareToPlay
+    // and whenever the Octave Transpose parameter changes (the octave
+    // stage's granular pitch shifter has a lookback that varies with the
+    // transpose ratio; at transpose=0 the shifter is bypassed entirely).
+    void updateLatency();
 
     //==============================================================================
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
@@ -448,9 +487,11 @@ private:
     void applyCompressor(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings);
     void applyOctave(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings);
     void applyDoubler(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings);
+    void applySynthFuzz(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings);
     void applyTremolo(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings);
     void applyDelay(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings);
     void applyDistortion(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings);
+    void applyOverdrive(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings);
     void applyFuzz(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings);
     void applyReverb(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings);
     void applyGain(juce::AudioBuffer<float>& buffer, float gainDecibels);
@@ -482,17 +523,51 @@ private:
     float compressorSidechainHpfCoeff { 0.0f };
     std::array<float, 2> gateEnvelope { 0.0f, 0.0f };
     std::array<GranularPitchShifter, 2> octavePitchShifters {};
+    std::array<DelayLine, 2>          octavePadDelay {};
+    std::array<float, 2> octaveLastInput { 0.0f, 0.0f };
+    std::array<bool, 2> octaveFlipFlopState { false, false };
+    std::array<float, 2> octaveTrackingFilterState { 0.0f, 0.0f };
+    std::array<float, 2> octaveOutputLpfState { 0.0f, 0.0f };
+    std::array<float, 2> octaveEnvState { 0.0f, 0.0f };
+    std::array<int,   2> octaveHoldCounter { 0, 0 };
+    std::array<float, 2> octaveDcBlockX1 { 0.0f, 0.0f };
+    std::array<float, 2> octaveDcBlockY1 { 0.0f, 0.0f };
     std::array<DelayLine, 2> doublerDelayLines {};
     std::array<GranularPitchShifter, 2> doublerPitchShifters {};
+    std::array<DelayLine, 2> synthFuzzDelayLines {};
+    std::array<GranularPitchShifter, 2> synthFuzzPitchShifters {};
+    std::array<float, 2> synthFuzzHpfState { 0.0f, 0.0f };
     double tremoloLfoPhase { 0.0 };
     std::array<DelayLine, 2> delayDelayLines {};
     std::array<float, 2> distortionToneState { 0.0f, 0.0f };
     std::array<float, 2> fuzzToneState { 0.0f, 0.0f };
+    std::array<float, 2> fuzzBiasFollower { 0.0f, 0.0f };
+    std::array<float, 2> overdriveToneState { 0.0f, 0.0f };
+    std::array<float, 2> distortionPreHpfX1 { 0.0f, 0.0f };
+    std::array<float, 2> distortionPreHpfY1 { 0.0f, 0.0f };
+    std::array<float, 2> distortionDcBlockX1 { 0.0f, 0.0f };
+    std::array<float, 2> distortionDcBlockY1 { 0.0f, 0.0f };
+    std::array<float, 2> fuzzPreHpfX1 { 0.0f, 0.0f };
+    std::array<float, 2> fuzzPreHpfY1 { 0.0f, 0.0f };
+    std::array<float, 2> fuzzDcBlockX1 { 0.0f, 0.0f };
+    std::array<float, 2> fuzzDcBlockY1 { 0.0f, 0.0f };
+    std::array<float, 2> overdrivePreHpfX1 { 0.0f, 0.0f };
+    std::array<float, 2> overdrivePreHpfY1 { 0.0f, 0.0f };
+    std::array<float, 2> overdriveDcBlockX1 { 0.0f, 0.0f };
+    std::array<float, 2> overdriveDcBlockY1 { 0.0f, 0.0f };
+
+    // Pre-allocated on the message thread in prepareToPlay and reused
+    // by the distortion and fuzz stages to capture a dry snapshot of
+    // their input. Must never be allocated on the audio thread.
+    juce::AudioBuffer<float> dryScratchBuffer;
 
     juce::dsp::Reverb reverb;
     juce::dsp::Reverb::Parameters reverbParameters;
 
     juce::dsp::Oscillator<float> osc;
+    juce::dsp::Oversampling<float> distOversampler { 2, 1, juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR };
+    juce::dsp::Oversampling<float> fuzzOversampler { 2, 1, juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR };
+    juce::dsp::Oversampling<float> overdriveOversampler { 2, 1, juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR };
     //==============================================================================
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SimpleEQAudioProcessor)
 };

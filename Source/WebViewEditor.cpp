@@ -36,31 +36,45 @@ juce::var makeSnapshotVar(float inputGain,
                           float compressorTone,
                           float compressorLevel,
                           float octaveTranspose,
+                          float octaveMix,
+                          float octaveTone,
+                          bool  octaveMonoDetector,
                           float doublerMix,
                           float doublerDelay,
                           float doublerDetune,
                           float tremoloSpeed,
                           float tremoloDepth,
                           int   tremoloLfoIndex,
+                          bool  tremoloStereoPhase,
                           float delayMix,
                           float delayTimeL,
                           float delayTimeR,
                           float delayFeedback,
                           bool  delayModeIsDual,
+                          float overdriveDrive,
+                          float overdriveTone,
+                          float overdriveLevel,
                           float drive,
                           float distortionTone,
                           float distortionLevel,
                           float fuzzDrive,
                            float fuzzTone,
                            float fuzzLevel,
-                           juce::var eqBands,
+                          float synthFuzzMix,
+                          float synthFuzzDelay,
+                          float synthFuzzDetune,
+                          float synthFuzzDrive,
+                          float synthFuzzLevel,
+                          juce::var eqBands,
                           float reverbSize,
                           float reverbDamping,
                           float reverbMix,
                           float reverbWidth,
                           bool eqBypassed,
+                          bool overdriveBypassed,
                           bool driveBypassed,
                           bool fuzzBypassed,
+                          bool synthFuzzBypassed,
                           bool compressorBypassed,
                           bool octaveBypassed,
                           bool doublerBypassed,
@@ -93,23 +107,35 @@ juce::var makeSnapshotVar(float inputGain,
     payload->setProperty("compressorTone", compressorTone);
     payload->setProperty("compressorLevel", compressorLevel);
     payload->setProperty("octaveTranspose", octaveTranspose);
+    payload->setProperty("octaveMix", octaveMix);
+    payload->setProperty("octaveTone", octaveTone);
+    payload->setProperty("octaveMonoDetector", octaveMonoDetector);
     payload->setProperty("doublerMix", doublerMix);
     payload->setProperty("doublerDelay", doublerDelay);
     payload->setProperty("doublerDetune", doublerDetune);
     payload->setProperty("tremoloSpeed", tremoloSpeed);
     payload->setProperty("tremoloDepth", tremoloDepth);
     payload->setProperty("tremoloLfoIndex", tremoloLfoIndex);
+    payload->setProperty("tremoloStereoPhase", tremoloStereoPhase);
     payload->setProperty("delayMix", delayMix);
     payload->setProperty("delayTimeL", delayTimeL);
     payload->setProperty("delayTimeR", delayTimeR);
     payload->setProperty("delayFeedback", delayFeedback);
     payload->setProperty("delayModeIsDual", delayModeIsDual);
+    payload->setProperty("overdriveDrive", overdriveDrive);
+    payload->setProperty("overdriveTone", overdriveTone);
+    payload->setProperty("overdriveLevel", overdriveLevel);
     payload->setProperty("drive", drive);
     payload->setProperty("distortionTone", distortionTone);
     payload->setProperty("distortionLevel", distortionLevel);
     payload->setProperty("fuzzDrive", fuzzDrive);
     payload->setProperty("fuzzTone", fuzzTone);
     payload->setProperty("fuzzLevel", fuzzLevel);
+    payload->setProperty("synthFuzzMix", synthFuzzMix);
+    payload->setProperty("synthFuzzDelay", synthFuzzDelay);
+    payload->setProperty("synthFuzzDetune", synthFuzzDetune);
+    payload->setProperty("synthFuzzDrive", synthFuzzDrive);
+    payload->setProperty("synthFuzzLevel", synthFuzzLevel);
     payload->setProperty("outputGain", outputGain);
     payload->setProperty("eqBands", eqBands);
     payload->setProperty("reverbSize", reverbSize);
@@ -117,8 +143,10 @@ juce::var makeSnapshotVar(float inputGain,
     payload->setProperty("reverbMix", reverbMix);
     payload->setProperty("reverbWidth", reverbWidth);
     payload->setProperty("eqBypassed", eqBypassed);
+    payload->setProperty("overdriveBypassed", overdriveBypassed);
     payload->setProperty("driveBypassed", driveBypassed);
     payload->setProperty("fuzzBypassed", fuzzBypassed);
+    payload->setProperty("synthFuzzBypassed", synthFuzzBypassed);
     payload->setProperty("compressorBypassed", compressorBypassed);
     payload->setProperty("octaveBypassed", octaveBypassed);
     payload->setProperty("doublerBypassed", doublerBypassed);
@@ -192,6 +220,9 @@ juce::WebBrowserComponent::Options makeWebViewOptions(SimpleEQAudioProcessor& pr
     auto compressorTone = processor.apvts.getRawParameterValue("Compressor Tone")->load();
     auto compressorLevel = processor.apvts.getRawParameterValue("Compressor Level")->load();
     auto octaveTranspose = processor.apvts.getRawParameterValue("Octave Transpose")->load();
+    auto octaveMix = processor.apvts.getRawParameterValue("Octave Mix")->load();
+    auto octaveTone = processor.apvts.getRawParameterValue("Octave Tone")->load();
+    auto octaveMonoDetector = processor.apvts.getRawParameterValue("Octave Mono Detector")->load() > 0.5f;
     auto doublerMix = processor.apvts.getRawParameterValue("Doubler Mix")->load();
     auto doublerDelay = processor.apvts.getRawParameterValue("Doubler Delay")->load();
     auto doublerDetune = processor.apvts.getRawParameterValue("Doubler Detune")->load();
@@ -201,6 +232,7 @@ juce::WebBrowserComponent::Options makeWebViewOptions(SimpleEQAudioProcessor& pr
     if (auto* lfoParam = dynamic_cast<juce::AudioParameterChoice*>(
             processor.apvts.getParameter("Tremolo LFO")))
         tremoloLfoIndex = lfoParam->getIndex();
+    auto tremoloStereoPhase = processor.apvts.getRawParameterValue("Tremolo Stereo Phase")->load() > 0.5f;
     auto delayMix = processor.apvts.getRawParameterValue("Delay Mix")->load();
     auto delayTimeL = processor.apvts.getRawParameterValue("Delay Time L")->load();
     auto delayTimeR = processor.apvts.getRawParameterValue("Delay Time R")->load();
@@ -212,16 +244,26 @@ juce::WebBrowserComponent::Options makeWebViewOptions(SimpleEQAudioProcessor& pr
     auto drive = processor.apvts.getRawParameterValue("Distortion Drive")->load();
     auto distortionTone = processor.apvts.getRawParameterValue("Distortion Tone")->load();
     auto distortionLevel = processor.apvts.getRawParameterValue("Distortion Level")->load();
+    auto overdriveDrive = processor.apvts.getRawParameterValue("Overdrive Drive")->load();
+    auto overdriveTone = processor.apvts.getRawParameterValue("Overdrive Tone")->load();
+    auto overdriveLevel = processor.apvts.getRawParameterValue("Overdrive Level")->load();
     auto fuzzDrive = processor.apvts.getRawParameterValue("Fuzz Drive")->load();
     auto fuzzTone = processor.apvts.getRawParameterValue("Fuzz Tone")->load();
     auto fuzzLevel = processor.apvts.getRawParameterValue("Fuzz Level")->load();
+    auto synthFuzzMix = processor.apvts.getRawParameterValue("Synth Fuzz Mix")->load();
+    auto synthFuzzDelay = processor.apvts.getRawParameterValue("Synth Fuzz Delay")->load();
+    auto synthFuzzDetune = processor.apvts.getRawParameterValue("Synth Fuzz Detune")->load();
+    auto synthFuzzDrive = processor.apvts.getRawParameterValue("Synth Fuzz Drive")->load();
+    auto synthFuzzLevel = processor.apvts.getRawParameterValue("Synth Fuzz Level")->load();
     juce::Array<juce::var> eqBands;
     eqBands.ensureStorageAllocated(numEqBands);
     for (int i = 0; i < numEqBands; ++i)
         eqBands.add(processor.apvts.getRawParameterValue(paramEqBand(i))->load());
     auto eqBypassed = processor.apvts.getRawParameterValue(paramEqBypassed)->load() > 0.5f;
+    auto overdriveBypassed = processor.apvts.getRawParameterValue("Overdrive Bypassed")->load() > 0.5f;
     auto driveBypassed = processor.apvts.getRawParameterValue("Distortion Bypassed")->load() > 0.5f;
     auto fuzzBypassed = processor.apvts.getRawParameterValue("Fuzz Bypassed")->load() > 0.5f;
+    auto synthFuzzBypassed = processor.apvts.getRawParameterValue("Synth Fuzz Bypassed")->load() > 0.5f;
     auto compressorBypassed = processor.apvts.getRawParameterValue("Compressor Bypassed")->load() > 0.5f;
     auto octaveBypassed = processor.apvts.getRawParameterValue("Octave Bypassed")->load() > 0.5f;
     auto doublerBypassed = processor.apvts.getRawParameterValue("Doubler Bypassed")->load() > 0.5f;
@@ -294,31 +336,45 @@ juce::WebBrowserComponent::Options makeWebViewOptions(SimpleEQAudioProcessor& pr
                                     compressorTone,
                                     compressorLevel,
                                     octaveTranspose,
+                                    octaveMix,
+                                    octaveTone,
+                                    octaveMonoDetector,
                                     doublerMix,
                                     doublerDelay,
                                     doublerDetune,
                                     tremoloSpeed,
                                     tremoloDepth,
                                     tremoloLfoIndex,
+                                    tremoloStereoPhase,
                                     delayMix,
                                     delayTimeL,
                                     delayTimeR,
                                     delayFeedback,
                                     delayModeIsDual,
+                                    overdriveDrive,
+                                    overdriveTone,
+                                    overdriveLevel,
                                     drive,
                                     distortionTone,
                                     distortionLevel,
                                     fuzzDrive,
                                     fuzzTone,
                                     fuzzLevel,
+                                    synthFuzzMix,
+                                    synthFuzzDelay,
+                                    synthFuzzDetune,
+                                    synthFuzzDrive,
+                                    synthFuzzLevel,
                                     juce::var(eqBands),
                                     reverbSize,
                                     reverbDamping,
                                     reverbMix,
                                     reverbWidth,
                                     eqBypassed,
+                                    overdriveBypassed,
                                     driveBypassed,
                                     fuzzBypassed,
+                                    synthFuzzBypassed,
                                     compressorBypassed,
                                     octaveBypassed,
                                     doublerBypassed,
@@ -385,6 +441,9 @@ SimpleEQWebViewEditor::SimpleEQWebViewEditor(SimpleEQAudioProcessor& p)
     audioProcessor.apvts.addParameterListener(paramCompressorTone, this);
     audioProcessor.apvts.addParameterListener(paramCompressorLevel, this);
     audioProcessor.apvts.addParameterListener(paramOctaveTranspose, this);
+    audioProcessor.apvts.addParameterListener(paramOctaveMix, this);
+    audioProcessor.apvts.addParameterListener(paramOctaveTone, this);
+    audioProcessor.apvts.addParameterListener(paramOctaveMonoDetector, this);
     audioProcessor.apvts.addParameterListener(paramDoublerMix, this);
     audioProcessor.apvts.addParameterListener(paramDoublerDelay, this);
     audioProcessor.apvts.addParameterListener(paramDoublerDetune, this);
@@ -392,6 +451,7 @@ SimpleEQWebViewEditor::SimpleEQWebViewEditor(SimpleEQAudioProcessor& p)
     audioProcessor.apvts.addParameterListener(paramTremoloSpeed, this);
     audioProcessor.apvts.addParameterListener(paramTremoloDepth, this);
     audioProcessor.apvts.addParameterListener(paramTremoloLfo, this);
+    audioProcessor.apvts.addParameterListener(paramTremoloStereoPhase, this);
     audioProcessor.apvts.addParameterListener(paramTremoloBypassed, this);
     audioProcessor.apvts.addParameterListener(paramDelayMix, this);
     audioProcessor.apvts.addParameterListener(paramDelayTimeL, this);
@@ -405,15 +465,25 @@ SimpleEQWebViewEditor::SimpleEQWebViewEditor(SimpleEQAudioProcessor& p)
     audioProcessor.apvts.addParameterListener(paramDrive, this);
     audioProcessor.apvts.addParameterListener(paramDistortionTone, this);
     audioProcessor.apvts.addParameterListener(paramDistortionLevel, this);
+    audioProcessor.apvts.addParameterListener(paramOverdriveDrive, this);
+    audioProcessor.apvts.addParameterListener(paramOverdriveTone, this);
+    audioProcessor.apvts.addParameterListener(paramOverdriveLevel, this);
     audioProcessor.apvts.addParameterListener(paramFuzzDrive, this);
     audioProcessor.apvts.addParameterListener(paramFuzzTone, this);
     audioProcessor.apvts.addParameterListener(paramFuzzLevel, this);
+    audioProcessor.apvts.addParameterListener(paramSynthFuzzMix, this);
+    audioProcessor.apvts.addParameterListener(paramSynthFuzzDelay, this);
+    audioProcessor.apvts.addParameterListener(paramSynthFuzzDetune, this);
+    audioProcessor.apvts.addParameterListener(paramSynthFuzzDrive, this);
+    audioProcessor.apvts.addParameterListener(paramSynthFuzzLevel, this);
     audioProcessor.apvts.addParameterListener(paramOutputGain, this);
     for (int i = 0; i < numEqBands; ++i)
         audioProcessor.apvts.addParameterListener(paramEqBand(i), this);
     audioProcessor.apvts.addParameterListener(paramEqBypassed, this);
+    audioProcessor.apvts.addParameterListener(paramOverdriveBypassed, this);
     audioProcessor.apvts.addParameterListener(paramDriveBypassed, this);
     audioProcessor.apvts.addParameterListener(paramFuzzBypassed, this);
+    audioProcessor.apvts.addParameterListener(paramSynthFuzzBypassed, this);
     audioProcessor.apvts.addParameterListener(paramCompressorBypassed, this);
     audioProcessor.apvts.addParameterListener(paramReverbSize, this);
     audioProcessor.apvts.addParameterListener(paramReverbDamping, this);
@@ -440,6 +510,9 @@ SimpleEQWebViewEditor::~SimpleEQWebViewEditor()
     audioProcessor.apvts.removeParameterListener(paramCompressorTone, this);
     audioProcessor.apvts.removeParameterListener(paramCompressorLevel, this);
     audioProcessor.apvts.removeParameterListener(paramOctaveTranspose, this);
+    audioProcessor.apvts.removeParameterListener(paramOctaveMix, this);
+    audioProcessor.apvts.removeParameterListener(paramOctaveTone, this);
+    audioProcessor.apvts.removeParameterListener(paramOctaveMonoDetector, this);
     audioProcessor.apvts.removeParameterListener(paramDoublerMix, this);
     audioProcessor.apvts.removeParameterListener(paramDoublerDelay, this);
     audioProcessor.apvts.removeParameterListener(paramDoublerDetune, this);
@@ -447,6 +520,7 @@ SimpleEQWebViewEditor::~SimpleEQWebViewEditor()
     audioProcessor.apvts.removeParameterListener(paramTremoloSpeed, this);
     audioProcessor.apvts.removeParameterListener(paramTremoloDepth, this);
     audioProcessor.apvts.removeParameterListener(paramTremoloLfo, this);
+    audioProcessor.apvts.removeParameterListener(paramTremoloStereoPhase, this);
     audioProcessor.apvts.removeParameterListener(paramTremoloBypassed, this);
     audioProcessor.apvts.removeParameterListener(paramDelayMix, this);
     audioProcessor.apvts.removeParameterListener(paramDelayTimeL, this);
@@ -460,15 +534,25 @@ SimpleEQWebViewEditor::~SimpleEQWebViewEditor()
     audioProcessor.apvts.removeParameterListener(paramDrive, this);
     audioProcessor.apvts.removeParameterListener(paramDistortionTone, this);
     audioProcessor.apvts.removeParameterListener(paramDistortionLevel, this);
+    audioProcessor.apvts.removeParameterListener(paramOverdriveDrive, this);
+    audioProcessor.apvts.removeParameterListener(paramOverdriveTone, this);
+    audioProcessor.apvts.removeParameterListener(paramOverdriveLevel, this);
     audioProcessor.apvts.removeParameterListener(paramFuzzDrive, this);
     audioProcessor.apvts.removeParameterListener(paramFuzzTone, this);
     audioProcessor.apvts.removeParameterListener(paramFuzzLevel, this);
+    audioProcessor.apvts.removeParameterListener(paramSynthFuzzMix, this);
+    audioProcessor.apvts.removeParameterListener(paramSynthFuzzDelay, this);
+    audioProcessor.apvts.removeParameterListener(paramSynthFuzzDetune, this);
+    audioProcessor.apvts.removeParameterListener(paramSynthFuzzDrive, this);
+    audioProcessor.apvts.removeParameterListener(paramSynthFuzzLevel, this);
     audioProcessor.apvts.removeParameterListener(paramOutputGain, this);
     for (int i = 0; i < numEqBands; ++i)
         audioProcessor.apvts.removeParameterListener(paramEqBand(i), this);
     audioProcessor.apvts.removeParameterListener(paramEqBypassed, this);
+    audioProcessor.apvts.removeParameterListener(paramOverdriveBypassed, this);
     audioProcessor.apvts.removeParameterListener(paramDriveBypassed, this);
     audioProcessor.apvts.removeParameterListener(paramFuzzBypassed, this);
+    audioProcessor.apvts.removeParameterListener(paramSynthFuzzBypassed, this);
     audioProcessor.apvts.removeParameterListener(paramCompressorBypassed, this);
     audioProcessor.apvts.removeParameterListener(paramReverbSize, this);
     audioProcessor.apvts.removeParameterListener(paramReverbDamping, this);
@@ -524,6 +608,9 @@ void SimpleEQWebViewEditor::parameterChanged(const juce::String& parameterID, fl
         && parameterID != paramCompressorTone
         && parameterID != paramCompressorLevel
         && parameterID != paramOctaveTranspose
+        && parameterID != paramOctaveMix
+        && parameterID != paramOctaveTone
+        && parameterID != paramOctaveMonoDetector
         && parameterID != paramDoublerMix
         && parameterID != paramDoublerDelay
         && parameterID != paramDoublerDetune
@@ -531,6 +618,7 @@ void SimpleEQWebViewEditor::parameterChanged(const juce::String& parameterID, fl
         && parameterID != paramTremoloSpeed
         && parameterID != paramTremoloDepth
         && parameterID != paramTremoloLfo
+        && parameterID != paramTremoloStereoPhase
         && parameterID != paramTremoloBypassed
         && parameterID != paramDelayMix
         && parameterID != paramDelayTimeL
@@ -542,9 +630,17 @@ void SimpleEQWebViewEditor::parameterChanged(const juce::String& parameterID, fl
         && parameterID != paramDrive
         && parameterID != paramDistortionTone
         && parameterID != paramDistortionLevel
+        && parameterID != paramOverdriveDrive
+        && parameterID != paramOverdriveTone
+        && parameterID != paramOverdriveLevel
         && parameterID != paramFuzzDrive
         && parameterID != paramFuzzTone
         && parameterID != paramFuzzLevel
+        && parameterID != paramSynthFuzzMix
+        && parameterID != paramSynthFuzzDelay
+        && parameterID != paramSynthFuzzDetune
+        && parameterID != paramSynthFuzzDrive
+        && parameterID != paramSynthFuzzLevel
         && parameterID != paramOutputGain
         && parameterID != paramMonoInput
         && parameterID != paramMute
@@ -559,8 +655,10 @@ void SimpleEQWebViewEditor::parameterChanged(const juce::String& parameterID, fl
         && parameterID != paramEqBand(7)
         && parameterID != paramEqBand(8)
         && parameterID != paramEqBand(9)
+        && parameterID != paramOverdriveBypassed
         && parameterID != paramDriveBypassed
         && parameterID != paramFuzzBypassed
+        && parameterID != paramSynthFuzzBypassed
         && parameterID != paramCompressorBypassed
         && parameterID != paramReverbSize
         && parameterID != paramReverbDamping
@@ -604,6 +702,9 @@ juce::var SimpleEQWebViewEditor::makeParameterSnapshot()
     auto compressorTone = audioProcessor.apvts.getRawParameterValue(paramCompressorTone)->load();
     auto compressorLevel = audioProcessor.apvts.getRawParameterValue(paramCompressorLevel)->load();
     auto octaveTranspose = audioProcessor.apvts.getRawParameterValue(paramOctaveTranspose)->load();
+    auto octaveMix = audioProcessor.apvts.getRawParameterValue(paramOctaveMix)->load();
+    auto octaveTone = audioProcessor.apvts.getRawParameterValue(paramOctaveTone)->load();
+    auto octaveMonoDetector = audioProcessor.apvts.getRawParameterValue(paramOctaveMonoDetector)->load() > 0.5f;
     auto doublerMix = audioProcessor.apvts.getRawParameterValue(paramDoublerMix)->load();
     auto doublerDelay = audioProcessor.apvts.getRawParameterValue(paramDoublerDelay)->load();
     auto doublerDetune = audioProcessor.apvts.getRawParameterValue(paramDoublerDetune)->load();
@@ -613,6 +714,7 @@ juce::var SimpleEQWebViewEditor::makeParameterSnapshot()
     if (auto* lfoParam = dynamic_cast<juce::AudioParameterChoice*>(
             audioProcessor.apvts.getParameter(paramTremoloLfo)))
         tremoloLfoIndex = lfoParam->getIndex();
+    auto tremoloStereoPhase = audioProcessor.apvts.getRawParameterValue(paramTremoloStereoPhase)->load() > 0.5f;
     auto delayMix = audioProcessor.apvts.getRawParameterValue(paramDelayMix)->load();
     auto delayTimeL = audioProcessor.apvts.getRawParameterValue(paramDelayTimeL)->load();
     auto delayTimeR = audioProcessor.apvts.getRawParameterValue(paramDelayTimeR)->load();
@@ -624,16 +726,26 @@ juce::var SimpleEQWebViewEditor::makeParameterSnapshot()
     auto drive = audioProcessor.apvts.getRawParameterValue(paramDrive)->load();
     auto distortionTone = audioProcessor.apvts.getRawParameterValue(paramDistortionTone)->load();
     auto distortionLevel = audioProcessor.apvts.getRawParameterValue(paramDistortionLevel)->load();
+    auto overdriveDrive = audioProcessor.apvts.getRawParameterValue(paramOverdriveDrive)->load();
+    auto overdriveTone = audioProcessor.apvts.getRawParameterValue(paramOverdriveTone)->load();
+    auto overdriveLevel = audioProcessor.apvts.getRawParameterValue(paramOverdriveLevel)->load();
     auto fuzzDrive = audioProcessor.apvts.getRawParameterValue(paramFuzzDrive)->load();
     auto fuzzTone = audioProcessor.apvts.getRawParameterValue(paramFuzzTone)->load();
     auto fuzzLevel = audioProcessor.apvts.getRawParameterValue(paramFuzzLevel)->load();
+    auto synthFuzzMix = audioProcessor.apvts.getRawParameterValue(paramSynthFuzzMix)->load();
+    auto synthFuzzDelay = audioProcessor.apvts.getRawParameterValue(paramSynthFuzzDelay)->load();
+    auto synthFuzzDetune = audioProcessor.apvts.getRawParameterValue(paramSynthFuzzDetune)->load();
+    auto synthFuzzDrive = audioProcessor.apvts.getRawParameterValue(paramSynthFuzzDrive)->load();
+    auto synthFuzzLevel = audioProcessor.apvts.getRawParameterValue(paramSynthFuzzLevel)->load();
     juce::Array<juce::var> eqBands;
     eqBands.ensureStorageAllocated(numEqBands);
     for (int i = 0; i < numEqBands; ++i)
         eqBands.add(audioProcessor.apvts.getRawParameterValue(paramEqBand(i))->load());
     auto eqBypassed = audioProcessor.apvts.getRawParameterValue(paramEqBypassed)->load() > 0.5f;
+    auto overdriveBypassed = audioProcessor.apvts.getRawParameterValue(paramOverdriveBypassed)->load() > 0.5f;
     auto driveBypassed = audioProcessor.apvts.getRawParameterValue(paramDriveBypassed)->load() > 0.5f;
     auto fuzzBypassed = audioProcessor.apvts.getRawParameterValue(paramFuzzBypassed)->load() > 0.5f;
+    auto synthFuzzBypassed = audioProcessor.apvts.getRawParameterValue(paramSynthFuzzBypassed)->load() > 0.5f;
     auto compressorBypassed = audioProcessor.apvts.getRawParameterValue(paramCompressorBypassed)->load() > 0.5f;
     auto octaveBypassed = audioProcessor.apvts.getRawParameterValue(paramOctaveBypassed)->load() > 0.5f;
     auto doublerBypassed = audioProcessor.apvts.getRawParameterValue(paramDoublerBypassed)->load() > 0.5f;
@@ -670,32 +782,46 @@ juce::var SimpleEQWebViewEditor::makeParameterSnapshot()
                            compressorTone,
                            compressorLevel,
                            octaveTranspose,
+                           octaveMix,
+                           octaveTone,
+                           octaveMonoDetector,
                            doublerMix,
                            doublerDelay,
                            doublerDetune,
                            tremoloSpeed,
                            tremoloDepth,
                            tremoloLfoIndex,
+                           tremoloStereoPhase,
                            delayMix,
                            delayTimeL,
                            delayTimeR,
                            delayFeedback,
-                            delayModeIsDual,
-                            drive,
-                           distortionTone,
-                           distortionLevel,
-                           fuzzDrive,
-                           fuzzTone,
-                           fuzzLevel,
-                           juce::var(eqBands),
-                           reverbSize,
-                           reverbDamping,
-                           reverbMix,
-                           reverbWidth,
-                           eqBypassed,
-                           driveBypassed,
-                           fuzzBypassed,
-                           compressorBypassed,
+                             delayModeIsDual,
+                             overdriveDrive,
+                             overdriveTone,
+                             overdriveLevel,
+                             drive,
+                            distortionTone,
+                            distortionLevel,
+                             fuzzDrive,
+                             fuzzTone,
+                             fuzzLevel,
+                             synthFuzzMix,
+                             synthFuzzDelay,
+                             synthFuzzDetune,
+                             synthFuzzDrive,
+                             synthFuzzLevel,
+                             juce::var(eqBands),
+                            reverbSize,
+                            reverbDamping,
+                            reverbMix,
+                            reverbWidth,
+                            eqBypassed,
+                            overdriveBypassed,
+                             driveBypassed,
+                            fuzzBypassed,
+                            synthFuzzBypassed,
+                            compressorBypassed,
                            octaveBypassed,
                            doublerBypassed,
                            tremoloBypassed,
