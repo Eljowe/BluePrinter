@@ -1,4 +1,4 @@
-# SimpleEQ (JUCE + CMake)
+# Obstacle (JUCE + CMake)
 
 This project builds a JUCE plugin in these formats:
 
@@ -36,23 +36,23 @@ cmake --build build --config Debug --clean-first
 
 Build only the standalone app target:
 
-cmake --build build --config Debug --target SimpleEQ_Standalone
+cmake --build build --config Debug --target Obstacle_Standalone
 
 Build only the VST3 target:
 
-cmake --build build --config Debug --target SimpleEQ_VST3
+cmake --build build --config Debug --target Obstacle_VST3
 
 ## Run
 
 Run the standalone app after building:
 
-.\build\SimpleEQ_artefacts\Debug\Standalone\SimpleEQ.exe
+.\build\Obstacle_artefacts\Debug\Standalone\Obstacle.exe
 
 Or build and launch in one PowerShell command:
 
-cmake --build build --config Debug --target SimpleEQ_Standalone; Start-Process -FilePath ".\\build\\SimpleEQ_artefacts\\Debug\\Standalone\\SimpleEQ.exe"
+cmake --build build --config Debug --target Obstacle_Standalone; Start-Process -FilePath ".\\build\\Obstacle_artefacts\\Debug\\Standalone\\Obstacle.exe"
 
-You can also use the VS Code task named: Run SimpleEQ Debug
+You can also use the VS Code task named: Run Obstacle Debug
 
 ## Testing
 
@@ -96,7 +96,7 @@ The JUCE editor tries to load this file automatically.
 
 You can override the loaded URL with an environment variable:
 
-set SIMPLEEQ_WEB_UI_URL=http://127.0.0.1:5173
+set Obstacle_WEB_UI_URL=http://127.0.0.1:5173
 
 Then run:
 
@@ -107,8 +107,8 @@ And launch the plugin/standalone in the same shell session where the environment
 
 ### 4) Build JUCE plugin/app
 
-cmake --build build --config Debug --target SimpleEQ_Standalone
-cmake --build build --config Debug --target SimpleEQ_VST3
+cmake --build build --config Debug --target Obstacle_Standalone
+cmake --build build --config Debug --target Obstacle_VST3
 
 ### Notes
 
@@ -119,8 +119,8 @@ cmake --build build --config Debug --target SimpleEQ_VST3
 
 This workspace already includes these tasks:
 
-- Build SimpleEQ Debug
-- Rebuild SimpleEQ Debug
-- Run SimpleEQ Debug
+- Build Obstacle Debug
+- Rebuild Obstacle Debug
+- Run Obstacle Debug
 
 Run them from Terminal -> Run Task.

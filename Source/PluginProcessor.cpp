@@ -11,7 +11,7 @@
 #include "WebViewEditor.h"
 
 //==============================================================================
-SimpleEQAudioProcessor::SimpleEQAudioProcessor()
+ObstacleAudioProcessor::ObstacleAudioProcessor()
 #ifndef JucePlugin_PreferredChannelConfigurations
      : AudioProcessor (BusesProperties()
                      #if ! JucePlugin_IsMidiEffect
@@ -25,17 +25,17 @@ SimpleEQAudioProcessor::SimpleEQAudioProcessor()
 {
 }
 
-SimpleEQAudioProcessor::~SimpleEQAudioProcessor()
+ObstacleAudioProcessor::~ObstacleAudioProcessor()
 {
 }
 
 //==============================================================================
-const juce::String SimpleEQAudioProcessor::getName() const
+const juce::String ObstacleAudioProcessor::getName() const
 {
     return JucePlugin_Name;
 }
 
-bool SimpleEQAudioProcessor::acceptsMidi() const
+bool ObstacleAudioProcessor::acceptsMidi() const
 {
    #if JucePlugin_WantsMidiInput
     return true;
@@ -44,7 +44,7 @@ bool SimpleEQAudioProcessor::acceptsMidi() const
    #endif
 }
 
-bool SimpleEQAudioProcessor::producesMidi() const
+bool ObstacleAudioProcessor::producesMidi() const
 {
    #if JucePlugin_ProducesMidiOutput
     return true;
@@ -53,7 +53,7 @@ bool SimpleEQAudioProcessor::producesMidi() const
    #endif
 }
 
-bool SimpleEQAudioProcessor::isMidiEffect() const
+bool ObstacleAudioProcessor::isMidiEffect() const
 {
    #if JucePlugin_IsMidiEffect
     return true;
@@ -62,37 +62,37 @@ bool SimpleEQAudioProcessor::isMidiEffect() const
    #endif
 }
 
-double SimpleEQAudioProcessor::getTailLengthSeconds() const
+double ObstacleAudioProcessor::getTailLengthSeconds() const
 {
     return 0.0;
 }
 
-int SimpleEQAudioProcessor::getNumPrograms()
+int ObstacleAudioProcessor::getNumPrograms()
 {
     return 1;   // NB: some hosts don't cope very well if you tell them there are 0 programs,
                 // so this should be at least 1, even if you're not really implementing programs.
 }
 
-int SimpleEQAudioProcessor::getCurrentProgram()
+int ObstacleAudioProcessor::getCurrentProgram()
 {
     return 0;
 }
 
-void SimpleEQAudioProcessor::setCurrentProgram (int index)
+void ObstacleAudioProcessor::setCurrentProgram (int index)
 {
 }
 
-const juce::String SimpleEQAudioProcessor::getProgramName (int index)
+const juce::String ObstacleAudioProcessor::getProgramName (int index)
 {
     return {};
 }
 
-void SimpleEQAudioProcessor::changeProgramName (int index, const juce::String& newName)
+void ObstacleAudioProcessor::changeProgramName (int index, const juce::String& newName)
 {
 }
 
 //==============================================================================
-void SimpleEQAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
+void ObstacleAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     // Use this method as the place to do any pre-playback
     // initialisation that you need..
@@ -209,7 +209,7 @@ void SimpleEQAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     tunerDetectedNoteIndex.store(-1, std::memory_order_release);
 }
 
-void SimpleEQAudioProcessor::updateLatency()
+void ObstacleAudioProcessor::updateLatency()
 {
     // Oversampler delays are fixed and accumulate in series. The octave
     // stage's pitch shifter has a data-dependent natural latency
@@ -236,14 +236,14 @@ void SimpleEQAudioProcessor::updateLatency()
     setLatencySamples(static_cast<int>(oversamplerLatency) + kOctaveStageLatencySamples);
 }
 
-void SimpleEQAudioProcessor::releaseResources()
+void ObstacleAudioProcessor::releaseResources()
 {
     // When playback stops, you can use this as an opportunity to free up any
     // spare memory, etc.
 }
 
 #ifndef JucePlugin_PreferredChannelConfigurations
-bool SimpleEQAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
+bool ObstacleAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
   #if JucePlugin_IsMidiEffect
     juce::ignoreUnused (layouts);
@@ -268,7 +268,7 @@ bool SimpleEQAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts)
 }
 #endif
 
-void SimpleEQAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
+void ObstacleAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
 {
     juce::ScopedNoDenormals noDenormals;
     auto totalNumInputChannels  = getTotalNumInputChannels();
@@ -384,13 +384,13 @@ void SimpleEQAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     
 }
 
-void SimpleEQAudioProcessor::applyGain(juce::AudioBuffer<float>& buffer, float gainDecibels)
+void ObstacleAudioProcessor::applyGain(juce::AudioBuffer<float>& buffer, float gainDecibels)
 {
     const auto gain = juce::Decibels::decibelsToGain(gainDecibels);
     buffer.applyGain(gain);
 }
 
-void SimpleEQAudioProcessor::applyTuner(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings)
+void ObstacleAudioProcessor::applyTuner(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings)
 {
     const auto numChannels = buffer.getNumChannels();
     const auto numSamples = buffer.getNumSamples();
@@ -555,7 +555,7 @@ void SimpleEQAudioProcessor::applyTuner(juce::AudioBuffer<float>& buffer, const 
     juce::ignoreUnused(peak);
 }
 
-void SimpleEQAudioProcessor::applyGate(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings)
+void ObstacleAudioProcessor::applyGate(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings)
 {
     if (chainSettings.gateBypassed)
         return;
@@ -590,7 +590,7 @@ void SimpleEQAudioProcessor::applyGate(juce::AudioBuffer<float>& buffer, const C
     }
 }
 
-void SimpleEQAudioProcessor::pushPeakLevel(std::atomic<float>& targetPeak, float peakValue)
+void ObstacleAudioProcessor::pushPeakLevel(std::atomic<float>& targetPeak, float peakValue)
 {
     auto previousPeak = targetPeak.load(std::memory_order_relaxed);
     while( peakValue > previousPeak
@@ -603,25 +603,25 @@ void SimpleEQAudioProcessor::pushPeakLevel(std::atomic<float>& targetPeak, float
 }
 
 //==============================================================================
-bool SimpleEQAudioProcessor::hasEditor() const
+bool ObstacleAudioProcessor::hasEditor() const
 {
     return true; // (change this to false if you choose to not supply an editor)
 }
 
-juce::AudioProcessorEditor* SimpleEQAudioProcessor::createEditor()
+juce::AudioProcessorEditor* ObstacleAudioProcessor::createEditor()
 {
     auto webViewOptions = juce::WebBrowserComponent::Options{}
                               .withBackend(juce::WebBrowserComponent::Options::Backend::webview2);
 
     if (!juce::WebBrowserComponent::areOptionsSupported(webViewOptions))
-        return new SimpleEQAudioProcessorEditor(*this);
+        return new ObstacleAudioProcessorEditor(*this);
 
-    return new SimpleEQWebViewEditor(*this);
+    return new ObstacleWebViewEditor(*this);
 //    return new juce::GenericAudioProcessorEditor(*this);
 }
 
 //==============================================================================
-void SimpleEQAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
+void ObstacleAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     // You should use this method to store your parameters in the memory block.
     // You could do that either as raw data, or use the XML or ValueTree classes
@@ -631,7 +631,7 @@ void SimpleEQAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
     apvts.state.writeToStream(mos);
 }
 
-void SimpleEQAudioProcessor::setStateInformation (const void* data, int sizeInBytes)
+void ObstacleAudioProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
     // You should use this method to restore your parameters from this memory block,
     // whose contents will have been created by the getStateInformation() call.
@@ -724,7 +724,7 @@ ChainSettings getChainSettings(juce::AudioProcessorValueTreeState& apvts)
     return settings;
 }
 
-void SimpleEQAudioProcessor::applyCompressor(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings)
+void ObstacleAudioProcessor::applyCompressor(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings)
 {
     if (chainSettings.compressorBypassed)
         return;
@@ -809,7 +809,7 @@ void SimpleEQAudioProcessor::applyCompressor(juce::AudioBuffer<float>& buffer, c
     }
 }
 
-void SimpleEQAudioProcessor::applyOctave(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings)
+void ObstacleAudioProcessor::applyOctave(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings)
 {
     if (chainSettings.octaveBypassed)
         return;
@@ -1022,7 +1022,7 @@ void SimpleEQAudioProcessor::applyOctave(juce::AudioBuffer<float>& buffer, const
 }
 
 
-void SimpleEQAudioProcessor::applyDoubler(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings)
+void ObstacleAudioProcessor::applyDoubler(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings)
 {
     if (chainSettings.doublerBypassed)
         return;
@@ -1066,7 +1066,7 @@ void SimpleEQAudioProcessor::applyDoubler(juce::AudioBuffer<float>& buffer, cons
     }
 }
 
-void SimpleEQAudioProcessor::applyDelay(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings)
+void ObstacleAudioProcessor::applyDelay(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings)
 {
     if (chainSettings.delayBypassed)
         return;
@@ -1113,7 +1113,7 @@ void SimpleEQAudioProcessor::applyDelay(juce::AudioBuffer<float>& buffer, const 
 }
 
 
-void SimpleEQAudioProcessor::applyOverdrive(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings)
+void ObstacleAudioProcessor::applyOverdrive(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings)
 {
     if (chainSettings.overdriveBypassed)
         return;
@@ -1220,7 +1220,7 @@ void SimpleEQAudioProcessor::applyOverdrive(juce::AudioBuffer<float>& buffer, co
     }
 }
 
-void SimpleEQAudioProcessor::applyDistortion(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings)
+void ObstacleAudioProcessor::applyDistortion(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings)
 {
     if (chainSettings.distortionBypassed)
         return;
@@ -1340,7 +1340,7 @@ void SimpleEQAudioProcessor::applyDistortion(juce::AudioBuffer<float>& buffer, c
     }
 }
 
-void SimpleEQAudioProcessor::applyFuzz(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings)
+void ObstacleAudioProcessor::applyFuzz(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings)
 {
     if (chainSettings.fuzzBypassed)
         return;
@@ -1464,7 +1464,7 @@ void SimpleEQAudioProcessor::applyFuzz(juce::AudioBuffer<float>& buffer, const C
     }
 }
 
-void SimpleEQAudioProcessor::applySynthFuzz(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings)
+void ObstacleAudioProcessor::applySynthFuzz(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings)
 {
     if (chainSettings.synthFuzzBypassed)
         return;
@@ -1539,7 +1539,7 @@ void SimpleEQAudioProcessor::applySynthFuzz(juce::AudioBuffer<float>& buffer, co
     }
 }
 
-void SimpleEQAudioProcessor::applyTremolo(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings)
+void ObstacleAudioProcessor::applyTremolo(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings)
 {
     if (chainSettings.tremoloBypassed)
         return;
@@ -1616,7 +1616,7 @@ void SimpleEQAudioProcessor::applyTremolo(juce::AudioBuffer<float>& buffer, cons
     tremoloLfoPhase = std::fmod(tremoloLfoPhase + (static_cast<float>(numSamples) * phaseInc), 1.0f);
 }
 
-void SimpleEQAudioProcessor::applyReverb(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings)
+void ObstacleAudioProcessor::applyReverb(juce::AudioBuffer<float>& buffer, const ChainSettings& chainSettings)
 {
     if (chainSettings.reverbBypassed)
         return;
@@ -1657,7 +1657,7 @@ void updateCoefficients(Coefficients &old, const Coefficients &replacements)
     *old = *replacements;
 }
 
-void SimpleEQAudioProcessor::updateGraphicEq(const ChainSettings& chainSettings)
+void ObstacleAudioProcessor::updateGraphicEq(const ChainSettings& chainSettings)
 {
     const auto sampleRate = getSampleRate();
     const bool bypassed = chainSettings.graphicEqBypassed;
@@ -1674,12 +1674,12 @@ void SimpleEQAudioProcessor::updateGraphicEq(const ChainSettings& chainSettings)
     }
 }
 
-void SimpleEQAudioProcessor::updateFilters()
+void ObstacleAudioProcessor::updateFilters()
 {
     updateGraphicEq(getChainSettings(apvts));
 }
 
-juce::AudioProcessorValueTreeState::ParameterLayout SimpleEQAudioProcessor::createParameterLayout()
+juce::AudioProcessorValueTreeState::ParameterLayout ObstacleAudioProcessor::createParameterLayout()
 {
     juce::AudioProcessorValueTreeState::ParameterLayout layout;
     
@@ -1935,5 +1935,5 @@ juce::AudioProcessorValueTreeState::ParameterLayout SimpleEQAudioProcessor::crea
 // This creates new instances of the plugin..
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 {
-    return new SimpleEQAudioProcessor();
+    return new ObstacleAudioProcessor();
 }

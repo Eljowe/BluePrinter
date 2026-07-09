@@ -3,18 +3,18 @@
 #include <JuceHeader.h>
 #include "PluginProcessor.h"
 
-class SimpleEQAudioProcessorEditor : public juce::AudioProcessorEditor
+class ObstacleAudioProcessorEditor : public juce::AudioProcessorEditor
 {
 public:
-    explicit SimpleEQAudioProcessorEditor (SimpleEQAudioProcessor&);
-    ~SimpleEQAudioProcessorEditor() override = default;
+    explicit ObstacleAudioProcessorEditor (ObstacleAudioProcessor&);
+    ~ObstacleAudioProcessorEditor() override = default;
 
     void paint (juce::Graphics&) override;
     void resized() override;
 
 private:
     juce::Label fallbackLabel;
-    SimpleEQAudioProcessor& audioProcessor;
+    ObstacleAudioProcessor& audioProcessor;
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SimpleEQAudioProcessorEditor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ObstacleAudioProcessorEditor)
 };

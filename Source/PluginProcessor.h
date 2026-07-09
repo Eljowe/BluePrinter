@@ -388,12 +388,12 @@ void update(ChainType& chain, const CoefficientType& coefficients)
 //==============================================================================
 /**
 */
-class SimpleEQAudioProcessor  : public juce::AudioProcessor
+class ObstacleAudioProcessor  : public juce::AudioProcessor
 {
 public:
     //==============================================================================
-    SimpleEQAudioProcessor();
-    ~SimpleEQAudioProcessor() override;
+    ObstacleAudioProcessor();
+    ~ObstacleAudioProcessor() override;
 
     // Recompute and report the total latency. Called from prepareToPlay
     // and whenever the Octave Transpose parameter changes (the octave
@@ -569,5 +569,5 @@ private:
     juce::dsp::Oversampling<float> fuzzOversampler { 2, 1, juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR };
     juce::dsp::Oversampling<float> overdriveOversampler { 2, 1, juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR };
     //==============================================================================
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SimpleEQAudioProcessor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ObstacleAudioProcessor)
 };

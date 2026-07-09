@@ -34,7 +34,7 @@ export default function EqPanel({
         rightSpectrum={analyzerEnabled ? rightSpectrum : []}
       />
 
-      <article className={`eq-pedal ${eqBypassed ? "is-bypassed" : ""}`.trim()}>
+      <article className={`eq-pedal pedal-accent-tan ${eqBypassed ? "is-bypassed" : ""}`.trim()}>
         <p className="fx-pedal-title">10-Band EQ</p>
         <div className="eq-band-grid">
           {BAND_LABELS.map((label, i) => (
@@ -48,7 +48,7 @@ export default function EqPanel({
               value={eqBands[i] ?? 0}
               onChange={(next) => onEqBandChange(i, next)}
               unit="dB"
-              accent="blue"
+              accent="tan"
             />
           ))}
         </div>
