@@ -27,7 +27,7 @@
       "dependsOn": "Install WebUI dependencies"
     },
     {
-      "label": "Build SimpleEQ Debug",
+      "label": "Build Obstacle Debug",
       "type": "shell",
       "command": "cmake",
       "args": ["--build", "build", "--config", "Debug"],
@@ -37,7 +37,7 @@
       "dependsOn": "Build WebUI"
     },
     {
-      "label": "Rebuild SimpleEQ Debug",
+      "label": "Rebuild Obstacle Debug",
       "type": "shell",
       "command": "powershell",
       "args": ["-NoProfile", "-Command", "cmake --build build --config Debug --clean-first"],
@@ -47,13 +47,13 @@
       "dependsOn": "Build WebUI"
     },
     {
-      "label": "Run SimpleEQ Debug",
+      "label": "Run Obstacle Debug",
       "type": "shell",
       "command": "powershell",
       "args": [
         "-NoProfile",
         "-Command",
-        "cmake --build build --config Debug --target SimpleEQ_Standalone; Start-Process -FilePath \".\\build\\SimpleEQ_artefacts\\Debug\\Standalone\\SimpleEQ.exe\""
+        "cmake --build build --config Debug --target Obstacle_Standalone; Start-Process -FilePath \".\\build\\Obstacle_artefacts\\Debug\\Standalone\\Obstacle.exe\""
       ],
       "isBackground": false,
       "problemMatcher": ["$msCompile"],

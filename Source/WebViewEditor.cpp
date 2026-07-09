@@ -207,7 +207,7 @@ juce::File findLocalWebUiDistIndex()
     return {};
 }
 
-juce::WebBrowserComponent::Options makeWebViewOptions(SimpleEQAudioProcessor& processor,
+juce::WebBrowserComponent::Options makeWebViewOptions(ObstacleAudioProcessor& processor,
                                                       const juce::File& distRoot)
 {
     auto input = processor.apvts.getRawParameterValue("Input Gain")->load();
@@ -279,7 +279,7 @@ juce::WebBrowserComponent::Options makeWebViewOptions(SimpleEQAudioProcessor& pr
     auto analyzerEnabled = processor.apvts.getRawParameterValue("Analyzer Enabled")->load() > 0.5f;
 
     const auto userDataFolder = juce::File::getSpecialLocation(juce::File::tempDirectory)
-                                    .getChildFile("SimpleEQWebView2Data");
+                                    .getChildFile("ObstacleWebView2Data");
 
     return juce::WebBrowserComponent::Options{}
         .withBackend(juce::WebBrowserComponent::Options::Backend::webview2)
@@ -398,7 +398,7 @@ juce::WebBrowserComponent::Options makeWebViewOptions(SimpleEQAudioProcessor& pr
 }
 }
 
-SimpleEQWebViewEditor::SimpleEQWebViewEditor(SimpleEQAudioProcessor& p)
+ObstacleWebViewEditor::ObstacleWebViewEditor(ObstacleAudioProcessor& p)
     : AudioProcessorEditor(&p)
     , audioProcessor(p)
     , webView(makeWebViewOptions(p, getWebUiDistRoot()))
@@ -407,7 +407,7 @@ SimpleEQWebViewEditor::SimpleEQWebViewEditor(SimpleEQAudioProcessor& p)
 
     fallbackLabel.setJustificationType(juce::Justification::centred);
     fallbackLabel.setColour(juce::Label::textColourId, juce::Colours::lightgrey);
-    fallbackLabel.setText("SimpleEQ Web UI not found. Run: npm install && npm run build in WebUI.",
+    fallbackLabel.setText("Obstacle Web UI not found. Run: npm install && npm run build in WebUI.",
                           juce::dontSendNotification);
     addAndMakeVisible(fallbackLabel);
 
@@ -497,7 +497,7 @@ SimpleEQWebViewEditor::SimpleEQWebViewEditor(SimpleEQAudioProcessor& p)
     setSize(960, 640);
 }
 
-SimpleEQWebViewEditor::~SimpleEQWebViewEditor()
+ObstacleWebViewEditor::~ObstacleWebViewEditor()
 {
     cancelPendingUpdate();
     stopTimer();
@@ -562,18 +562,18 @@ SimpleEQWebViewEditor::~SimpleEQWebViewEditor()
     audioProcessor.apvts.removeParameterListener(paramAnalyzerEnabled, this);
 }
 
-void SimpleEQWebViewEditor::paint(juce::Graphics& g)
+void ObstacleWebViewEditor::paint(juce::Graphics& g)
 {
     g.fillAll(juce::Colours::black);
 }
 
-void SimpleEQWebViewEditor::resized()
+void ObstacleWebViewEditor::resized()
 {
     webView.setBounds(getLocalBounds());
     fallbackLabel.setBounds(getLocalBounds().reduced(20));
 }
 
-juce::String SimpleEQWebViewEditor::resolveWebUiUrl() const
+juce::String ObstacleWebViewEditor::resolveWebUiUrl() const
 {
     auto overrideUrl = juce::SystemStats::getEnvironmentVariable("SIMPLEEQ_WEB_UI_URL", {});
     if (overrideUrl.isNotEmpty())
@@ -586,7 +586,7 @@ juce::String SimpleEQWebViewEditor::resolveWebUiUrl() const
     return {};
 }
 
-juce::File SimpleEQWebViewEditor::getWebUiDistRoot() const
+juce::File ObstacleWebViewEditor::getWebUiDistRoot() const
 {
     auto localIndex = findLocalWebUiDistIndex();
     if (localIndex.existsAsFile())
@@ -595,7 +595,7 @@ juce::File SimpleEQWebViewEditor::getWebUiDistRoot() const
     return {};
 }
 
-void SimpleEQWebViewEditor::parameterChanged(const juce::String& parameterID, float newValue)
+void ObstacleWebViewEditor::parameterChanged(const juce::String& parameterID, float newValue)
 {
     juce::ignoreUnused(newValue);
 
@@ -672,7 +672,7 @@ void SimpleEQWebViewEditor::parameterChanged(const juce::String& parameterID, fl
     triggerAsyncUpdate();
 }
 
-void SimpleEQWebViewEditor::handleAsyncUpdate()
+void ObstacleWebViewEditor::handleAsyncUpdate()
 {
     if (!parameterUpdatePending.exchange(false, std::memory_order_acq_rel))
         return;
@@ -680,17 +680,17 @@ void SimpleEQWebViewEditor::handleAsyncUpdate()
     emitParameterSnapshotToFrontend();
 }
 
-void SimpleEQWebViewEditor::timerCallback()
+void ObstacleWebViewEditor::timerCallback()
 {
     emitParameterSnapshotToFrontend();
 }
 
-void SimpleEQWebViewEditor::emitParameterSnapshotToFrontend()
+void ObstacleWebViewEditor::emitParameterSnapshotToFrontend()
 {
     webView.emitEventIfBrowserIsVisible(juce::Identifier(backendParametersEvent), makeParameterSnapshot());
 }
 
-juce::var SimpleEQWebViewEditor::makeParameterSnapshot()
+juce::var ObstacleWebViewEditor::makeParameterSnapshot()
 {
     auto input = audioProcessor.apvts.getRawParameterValue(paramInputGain)->load();
     auto output = audioProcessor.apvts.getRawParameterValue(paramOutputGain)->load();
@@ -843,7 +843,7 @@ juce::var SimpleEQWebViewEditor::makeParameterSnapshot()
                            makeFloatArrayVar(rightSpectrum));
 }
 
-juce::var SimpleEQWebViewEditor::makeFloatArrayVar(const std::vector<float>& values)
+juce::var ObstacleWebViewEditor::makeFloatArrayVar(const std::vector<float>& values)
 {
     juce::Array<juce::var> array;
     array.ensureStorageAllocated(static_cast<int>(values.size()));
@@ -853,12 +853,12 @@ juce::var SimpleEQWebViewEditor::makeFloatArrayVar(const std::vector<float>& val
     return juce::var(array);
 }
 
-std::vector<float> SimpleEQWebViewEditor::buildSpectrumFromFifo(SingleChannelSampleFifo<SimpleEQAudioProcessor::BlockType>& fifo,
+std::vector<float> ObstacleWebViewEditor::buildSpectrumFromFifo(SingleChannelSampleFifo<ObstacleAudioProcessor::BlockType>& fifo,
                                                                  juce::AudioBuffer<float>& monoBuffer,
                                                                  std::vector<float>& fftScratch,
                                                                  std::vector<float>& fftResult)
 {
-    SimpleEQAudioProcessor::BlockType tempIncomingBuffer;
+    ObstacleAudioProcessor::BlockType tempIncomingBuffer;
     bool hasNewData = false;
 
     while (fifo.getNumCompleteBuffersAvailable() > 0)
@@ -927,7 +927,7 @@ std::vector<float> SimpleEQWebViewEditor::buildSpectrumFromFifo(SingleChannelSam
     return fftResult;
 }
 
-std::vector<float> SimpleEQWebViewEditor::buildResponseCurve() const
+std::vector<float> ObstacleWebViewEditor::buildResponseCurve() const
 {
     auto settings = getChainSettings(audioProcessor.apvts);
     const auto sampleRate = juce::jmax(1.0, audioProcessor.getSampleRate());

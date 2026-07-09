@@ -110,7 +110,7 @@ export default function Pedalboard({
     <section className="panel-shell fx-shell">
       <p className="section-title">Pedalboard</p>
       <div className="fx-pedal-grid">
-        <article className={`fx-pedal-card ${tunerBypassed ? "is-bypassed" : ""}`.trim()}>
+        <article className={`fx-pedal-card pedal-accent-olive ${tunerBypassed ? "is-bypassed" : ""}`.trim()}>
           <p className="fx-pedal-title">Tuner</p>
           <div className="tuner-display">
             <div className={`tuner-note ${tunerBypassed || !tunerNote ? "is-muted" : ""}`.trim()}>
@@ -153,7 +153,7 @@ export default function Pedalboard({
           />
         </article>
 
-        <article className={`fx-pedal-card ${gateBypassed ? "is-bypassed" : ""}`.trim()}>
+        <article className={`fx-pedal-card pedal-accent-olive ${gateBypassed ? "is-bypassed" : ""}`.trim()}>
           <p className="fx-pedal-title">Gate</p>
           <Knob
             className="pedal-compact"
@@ -163,7 +163,7 @@ export default function Pedalboard({
             value={gateThreshold}
             onChange={onGateThresholdChange}
             unit="dB"
-            accent="lime"
+            accent="olive"
           />
           <BypassButton
             label="Power"
@@ -173,7 +173,7 @@ export default function Pedalboard({
           />
         </article>
 
-        <article className={`fx-pedal-card fx-pedal-card-secondary ${compressorBypassed ? "is-bypassed" : ""}`.trim()}>
+        <article className={`fx-pedal-card fx-pedal-card-secondary pedal-accent-tan ${compressorBypassed ? "is-bypassed" : ""}`.trim()}>
           <p className="fx-pedal-title">Compressor</p>
           <Knob
             className="pedal-compact"
@@ -183,7 +183,7 @@ export default function Pedalboard({
             value={compressorAmount}
             onChange={onCompressorChange}
             unit="dB"
-            accent="blue"
+            accent="tan"
           />
           <div className="knob-grid knob-grid-2">
             <Knob
@@ -194,7 +194,7 @@ export default function Pedalboard({
               step={0.01}
               value={compressorTone}
               onChange={onCompressorToneChange}
-              accent="blue"
+              accent="tan"
             />
             <Knob
               className="pedal-compact"
@@ -204,7 +204,7 @@ export default function Pedalboard({
               value={compressorLevel}
               onChange={onCompressorLevelChange}
               unit="dB"
-              accent="blue"
+              accent="tan"
             />
           </div>
           <BypassButton
@@ -215,21 +215,21 @@ export default function Pedalboard({
           />
         </article>
 
-        <article className={`fx-pedal-card fx-pedal-card-wide ${octaveBypassed ? "is-bypassed" : ""}`.trim()}>
+        <article className={`fx-pedal-card pedal-accent-plum ${octaveBypassed ? "is-bypassed" : ""}`.trim()}>
           <p className="fx-pedal-title">Octave</p>
-          <div className="knob-grid knob-grid-3">
-            <Knob
-              className="pedal-compact"
-              label="Transpose"
-              min={-12}
-              max={12}
-              step={1}
-              value={octaveTranspose}
-              onChange={onOctaveTransposeChange}
-              unit="st"
-              accent="magenta"
-              decimals={0}
-            />
+          <Knob
+            className="pedal-compact"
+            label="Transpose"
+            min={-12}
+            max={12}
+            step={1}
+            value={octaveTranspose}
+            onChange={onOctaveTransposeChange}
+            unit="st"
+            accent="plum"
+            decimals={0}
+          />
+          <div className="knob-grid knob-grid-2">
             <Knob
               className="pedal-compact"
               label="Mix"
@@ -238,7 +238,7 @@ export default function Pedalboard({
               step={0.01}
               value={octaveMix}
               onChange={onOctaveMixChange}
-              accent="magenta"
+              accent="plum"
               decimals={2}
             />
             <Knob
@@ -249,7 +249,7 @@ export default function Pedalboard({
               step={0.01}
               value={octaveTone}
               onChange={onOctaveToneChange}
-              accent="magenta"
+              accent="plum"
               decimals={2}
             />
           </div>
@@ -268,7 +268,7 @@ export default function Pedalboard({
           </div>
         </article>
 
-        <article className={`fx-pedal-card ${doublerBypassed ? "is-bypassed" : ""}`.trim()}>
+        <article className={`fx-pedal-card pedal-accent-terracotta ${doublerBypassed ? "is-bypassed" : ""}`.trim()}>
           <p className="fx-pedal-title">Doubler</p>
           <Knob
             className="pedal-compact"
@@ -278,7 +278,7 @@ export default function Pedalboard({
             step={0.01}
             value={doublerMix}
             onChange={onDoublerMixChange}
-            accent="teal"
+            accent="terracotta"
           />
           <div className="knob-grid knob-grid-2">
             <Knob
@@ -291,7 +291,7 @@ export default function Pedalboard({
               onChange={onDoublerDelayChange}
               unit="ms"
               decimals={0}
-              accent="teal"
+              accent="terracotta"
             />
             <Knob
               className="pedal-compact"
@@ -303,7 +303,7 @@ export default function Pedalboard({
               onChange={onDoublerDetuneChange}
               unit="ct"
               decimals={0}
-              accent="teal"
+              accent="terracotta"
             />
           </div>
           <BypassButton
@@ -314,7 +314,7 @@ export default function Pedalboard({
           />
         </article>
 
-        <article className={`fx-pedal-card ${overdriveBypassed ? "is-bypassed" : ""}`.trim()}>
+        <article className={`fx-pedal-card pedal-accent-saddle ${overdriveBypassed ? "is-bypassed" : ""}`.trim()}>
           <p className="fx-pedal-title">Overdrive</p>
           <Knob
             className="pedal-compact"
@@ -324,7 +324,7 @@ export default function Pedalboard({
             value={overdriveDrive}
             onChange={onOverdriveDriveChange}
             unit="dB"
-            accent="green"
+            accent="saddle"
           />
           <div className="knob-grid knob-grid-2">
             <Knob
@@ -335,7 +335,7 @@ export default function Pedalboard({
               step={0.01}
               value={overdriveTone}
               onChange={onOverdriveToneChange}
-              accent="green"
+              accent="saddle"
             />
             <Knob
               className="pedal-compact"
@@ -345,7 +345,7 @@ export default function Pedalboard({
               value={overdriveLevel}
               onChange={onOverdriveLevelChange}
               unit="dB"
-              accent="green"
+              accent="saddle"
             />
           </div>
           <BypassButton
@@ -356,7 +356,7 @@ export default function Pedalboard({
           />
         </article>
 
-        <article className={`fx-pedal-card ${driveBypassed ? "is-bypassed" : ""}`.trim()}>
+        <article className={`fx-pedal-card pedal-accent-amber ${driveBypassed ? "is-bypassed" : ""}`.trim()}>
           <p className="fx-pedal-title">Drive</p>
           <Knob
             className="pedal-compact"
@@ -366,7 +366,7 @@ export default function Pedalboard({
             value={drive}
             onChange={onDriveChange}
             unit="dB"
-            accent="orange"
+            accent="amber"
           />
           <div className="knob-grid knob-grid-2">
             <Knob
@@ -377,7 +377,7 @@ export default function Pedalboard({
               step={0.01}
               value={driveTone}
               onChange={onDriveToneChange}
-              accent="orange"
+              accent="amber"
             />
             <Knob
               className="pedal-compact"
@@ -387,13 +387,13 @@ export default function Pedalboard({
               value={driveLevel}
               onChange={onDriveLevelChange}
               unit="dB"
-              accent="orange"
+              accent="amber"
             />
           </div>
           <BypassButton label="Power" enabled={driveBypassed} className="pedal-power" onToggle={onDriveToggle} />
         </article>
 
-        <article className={`fx-pedal-card ${fuzzBypassed ? "is-bypassed" : ""}`.trim()}>
+        <article className={`fx-pedal-card pedal-accent-rust ${fuzzBypassed ? "is-bypassed" : ""}`.trim()}>
           <p className="fx-pedal-title">Fuzz</p>
           <Knob
             className="pedal-compact"
@@ -403,7 +403,7 @@ export default function Pedalboard({
             value={fuzzDrive}
             onChange={onFuzzDriveChange}
             unit="dB"
-            accent="red"
+            accent="rust"
           />
           <div className="knob-grid knob-grid-2">
             <Knob
@@ -414,7 +414,7 @@ export default function Pedalboard({
               step={0.01}
               value={fuzzTone}
               onChange={onFuzzToneChange}
-              accent="red"
+              accent="rust"
             />
             <Knob
               className="pedal-compact"
@@ -424,7 +424,7 @@ export default function Pedalboard({
               value={fuzzLevel}
               onChange={onFuzzLevelChange}
               unit="dB"
-              accent="red"
+              accent="rust"
             />
           </div>
           <BypassButton
@@ -435,19 +435,9 @@ export default function Pedalboard({
           />
         </article>
 
-        <article className={`fx-pedal-card ${synthFuzzBypassed ? "is-bypassed" : ""}`.trim()}>
+        <article className={`fx-pedal-card fx-pedal-card-wide pedal-accent-brick ${synthFuzzBypassed ? "is-bypassed" : ""}`.trim()}>
           <p className="fx-pedal-title">Synth Fuzz</p>
-          <Knob
-            className="pedal-compact"
-            label="Mix"
-            min={0}
-            max={1}
-            step={0.01}
-            value={synthFuzzMix}
-            onChange={onSynthFuzzMixChange}
-            accent="red"
-          />
-          <div className="knob-grid knob-grid-2">
+          <div className="knob-grid knob-grid-3">
             <Knob
               className="pedal-compact"
               label="Delay"
@@ -458,7 +448,7 @@ export default function Pedalboard({
               onChange={onSynthFuzzDelayChange}
               unit="ms"
               decimals={0}
-              accent="red"
+              accent="brick"
             />
             <Knob
               className="pedal-compact"
@@ -470,10 +460,8 @@ export default function Pedalboard({
               onChange={onSynthFuzzDetuneChange}
               unit="ct"
               decimals={0}
-              accent="red"
+              accent="brick"
             />
-          </div>
-          <div className="knob-grid knob-grid-2">
             <Knob
               className="pedal-compact"
               label="Drive"
@@ -482,9 +470,11 @@ export default function Pedalboard({
               step={0.05}
               value={synthFuzzDrive}
               onChange={onSynthFuzzDriveChange}
-              accent="red"
+              accent="brick"
               decimals={2}
             />
+          </div>
+          <div className="knob-grid knob-grid-2">
             <Knob
               className="pedal-compact"
               label="Level"
@@ -493,7 +483,17 @@ export default function Pedalboard({
               value={synthFuzzLevel}
               onChange={onSynthFuzzLevelChange}
               unit="dB"
-              accent="red"
+              accent="brick"
+            />
+            <Knob
+              className="pedal-compact"
+              label="Mix"
+              min={0}
+              max={1}
+              step={0.01}
+              value={synthFuzzMix}
+              onChange={onSynthFuzzMixChange}
+              accent="brick"
             />
           </div>
           <BypassButton
@@ -504,7 +504,7 @@ export default function Pedalboard({
           />
         </article>
 
-        <article className={`fx-pedal-card ${reverbBypassed ? "is-bypassed" : ""}`.trim()}>
+        <article className={`fx-pedal-card pedal-accent-saffron ${reverbBypassed ? "is-bypassed" : ""}`.trim()}>
           <p className="fx-pedal-title">Reverb</p>
           <div className="knob-grid knob-grid-2">
             <Knob
@@ -515,7 +515,7 @@ export default function Pedalboard({
               step={0.01}
               value={reverbSize}
               onChange={onReverbSizeChange}
-              accent="purple"
+              accent="saffron"
             />
             <Knob
               className="pedal-compact"
@@ -525,7 +525,7 @@ export default function Pedalboard({
               step={0.01}
               value={reverbDamping}
               onChange={onReverbDampingChange}
-              accent="purple"
+              accent="saffron"
             />
             <Knob
               className="pedal-compact"
@@ -535,7 +535,7 @@ export default function Pedalboard({
               step={0.01}
               value={reverbMix}
               onChange={onReverbMixChange}
-              accent="purple"
+              accent="saffron"
             />
             <Knob
               className="pedal-compact"
@@ -545,7 +545,7 @@ export default function Pedalboard({
               step={0.01}
               value={reverbWidth}
               onChange={onReverbWidthChange}
-              accent="purple"
+              accent="saffron"
             />
           </div>
           <BypassButton
@@ -557,7 +557,7 @@ export default function Pedalboard({
         </article>
 
         <article
-          className={`fx-pedal-card fx-pedal-card-wide ${delayBypassed ? "is-bypassed" : ""}`.trim()}
+          className={`fx-pedal-card fx-pedal-card-wide pedal-accent-copper ${delayBypassed ? "is-bypassed" : ""}`.trim()}
         >
           <p className="fx-pedal-title">Delay</p>
           <div className="knob-grid knob-grid-3">
@@ -569,7 +569,7 @@ export default function Pedalboard({
               step={0.01}
               value={delayMix}
               onChange={onDelayMixChange}
-              accent="cyan"
+              accent="copper"
             />
             <Knob
               className="pedal-compact"
@@ -579,7 +579,7 @@ export default function Pedalboard({
               step={0.01}
               value={delayFeedback}
               onChange={onDelayFeedbackChange}
-              accent="cyan"
+              accent="copper"
             />
             <div className="pedal-mode-toggle">
               <div className="pedal-mode-option">
@@ -613,7 +613,7 @@ export default function Pedalboard({
               onChange={onDelayTimeLChange}
               unit="ms"
               decimals={0}
-              accent="cyan"
+              accent="copper"
             />
             <Knob
               className="pedal-compact"
@@ -625,7 +625,7 @@ export default function Pedalboard({
               onChange={delayModeIsDual ? onDelayTimeRChange : undefined}
               unit="ms"
               decimals={0}
-              accent="cyan"
+              accent="copper"
               disabled={!delayModeIsDual}
             />
           </div>
@@ -637,7 +637,7 @@ export default function Pedalboard({
            />
          </article>
 
-        <article className={`fx-pedal-card ${tremoloBypassed ? "is-bypassed" : ""}`.trim()}>
+        <article className={`fx-pedal-card pedal-accent-gold ${tremoloBypassed ? "is-bypassed" : ""}`.trim()}>
           <p className="fx-pedal-title">Tremolo</p>
           <div className="knob-grid knob-grid-2">
             <Knob
@@ -650,7 +650,7 @@ export default function Pedalboard({
               onChange={onTremoloSpeedChange}
               unit="Hz"
               decimals={2}
-              accent="yellow"
+              accent="gold"
             />
             <Knob
               className="pedal-compact"
@@ -660,7 +660,7 @@ export default function Pedalboard({
               step={0.01}
               value={tremoloDepth}
               onChange={onTremoloDepthChange}
-              accent="yellow"
+              accent="gold"
             />
           </div>
           <div className="pedal-mode-toggle">

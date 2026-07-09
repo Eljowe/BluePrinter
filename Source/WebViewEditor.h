@@ -4,14 +4,14 @@
 #include "PluginProcessor.h"
 #include <vector>
 
-class SimpleEQWebViewEditor : public juce::AudioProcessorEditor
+class ObstacleWebViewEditor : public juce::AudioProcessorEditor
                               , private juce::AudioProcessorValueTreeState::Listener
                               , private juce::AsyncUpdater
                               , private juce::Timer
 {
 public:
-    explicit SimpleEQWebViewEditor(SimpleEQAudioProcessor&);
-    ~SimpleEQWebViewEditor() override;
+    explicit ObstacleWebViewEditor(ObstacleAudioProcessor&);
+    ~ObstacleWebViewEditor() override;
 
     void paint(juce::Graphics&) override;
     void resized() override;
@@ -25,7 +25,7 @@ private:
     juce::File getWebUiDistRoot() const;
     void emitParameterSnapshotToFrontend();
     juce::var makeParameterSnapshot();
-    std::vector<float> buildSpectrumFromFifo(SingleChannelSampleFifo<SimpleEQAudioProcessor::BlockType>& fifo,
+    std::vector<float> buildSpectrumFromFifo(SingleChannelSampleFifo<ObstacleAudioProcessor::BlockType>& fifo,
                                              juce::AudioBuffer<float>& monoBuffer,
                                              std::vector<float>& fftScratch,
                                              std::vector<float>& fftResult);
@@ -88,7 +88,7 @@ public:
     static constexpr const char* paramReverbBypassed = "Reverb Bypassed";
     static constexpr const char* paramAnalyzerEnabled = "Analyzer Enabled";
 
-    SimpleEQAudioProcessor& audioProcessor;
+    ObstacleAudioProcessor& audioProcessor;
     juce::WebBrowserComponent webView;
     juce::Label fallbackLabel;
 
@@ -108,5 +108,5 @@ public:
     std::vector<float> leftFftResult = std::vector<float>(spectrumPoints, spectrumNegativeInfinity);
     std::vector<float> rightFftResult = std::vector<float>(spectrumPoints, spectrumNegativeInfinity);
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SimpleEQWebViewEditor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ObstacleWebViewEditor)
 };

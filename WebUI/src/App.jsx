@@ -341,10 +341,9 @@ export default function App() {
     <main className="app">
       <header className="chrome-header">
         <div className="brand-block">
-          <span className="brand-mark">A</span>
           <div>
-            <p className="brand-name">IRONFORGE</p>
-            <p className="brand-version">v2.4.1</p>
+            <p className="brand-name">OBSTACLE</p>
+            <p className="brand-version">v1.0.0</p>
           </div>
         </div>
 
@@ -416,7 +415,7 @@ export default function App() {
                 emitParameterChange(PARAM_IDS.input, next);
               }}
               unit="dB"
-              accent="orange"
+              accent="amber"
             />
             <Knob
               className="io-compact"
@@ -429,7 +428,7 @@ export default function App() {
                 emitParameterChange(PARAM_IDS.output, next);
               }}
               unit="dB"
-              accent="yellow"
+              accent="gold"
             />
             <MiniPeak className="io-meter" label="Output" level={outputPeak} clipping={outputClipping} />
           </div>
