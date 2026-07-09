@@ -12,6 +12,9 @@ const PARAM_IDS = {
   compressorTone: "Compressor Tone",
   compressorLevel: "Compressor Level",
   octaveTranspose: "Octave Transpose",
+  octaveMix: "Octave Mix",
+  octaveTone: "Octave Tone",
+  octaveMonoDetector: "Octave Mono Detector",
   octaveBypassed: "Octave Bypassed",
   doublerMix: "Doubler Mix",
   doublerDelay: "Doubler Delay",
@@ -20,6 +23,7 @@ const PARAM_IDS = {
   tremoloSpeed: "Tremolo Speed",
   tremoloDepth: "Tremolo Depth",
   tremoloLfo: "Tremolo LFO",
+  tremoloStereoPhase: "Tremolo Stereo Phase",
   tremoloBypassed: "Tremolo Bypassed",
   delayMix: "Delay Mix",
   delayTimeL: "Delay Time L",
@@ -28,18 +32,28 @@ const PARAM_IDS = {
   delayModeIsDual: "Delay Mode",
   delayBypassed: "Delay Bypassed",
   monoInput: "Mono Input",
+  overdriveDrive: "Overdrive Drive",
+  overdriveTone: "Overdrive Tone",
+  overdriveLevel: "Overdrive Level",
+  overdriveBypassed: "Overdrive Bypassed",
   drive: "Distortion Drive",
   driveTone: "Distortion Tone",
   driveLevel: "Distortion Level",
   fuzzDrive: "Fuzz Drive",
   fuzzTone: "Fuzz Tone",
   fuzzLevel: "Fuzz Level",
+  synthFuzzMix: "Synth Fuzz Mix",
+  synthFuzzDelay: "Synth Fuzz Delay",
+  synthFuzzDetune: "Synth Fuzz Detune",
+  synthFuzzDrive: "Synth Fuzz Drive",
+  synthFuzzLevel: "Synth Fuzz Level",
   output: "Output Gain",
   mute: "Mute",
   eqBands: Array.from({ length: 10 }, (_, i) => `EQ Band ${i}`),
   eqBypassed: "EQ Bypassed",
   driveBypassed: "Distortion Bypassed",
   fuzzBypassed: "Fuzz Bypassed",
+  synthFuzzBypassed: "Synth Fuzz Bypassed",
   compressorBypassed: "Compressor Bypassed",
   reverbSize: "Reverb Size",
   reverbDamping: "Reverb Damping",
@@ -85,24 +99,36 @@ function readInitialParametersFromJuce() {
     compressorTone: Number(first.compressorTone ?? 0),
     compressorLevel: Number(first.compressorLevel ?? 0),
     octaveTranspose: Number(first.octaveTranspose ?? 0),
+    octaveMix: Number(first.octaveMix ?? 0.5),
+    octaveTone: Number(first.octaveTone ?? 0.5),
+    octaveMonoDetector: Boolean(first.octaveMonoDetector),
     doublerMix: Number(first.doublerMix ?? 0),
     doublerDelay: Number(first.doublerDelay ?? 20),
     doublerDetune: Number(first.doublerDetune ?? 5),
     tremoloSpeed: Number(first.tremoloSpeed ?? 5),
     tremoloDepth: Number(first.tremoloDepth ?? 0.5),
     tremoloLfoIndex: Number(first.tremoloLfoIndex ?? 0),
+    tremoloStereoPhase: Boolean(first.tremoloStereoPhase),
     delayMix: Number(first.delayMix ?? 0.35),
     delayTimeL: Number(first.delayTimeL ?? 350),
     delayTimeR: Number(first.delayTimeR ?? 350),
     delayFeedback: Number(first.delayFeedback ?? 0.35),
     delayModeIsDual: Boolean(first.delayModeIsDual),
     monoInput: Boolean(first.monoInput),
+    overdriveDrive: Number(first.overdriveDrive ?? 0),
+    overdriveTone: Number(first.overdriveTone ?? 0.5),
+    overdriveLevel: Number(first.overdriveLevel ?? 0),
     drive: Number(first.drive ?? 6),
     driveTone: Number(first.driveTone ?? 0.7),
     driveLevel: Number(first.driveLevel ?? 0),
     fuzzDrive: Number(first.fuzzDrive ?? 0),
     fuzzTone: Number(first.fuzzTone ?? 0.7),
     fuzzLevel: Number(first.fuzzLevel ?? 0),
+    synthFuzzMix: Number(first.synthFuzzMix ?? 0),
+    synthFuzzDelay: Number(first.synthFuzzDelay ?? 18),
+    synthFuzzDetune: Number(first.synthFuzzDetune ?? 6),
+    synthFuzzDrive: Number(first.synthFuzzDrive ?? 1),
+    synthFuzzLevel: Number(first.synthFuzzLevel ?? 0),
     outputGain: Number(first.outputGain ?? 0),
     mute: Boolean(first.mute),
     eqBands: Array.isArray(first.eqBands) ? first.eqBands.map((v) => Number(v)) : Array(10).fill(0),
@@ -112,8 +138,10 @@ function readInitialParametersFromJuce() {
     reverbMix: Number(first.reverbMix ?? 0),
     reverbWidth: Number(first.reverbWidth ?? 1),
     highCutBypassed: Boolean(first.highCutBypassed),
+    overdriveBypassed: Boolean(first.overdriveBypassed),
     driveBypassed: Boolean(first.driveBypassed),
     fuzzBypassed: Boolean(first.fuzzBypassed),
+    synthFuzzBypassed: Boolean(first.synthFuzzBypassed),
     compressorBypassed: Boolean(first.compressorBypassed),
     octaveBypassed: Boolean(first.octaveBypassed),
     doublerBypassed: Boolean(first.doublerBypassed),
@@ -166,16 +194,25 @@ export default function App() {
   const [fuzzDrive, setFuzzDrive] = useState(initial?.fuzzDrive ?? 0);
   const [fuzzTone, setFuzzTone] = useState(initial?.fuzzTone ?? 0.7);
   const [fuzzLevel, setFuzzLevel] = useState(initial?.fuzzLevel ?? 0);
+  const [synthFuzzMix, setSynthFuzzMix] = useState(initial?.synthFuzzMix ?? 0);
+  const [synthFuzzDelay, setSynthFuzzDelay] = useState(initial?.synthFuzzDelay ?? 18);
+  const [synthFuzzDetune, setSynthFuzzDetune] = useState(initial?.synthFuzzDetune ?? 6);
+  const [synthFuzzDrive, setSynthFuzzDrive] = useState(initial?.synthFuzzDrive ?? 1);
+  const [synthFuzzLevel, setSynthFuzzLevel] = useState(initial?.synthFuzzLevel ?? 0);
   const [compressorAmount, setCompressorAmount] = useState(initial?.compressorAmount ?? 0);
   const [compressorTone, setCompressorTone] = useState(initial?.compressorTone ?? 0);
   const [compressorLevel, setCompressorLevel] = useState(initial?.compressorLevel ?? 0);
   const [octaveTranspose, setOctaveTranspose] = useState(initial?.octaveTranspose ?? 0);
+  const [octaveMix, setOctaveMix] = useState(initial?.octaveMix ?? 0.5);
+  const [octaveTone, setOctaveTone] = useState(initial?.octaveTone ?? 0.5);
+  const [octaveMonoDetector, setOctaveMonoDetector] = useState(initial?.octaveMonoDetector ?? true);
   const [doublerMix, setDoublerMix] = useState(initial?.doublerMix ?? 0);
   const [doublerDelay, setDoublerDelay] = useState(initial?.doublerDelay ?? 20);
   const [doublerDetune, setDoublerDetune] = useState(initial?.doublerDetune ?? 5);
   const [tremoloSpeed, setTremoloSpeed] = useState(initial?.tremoloSpeed ?? 5);
   const [tremoloDepth, setTremoloDepth] = useState(initial?.tremoloDepth ?? 0.5);
   const [tremoloLfoIndex, setTremoloLfoIndex] = useState(initial?.tremoloLfoIndex ?? 0);
+  const [tremoloStereoPhase, setTremoloStereoPhase] = useState(initial?.tremoloStereoPhase ?? true);
   const [delayMix, setDelayMix] = useState(initial?.delayMix ?? 0.35);
   const [delayTimeL, setDelayTimeL] = useState(initial?.delayTimeL ?? 350);
   const [delayTimeR, setDelayTimeR] = useState(initial?.delayTimeR ?? 350);
@@ -186,8 +223,13 @@ export default function App() {
   const [mute, setMute] = useState(initial?.mute ?? false);
   const [eqBands, setEqBands] = useState(Array.isArray(initial?.eqBands) ? initial.eqBands : Array(10).fill(0));
   const [eqBypassed, setEqBypassed] = useState(initial?.eqBypassed ?? false);
+  const [overdriveDrive, setOverdriveDrive] = useState(initial?.overdriveDrive ?? 0);
+  const [overdriveTone, setOverdriveTone] = useState(initial?.overdriveTone ?? 0.5);
+  const [overdriveLevel, setOverdriveLevel] = useState(initial?.overdriveLevel ?? 0);
+  const [overdriveBypassed, setOverdriveBypassed] = useState(initial?.overdriveBypassed ?? false);
   const [driveBypassed, setDriveBypassed] = useState(initial?.driveBypassed ?? false);
   const [fuzzBypassed, setFuzzBypassed] = useState(initial?.fuzzBypassed ?? false);
+  const [synthFuzzBypassed, setSynthFuzzBypassed] = useState(initial?.synthFuzzBypassed ?? false);
   const [compressorBypassed, setCompressorBypassed] = useState(initial?.compressorBypassed ?? false);
   const [octaveBypassed, setOctaveBypassed] = useState(initial?.octaveBypassed ?? false);
   const [doublerBypassed, setDoublerBypassed] = useState(initial?.doublerBypassed ?? false);
@@ -227,24 +269,36 @@ export default function App() {
       if (payload.compressorTone !== undefined) setCompressorTone(Number(payload.compressorTone));
       if (payload.compressorLevel !== undefined) setCompressorLevel(Number(payload.compressorLevel));
       if (payload.octaveTranspose !== undefined) setOctaveTranspose(Number(payload.octaveTranspose));
+      if (payload.octaveMix !== undefined) setOctaveMix(Number(payload.octaveMix));
+      if (payload.octaveTone !== undefined) setOctaveTone(Number(payload.octaveTone));
+      if (payload.octaveMonoDetector !== undefined) setOctaveMonoDetector(Boolean(payload.octaveMonoDetector));
       if (payload.doublerMix !== undefined) setDoublerMix(Number(payload.doublerMix));
       if (payload.doublerDelay !== undefined) setDoublerDelay(Number(payload.doublerDelay));
       if (payload.doublerDetune !== undefined) setDoublerDetune(Number(payload.doublerDetune));
       if (payload.tremoloSpeed !== undefined) setTremoloSpeed(Number(payload.tremoloSpeed));
       if (payload.tremoloDepth !== undefined) setTremoloDepth(Number(payload.tremoloDepth));
       if (payload.tremoloLfoIndex !== undefined) setTremoloLfoIndex(Number(payload.tremoloLfoIndex));
+      if (payload.tremoloStereoPhase !== undefined) setTremoloStereoPhase(Boolean(payload.tremoloStereoPhase));
       if (payload.delayMix !== undefined) setDelayMix(Number(payload.delayMix));
       if (payload.delayTimeL !== undefined) setDelayTimeL(Number(payload.delayTimeL));
       if (payload.delayTimeR !== undefined) setDelayTimeR(Number(payload.delayTimeR));
       if (payload.delayFeedback !== undefined) setDelayFeedback(Number(payload.delayFeedback));
       if (payload.delayModeIsDual !== undefined) setDelayModeIsDual(Boolean(payload.delayModeIsDual));
       if (payload.monoInput !== undefined) setMonoInput(Boolean(payload.monoInput));
+      if (payload.overdriveDrive !== undefined) setOverdriveDrive(Number(payload.overdriveDrive));
+      if (payload.overdriveTone !== undefined) setOverdriveTone(Number(payload.overdriveTone));
+      if (payload.overdriveLevel !== undefined) setOverdriveLevel(Number(payload.overdriveLevel));
       if (payload.drive !== undefined) setDrive(Number(payload.drive));
       if (payload.driveTone !== undefined) setDriveTone(Number(payload.driveTone));
       if (payload.driveLevel !== undefined) setDriveLevel(Number(payload.driveLevel));
       if (payload.fuzzDrive !== undefined) setFuzzDrive(Number(payload.fuzzDrive));
       if (payload.fuzzTone !== undefined) setFuzzTone(Number(payload.fuzzTone));
       if (payload.fuzzLevel !== undefined) setFuzzLevel(Number(payload.fuzzLevel));
+      if (payload.synthFuzzMix !== undefined) setSynthFuzzMix(Number(payload.synthFuzzMix));
+      if (payload.synthFuzzDelay !== undefined) setSynthFuzzDelay(Number(payload.synthFuzzDelay));
+      if (payload.synthFuzzDetune !== undefined) setSynthFuzzDetune(Number(payload.synthFuzzDetune));
+      if (payload.synthFuzzDrive !== undefined) setSynthFuzzDrive(Number(payload.synthFuzzDrive));
+      if (payload.synthFuzzLevel !== undefined) setSynthFuzzLevel(Number(payload.synthFuzzLevel));
       if (payload.outputGain !== undefined) setOutGain(Number(payload.outputGain));
       if (payload.monoInput !== undefined) setMonoInput(Boolean(payload.monoInput));
       if (payload.mute !== undefined) setMute(Boolean(payload.mute));
@@ -252,8 +306,10 @@ export default function App() {
         setEqBands(payload.eqBands.map((v) => Number(v)));
       }
       if (payload.eqBypassed !== undefined) setEqBypassed(Boolean(payload.eqBypassed));
+      if (payload.overdriveBypassed !== undefined) setOverdriveBypassed(Boolean(payload.overdriveBypassed));
       if (payload.driveBypassed !== undefined) setDriveBypassed(Boolean(payload.driveBypassed));
       if (payload.fuzzBypassed !== undefined) setFuzzBypassed(Boolean(payload.fuzzBypassed));
+      if (payload.synthFuzzBypassed !== undefined) setSynthFuzzBypassed(Boolean(payload.synthFuzzBypassed));
       if (payload.compressorBypassed !== undefined) setCompressorBypassed(Boolean(payload.compressorBypassed));
       if (payload.octaveBypassed !== undefined) setOctaveBypassed(Boolean(payload.octaveBypassed));
       if (payload.doublerBypassed !== undefined) setDoublerBypassed(Boolean(payload.doublerBypassed));
@@ -389,6 +445,10 @@ export default function App() {
           tunerLevel={tunerLevel}
           gateThreshold={gateThreshold}
           gateBypassed={gateBypassed}
+          overdriveDrive={overdriveDrive}
+          overdriveTone={overdriveTone}
+          overdriveLevel={overdriveLevel}
+          overdriveBypassed={overdriveBypassed}
           drive={drive}
           driveTone={driveTone}
           driveLevel={driveLevel}
@@ -397,11 +457,20 @@ export default function App() {
           fuzzTone={fuzzTone}
           fuzzLevel={fuzzLevel}
           fuzzBypassed={fuzzBypassed}
+          synthFuzzMix={synthFuzzMix}
+          synthFuzzDelay={synthFuzzDelay}
+          synthFuzzDetune={synthFuzzDetune}
+          synthFuzzDrive={synthFuzzDrive}
+          synthFuzzLevel={synthFuzzLevel}
+          synthFuzzBypassed={synthFuzzBypassed}
           compressorAmount={compressorAmount}
           compressorBypassed={compressorBypassed}
           compressorTone={compressorTone}
           compressorLevel={compressorLevel}
           octaveTranspose={octaveTranspose}
+          octaveMix={octaveMix}
+          octaveTone={octaveTone}
+          octaveMonoDetector={octaveMonoDetector}
           octaveBypassed={octaveBypassed}
           doublerMix={doublerMix}
           doublerDelay={doublerDelay}
@@ -410,6 +479,7 @@ export default function App() {
           tremoloSpeed={tremoloSpeed}
           tremoloDepth={tremoloDepth}
           tremoloLfoIndex={tremoloLfoIndex}
+          tremoloStereoPhase={tremoloStereoPhase}
           tremoloBypassed={tremoloBypassed}
           delayMix={delayMix}
           delayTimeL={delayTimeL}
@@ -435,6 +505,23 @@ export default function App() {
             const next = !gateBypassed;
             setGateBypassed(next);
             emitParameterChange(PARAM_IDS.gateBypassed, next ? 1 : 0);
+          }}
+          onOverdriveDriveChange={(next) => {
+            setOverdriveDrive(next);
+            emitParameterChange(PARAM_IDS.overdriveDrive, next);
+          }}
+          onOverdriveToneChange={(next) => {
+            setOverdriveTone(next);
+            emitParameterChange(PARAM_IDS.overdriveTone, next);
+          }}
+          onOverdriveLevelChange={(next) => {
+            setOverdriveLevel(next);
+            emitParameterChange(PARAM_IDS.overdriveLevel, next);
+          }}
+          onOverdriveToggle={() => {
+            const next = !overdriveBypassed;
+            setOverdriveBypassed(next);
+            emitParameterChange(PARAM_IDS.overdriveBypassed, next ? 1 : 0);
           }}
           onDriveChange={(next) => {
             setDrive(next);
@@ -470,6 +557,31 @@ export default function App() {
             setFuzzBypassed(next);
             emitParameterChange(PARAM_IDS.fuzzBypassed, next ? 1 : 0);
           }}
+          onSynthFuzzMixChange={(next) => {
+            setSynthFuzzMix(next);
+            emitParameterChange(PARAM_IDS.synthFuzzMix, next);
+          }}
+          onSynthFuzzDelayChange={(next) => {
+            setSynthFuzzDelay(next);
+            emitParameterChange(PARAM_IDS.synthFuzzDelay, next);
+          }}
+          onSynthFuzzDetuneChange={(next) => {
+            setSynthFuzzDetune(next);
+            emitParameterChange(PARAM_IDS.synthFuzzDetune, next);
+          }}
+          onSynthFuzzDriveChange={(next) => {
+            setSynthFuzzDrive(next);
+            emitParameterChange(PARAM_IDS.synthFuzzDrive, next);
+          }}
+          onSynthFuzzLevelChange={(next) => {
+            setSynthFuzzLevel(next);
+            emitParameterChange(PARAM_IDS.synthFuzzLevel, next);
+          }}
+          onSynthFuzzToggle={() => {
+            const next = !synthFuzzBypassed;
+            setSynthFuzzBypassed(next);
+            emitParameterChange(PARAM_IDS.synthFuzzBypassed, next ? 1 : 0);
+          }}
           onCompressorChange={(next) => {
             setCompressorAmount(next);
             emitParameterChange(PARAM_IDS.compressorAmount, next);
@@ -490,6 +602,19 @@ export default function App() {
           onOctaveTransposeChange={(next) => {
             setOctaveTranspose(next);
             emitParameterChange(PARAM_IDS.octaveTranspose, next);
+          }}
+          onOctaveMixChange={(next) => {
+            setOctaveMix(next);
+            emitParameterChange(PARAM_IDS.octaveMix, next);
+          }}
+          onOctaveToneChange={(next) => {
+            setOctaveTone(next);
+            emitParameterChange(PARAM_IDS.octaveTone, next);
+          }}
+          onOctaveMonoDetectorToggle={() => {
+            const next = !octaveMonoDetector;
+            setOctaveMonoDetector(next);
+            emitParameterChange(PARAM_IDS.octaveMonoDetector, next ? 1 : 0);
           }}
           onDoublerMixChange={(next) => {
             setDoublerMix(next);
@@ -524,6 +649,11 @@ export default function App() {
           onTremoloLfoChange={(next) => {
             setTremoloLfoIndex(next);
             emitParameterChange(PARAM_IDS.tremoloLfo, next);
+          }}
+          onTremoloStereoPhaseToggle={() => {
+            const next = !tremoloStereoPhase;
+            setTremoloStereoPhase(next);
+            emitParameterChange(PARAM_IDS.tremoloStereoPhase, next ? 1 : 0);
           }}
           onTremoloToggle={() => {
             const next = !tremoloBypassed;

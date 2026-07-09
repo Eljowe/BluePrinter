@@ -12,15 +12,28 @@ export default function Pedalboard({
   driveTone,
   driveLevel,
   driveBypassed,
+  overdriveDrive,
+  overdriveTone,
+  overdriveLevel,
+  overdriveBypassed,
   fuzzDrive,
   fuzzTone,
   fuzzLevel,
   fuzzBypassed,
+  synthFuzzMix,
+  synthFuzzDelay,
+  synthFuzzDetune,
+  synthFuzzDrive,
+  synthFuzzLevel,
+  synthFuzzBypassed,
   compressorAmount,
   compressorBypassed,
   compressorTone,
   compressorLevel,
   octaveTranspose,
+  octaveMix,
+  octaveTone,
+  octaveMonoDetector,
   octaveBypassed,
   doublerMix,
   doublerDelay,
@@ -29,6 +42,7 @@ export default function Pedalboard({
   tremoloSpeed,
   tremoloDepth,
   tremoloLfoIndex,
+  tremoloStereoPhase,
   tremoloBypassed,
   delayMix,
   delayTimeL,
@@ -52,11 +66,24 @@ export default function Pedalboard({
   onDriveToneChange,
   onDriveLevelChange,
   onDriveToggle,
+  onOverdriveDriveChange,
+  onOverdriveToneChange,
+  onOverdriveLevelChange,
+  onOverdriveToggle,
   onFuzzDriveChange,
   onFuzzToneChange,
   onFuzzLevelChange,
   onFuzzToggle,
+  onSynthFuzzMixChange,
+  onSynthFuzzDelayChange,
+  onSynthFuzzDetuneChange,
+  onSynthFuzzDriveChange,
+  onSynthFuzzLevelChange,
+  onSynthFuzzToggle,
   onOctaveTransposeChange,
+  onOctaveMixChange,
+  onOctaveToneChange,
+  onOctaveMonoDetectorToggle,
   onOctaveToggle,
   onDoublerMixChange,
   onDoublerDelayChange,
@@ -65,6 +92,7 @@ export default function Pedalboard({
   onTremoloSpeedChange,
   onTremoloDepthChange,
   onTremoloLfoChange,
+  onTremoloStereoPhaseToggle,
   onTremoloToggle,
   onDelayMixChange,
   onDelayTimeLChange,
@@ -187,9 +215,9 @@ export default function Pedalboard({
           />
         </article>
 
-        <article className={`fx-pedal-card ${octaveBypassed ? "is-bypassed" : ""}`.trim()}>
+        <article className={`fx-pedal-card fx-pedal-card-wide ${octaveBypassed ? "is-bypassed" : ""}`.trim()}>
           <p className="fx-pedal-title">Octave</p>
-          <div className="knob-grid knob-grid-1">
+          <div className="knob-grid knob-grid-3">
             <Knob
               className="pedal-compact"
               label="Transpose"
@@ -202,13 +230,42 @@ export default function Pedalboard({
               accent="magenta"
               decimals={0}
             />
+            <Knob
+              className="pedal-compact"
+              label="Mix"
+              min={0}
+              max={1}
+              step={0.01}
+              value={octaveMix}
+              onChange={onOctaveMixChange}
+              accent="magenta"
+              decimals={2}
+            />
+            <Knob
+              className="pedal-compact"
+              label="Tone"
+              min={0}
+              max={1}
+              step={0.01}
+              value={octaveTone}
+              onChange={onOctaveToneChange}
+              accent="magenta"
+              decimals={2}
+            />
           </div>
-          <BypassButton
-            label="Power"
-            enabled={octaveBypassed}
-            className="pedal-power"
-            onToggle={onOctaveToggle}
-          />
+          <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", justifyContent: "center" }}>
+            <BypassButton
+              label="Mono Det"
+              enabled={octaveMonoDetector}
+              onToggle={onOctaveMonoDetectorToggle}
+            />
+            <BypassButton
+              label="Power"
+              enabled={octaveBypassed}
+              className="pedal-power"
+              onToggle={onOctaveToggle}
+            />
+          </div>
         </article>
 
         <article className={`fx-pedal-card ${doublerBypassed ? "is-bypassed" : ""}`.trim()}>
@@ -254,6 +311,48 @@ export default function Pedalboard({
             enabled={doublerBypassed}
             className="pedal-power"
             onToggle={onDoublerToggle}
+          />
+        </article>
+
+        <article className={`fx-pedal-card ${overdriveBypassed ? "is-bypassed" : ""}`.trim()}>
+          <p className="fx-pedal-title">Overdrive</p>
+          <Knob
+            className="pedal-compact"
+            label="Drive"
+            min={0}
+            max={24}
+            value={overdriveDrive}
+            onChange={onOverdriveDriveChange}
+            unit="dB"
+            accent="green"
+          />
+          <div className="knob-grid knob-grid-2">
+            <Knob
+              className="pedal-compact"
+              label="Tone"
+              min={0}
+              max={1}
+              step={0.01}
+              value={overdriveTone}
+              onChange={onOverdriveToneChange}
+              accent="green"
+            />
+            <Knob
+              className="pedal-compact"
+              label="Level"
+              min={-24}
+              max={12}
+              value={overdriveLevel}
+              onChange={onOverdriveLevelChange}
+              unit="dB"
+              accent="green"
+            />
+          </div>
+          <BypassButton
+            label="Power"
+            enabled={overdriveBypassed}
+            className="pedal-power"
+            onToggle={onOverdriveToggle}
           />
         </article>
 
@@ -333,6 +432,75 @@ export default function Pedalboard({
             enabled={fuzzBypassed}
             className="pedal-power"
             onToggle={onFuzzToggle}
+          />
+        </article>
+
+        <article className={`fx-pedal-card ${synthFuzzBypassed ? "is-bypassed" : ""}`.trim()}>
+          <p className="fx-pedal-title">Synth Fuzz</p>
+          <Knob
+            className="pedal-compact"
+            label="Mix"
+            min={0}
+            max={1}
+            step={0.01}
+            value={synthFuzzMix}
+            onChange={onSynthFuzzMixChange}
+            accent="red"
+          />
+          <div className="knob-grid knob-grid-2">
+            <Knob
+              className="pedal-compact"
+              label="Delay"
+              min={0}
+              max={100}
+              step={0.5}
+              value={synthFuzzDelay}
+              onChange={onSynthFuzzDelayChange}
+              unit="ms"
+              decimals={0}
+              accent="red"
+            />
+            <Knob
+              className="pedal-compact"
+              label="Detune"
+              min={-50}
+              max={50}
+              step={1}
+              value={synthFuzzDetune}
+              onChange={onSynthFuzzDetuneChange}
+              unit="ct"
+              decimals={0}
+              accent="red"
+            />
+          </div>
+          <div className="knob-grid knob-grid-2">
+            <Knob
+              className="pedal-compact"
+              label="Drive"
+              min={1}
+              max={20}
+              step={0.05}
+              value={synthFuzzDrive}
+              onChange={onSynthFuzzDriveChange}
+              accent="red"
+              decimals={2}
+            />
+            <Knob
+              className="pedal-compact"
+              label="Level"
+              min={-24}
+              max={12}
+              value={synthFuzzLevel}
+              onChange={onSynthFuzzLevelChange}
+              unit="dB"
+              accent="red"
+            />
+          </div>
+          <BypassButton
+            label="Power"
+            enabled={synthFuzzBypassed}
+            className="pedal-power"
+            onToggle={onSynthFuzzToggle}
           />
         </article>
 
@@ -521,16 +689,23 @@ export default function Pedalboard({
                 onClick={() => { if (tremoloLfoIndex !== 2) onTremoloLfoChange(2); }}
                 aria-label="Square"
               />
-              <span className="pedal-mode-label">Square</span>
+                <span className="pedal-mode-label">Square</span>
+              </div>
             </div>
-          </div>
-          <BypassButton
-            label="Power"
-            enabled={tremoloBypassed}
-            className="pedal-power"
-            onToggle={onTremoloToggle}
-          />
-        </article>
+            <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", justifyContent: "center" }}>
+              <BypassButton
+                label="Stereo"
+                enabled={tremoloStereoPhase}
+                onToggle={onTremoloStereoPhaseToggle}
+              />
+              <BypassButton
+                label="Power"
+                enabled={tremoloBypassed}
+                className="pedal-power"
+                onToggle={onTremoloToggle}
+              />
+            </div>
+          </article>
       </div>
     </section>
   );
