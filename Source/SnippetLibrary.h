@@ -23,6 +23,10 @@ struct Snippet
     // (audio too short, atonal, or below the confidence threshold).
     juce::String key;
     float        keyConfidence = 0.0f;
+    // Pitch classes detected in the snippet (e.g. {"C", "E", "G"}),
+    // strongest first. Populated by the same Analyse pass as the key,
+    // empty if analysis hasn't run or the audio has no clear pitches.
+    juce::StringArray detectedNotes;
 };
 
 class SnippetLibrary

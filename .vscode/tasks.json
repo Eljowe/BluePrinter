@@ -59,6 +59,20 @@
       "problemMatcher": ["$msCompile"],
       "group": "test",
       "dependsOn": "Build WebUI"
+    },
+    {
+      "label": "Build + Install + Run BluePrinter (Release, per-user)",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-Command",
+        "Get-Process -Name BluePrinter -ErrorAction SilentlyContinue | Stop-Process -Force; $env:BLUEPRINTER_HOME = Join-Path $env:USERPROFILE 'BluePrinter'; if (-not (Test-Path build -PathType Container)) { cmake -S . -B build \"-DBLUEPRINTER_VST3_DIR=$(Join-Path $env:BLUEPRINTER_HOME 'VST3')\" | Out-Null }; cmake --build build --config Release --target BluePrinter_Standalone BluePrinter_VST3; cmake --install build --config Release --prefix $env:BLUEPRINTER_HOME; Start-Process -FilePath (Join-Path $env:BLUEPRINTER_HOME 'BluePrinter.exe')"
+      ],
+      "isBackground": false,
+      "problemMatcher": ["$msCompile"],
+      "group": "test",
+      "dependsOn": "Build WebUI"
     }
   ]
 }

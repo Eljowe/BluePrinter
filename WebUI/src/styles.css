@@ -796,6 +796,27 @@ body, html, #root {
   font-style: italic;
 }
 
+.snippet-notes-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: rgba(170, 140, 255, 0.10);
+  border: 1px solid rgba(170, 140, 255, 0.30);
+  color: #d4c4ff;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-family: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace;
+}
+
+.snippet-notes-inline {
+  color: #d4c4ff;
+  font-family: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace;
+}
+
 .snippet-expand-button {
   width: 28px;
   height: 28px;

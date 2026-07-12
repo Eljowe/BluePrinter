@@ -83,7 +83,7 @@ public:
     // chroma analysis runs on a worker thread; the snippet is updated
     // and the sidecar JSON rewritten on the message thread, then
     // listeners are notified. Replaces any previously detected key.
-    void detectSnippetKey (int id);
+    void detectSnippetKeyAndNotes (int id);
 
     SnippetLibrary& getLibrary() { return library; }
     const SnippetLibrary& getLibrary() const { return library; }
@@ -198,6 +198,35 @@ private:
     juce::File libraryFolder;
     juce::CriticalSection libraryFolderLock;
     juce::String lastSaveError;
+
+    // User-state persistence for the standalone build. Standalone
+    // never has a host calling getStateInformation/setStateInformation
+    // automatically, so without this the library folder and VST3
+    // chain are lost on every restart. The file lives under
+    // userApplicationDataDirectory/Retrokielto/BluePrinter.properties
+    // (%APPDATA%/Retrokielto/BluePrinter.properties on Windows).
+    std::unique_ptr<juce::PropertiesFile> userState;
+
+    // Lazily open the properties file. Returns nullptr on disk failure
+    // (read-only volume, missing perms) so the rest of the code can
+    // keep working in-memory without crashing.
+    juce::PropertiesFile* getUserState();
+
+    // One-shot restore from userState: sets the library folder (which
+    // also auto-loads snippets) and replays the saved VST3 chain.
+    // Safe to call on every construction; no-op if userState is empty.
+    void restoreUserState();
+
+    // Write the library folder string to userState. Called from
+    // setLibraryFolder.
+    void persistLibraryFolder();
+
+    // Serialise the VST3 chain to userState. Wired into
+    // pluginChain.onChanged so it runs after every add/remove/
+    // bypass/move. Skipped while a restore is in progress to avoid
+    // writing the just-loaded state back over the file.
+    void persistPluginChain();
+    bool persistingPluginChain = false;
 
     // Stashed when setStateInformation fails to restore one or more
     // chain plugins (e.g. expired-license VST3s). Read by the UI on

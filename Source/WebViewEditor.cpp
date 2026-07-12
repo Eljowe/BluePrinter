@@ -92,6 +92,12 @@ juce::var snippetToVar (const Snippet& s)
     obj->setProperty ("key", s.key);
     obj->setProperty ("keyConfidence", s.keyConfidence);
 
+    juce::Array<juce::var> notesVar;
+    notesVar.ensureStorageAllocated (s.detectedNotes.size());
+    for (const auto& n : s.detectedNotes)
+        notesVar.add (n);
+    obj->setProperty ("notes", notesVar);
+
     auto* peaks = new juce::DynamicObject();
     juce::Array<juce::var> peakArray;
     peakArray.ensureStorageAllocated (static_cast<int> (s.peaks.size()));
@@ -206,7 +212,7 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
             if (auto* obj = data.getDynamicObject())
             {
                 const int id = static_cast<int> (obj->getProperty ("id"));
-                processor.detectSnippetKey (id);
+                processor.detectSnippetKeyAndNotes (id);
             }
         })
         .withEventListener(BluePrinterWebViewEditor::frontendSaveSnippetEvent, [owner](juce::var data)
@@ -386,14 +392,11 @@ BluePrinterWebViewEditor::BluePrinterWebViewEditor(BluePrinterAudioProcessor& p)
         vst3EditorWindows.erase (index);
     };
 
-    // Push a fresh chain snapshot whenever the chain mutates so the UI
-    // stays in sync (covers mutations from the message thread that
-    // didn't go through the event listeners, like setChainState).
-    audioProcessor.getPluginChain().onChanged = [this]
-    {
-        chainUpdatePending.store (true, std::memory_order_release);
-        triggerAsyncUpdate();
-    };
+    // The processor installs its own pluginChain.onChanged hook (which
+    // persists state) and notifies us via the Listener::pluginChainChanged
+    // callback below. So we don't wire onChanged here — the listener
+    // override already sets chainUpdatePending and triggers an async
+    // update.
 
     // Push the initial chain snapshot so the UI doesn't sit empty until
     // the user makes a change. Also push the default VST3 folder so the
