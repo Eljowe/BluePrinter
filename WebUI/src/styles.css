@@ -772,6 +772,30 @@ body, html, #root {
   font-size: 0.82rem;
 }
 
+.snippet-key-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: rgba(106, 169, 255, 0.12);
+  border: 1px solid rgba(106, 169, 255, 0.35);
+  color: #b3d1ff;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.snippet-key-inline {
+  color: #b3d1ff;
+}
+
+.snippet-key-empty {
+  color: #5a6273;
+  font-style: italic;
+}
+
 .snippet-expand-button {
   width: 28px;
   height: 28px;

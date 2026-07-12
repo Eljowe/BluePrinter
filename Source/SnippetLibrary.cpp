@@ -259,6 +259,8 @@ bool SnippetLibrary::loadFromFolder (const juce::File& folder, juce::String& out
         int idFromJson = 0;
         juce::Time creationTime;
         bool hasJson = false;
+        juce::String key;
+        float keyConfidence = 0.0f;
 
         auto jsonFile = audioFile.getSiblingFile (audioFile.getFileNameWithoutExtension() + ".json");
         if (jsonFile.existsAsFile())
@@ -272,6 +274,8 @@ bool SnippetLibrary::loadFromFolder (const juce::File& folder, juce::String& out
                     name = nameFromJson;
                 comments = obj->getProperty ("comments").toString();
                 idFromJson = static_cast<int> (obj->getProperty ("id"));
+                key = obj->getProperty ("key").toString();
+                keyConfidence = static_cast<float> (obj->getProperty ("keyConfidence"));
 
                 auto createdAtStr = obj->getProperty ("createdAt").toString();
                 if (createdAtStr.isNotEmpty())
@@ -295,6 +299,8 @@ bool SnippetLibrary::loadFromFolder (const juce::File& folder, juce::String& out
                                     ? creationTime
                                     : juce::Time::getCurrentTime();
         snippet->peaks        = computePeaks (*buffer, peaksPerSnippet);
+        snippet->key          = key;
+        snippet->keyConfidence = keyConfidence;
 
         {
             const std::lock_guard<std::mutex> lock (mutex);
@@ -378,6 +384,11 @@ bool SnippetLibrary::writeMetadataFile (const Snippet& snippet, const juce::File
     meta->setProperty ("createdAt", snippet.creationTime.toISO8601 (true));
     meta->setProperty ("audioFile", jsonFile.getSiblingFile (jsonFile.getFileNameWithoutExtension() + ".wav").getFileName());
     meta->setProperty ("format", "WAV 16-bit PCM");
+    if (snippet.key.isNotEmpty())
+    {
+        meta->setProperty ("key", snippet.key);
+        meta->setProperty ("keyConfidence", snippet.keyConfidence);
+    }
 
     juce::FileOutputStream stream (jsonFile);
     if (! stream.openedOk())

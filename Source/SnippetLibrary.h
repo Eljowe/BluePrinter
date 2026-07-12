@@ -17,6 +17,12 @@ struct Snippet
     std::vector<float> peaks;
     juce::Time creationTime;
     juce::String savedPath;
+    // Detected musical key, populated by KeyDetector when the user
+    // runs "Detect key" on the snippet. Empty string means either no
+    // detection has been run yet, or the detector returned no result
+    // (audio too short, atonal, or below the confidence threshold).
+    juce::String key;
+    float        keyConfidence = 0.0f;
 };
 
 class SnippetLibrary

@@ -89,6 +89,8 @@ juce::var snippetToVar (const Snippet& s)
     obj->setProperty ("durationSeconds", s.sampleRate > 0.0 ? s.numSamples / s.sampleRate : 0.0);
     obj->setProperty ("createdAt", s.creationTime.toISO8601 (true));
     obj->setProperty ("savedPath", s.savedPath);
+    obj->setProperty ("key", s.key);
+    obj->setProperty ("keyConfidence", s.keyConfidence);
 
     auto* peaks = new juce::DynamicObject();
     juce::Array<juce::var> peakArray;
@@ -198,6 +200,14 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
                 processor.deleteSnippet (id);
             }
             juce::ignoreUnused (owner);
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendDetectSnippetKeyEvent, [&processor](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+            {
+                const int id = static_cast<int> (obj->getProperty ("id"));
+                processor.detectSnippetKey (id);
+            }
         })
         .withEventListener(BluePrinterWebViewEditor::frontendSaveSnippetEvent, [owner](juce::var data)
         {

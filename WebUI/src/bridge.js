@@ -8,6 +8,7 @@ export const FRONTEND_EVENTS = {
   stopPlayback: "frontendStopPlayback",
   updateSnippet: "frontendUpdateSnippetMeta",
   deleteSnippet: "frontendDeleteSnippet",
+  detectSnippetKey: "frontendDetectSnippetKey",
   saveSnippet: "frontendSaveSnippet",
   revealSnippet: "frontendRevealSnippet",
   chooseLibraryFolder: "frontendChooseLibraryFolder",

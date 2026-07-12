@@ -7,6 +7,11 @@ export function SnippetCard({ snippet, isPlaying, playPositionSeconds }) {
   const [name, setName] = useState(snippet.name ?? "");
   const [comments, setComments] = useState(snippet.comments ?? "");
   const [expanded, setExpanded] = useState(false);
+  // `detecting` flips on while a key-detection request is in flight
+  // and clears when the backend echoes the (possibly empty) result
+  // back through the snippet prop. We key it on the snippet id so
+  // switching cards doesn't carry the spinner across.
+  const [detecting, setDetecting] = useState(false);
 
   // Only resync from props when this card switches to a different snippet.
   // We deliberately don't resync on every prop change so a user who is
@@ -19,8 +24,17 @@ export function SnippetCard({ snippet, isPlaying, playPositionSeconds }) {
       setName(snippet.name ?? "");
       setComments(snippet.comments ?? "");
       setExpanded(false);
+      setDetecting(false);
     }
   }, [snippet.id, snippet.name, snippet.comments]);
+
+  // The backend clears `key` immediately on a fresh detect request,
+  // so the prop changing from "C major" -> "" signals that detection
+  // is running. When it changes back to a value (or stays empty
+  // because the detector found nothing) the spinner clears.
+  useEffect(() => {
+    setDetecting(false);
+  }, [snippet.key]);
 
   const commitMeta = () => {
     if (name === snippet.name && comments === snippet.comments) return;
@@ -50,6 +64,11 @@ export function SnippetCard({ snippet, isPlaying, playPositionSeconds }) {
     emit(FRONTEND_EVENTS.revealSnippet, { id: snippet.id });
   };
 
+  const handleDetectKey = () => {
+    setDetecting(true);
+    emit(FRONTEND_EVENTS.detectSnippetKey, { id: snippet.id });
+  };
+
   const toggleExpanded = () => setExpanded((v) => !v);
 
   const duration = Number(snippet.durationSeconds) || 0;
@@ -58,6 +77,11 @@ export function SnippetCard({ snippet, isPlaying, playPositionSeconds }) {
   const positionLabel = isPlaying
     ? `${formatTime(showPosition)} / ${formatTime(duration)}`
     : formatTime(duration);
+  const hasKey = typeof snippet.key === "string" && snippet.key.length > 0;
+  const keyConfidence = Number(snippet.keyConfidence) || 0;
+  const keyTitle = hasKey
+    ? `Detected key: ${snippet.key} (confidence ${Math.round(keyConfidence * 100)}%)`
+    : "No key detected yet";
 
   return (
     <article
@@ -86,6 +110,15 @@ export function SnippetCard({ snippet, isPlaying, playPositionSeconds }) {
           }}
         >
           <span className="snippet-name" title={displayName}>{displayName}</span>
+          {hasKey ? (
+            <span
+              className="snippet-key-badge"
+              title={keyTitle}
+              aria-label={keyTitle}
+            >
+              {snippet.key}
+            </span>
+          ) : null}
           <span className="snippet-sep" aria-hidden="true">·</span>
           <span className="snippet-duration">{positionLabel}</span>
           <span className="snippet-sep" aria-hidden="true">·</span>
@@ -147,9 +180,22 @@ export function SnippetCard({ snippet, isPlaying, playPositionSeconds }) {
           <footer className="snippet-footer">
             <div className="snippet-meta">
               #{snippet.id} · {Number(snippet.numChannels) || 0}ch · {Math.round(Number(snippet.sampleRate) || 0)} Hz
+              {hasKey
+                ? <span className="snippet-key-inline" title={keyTitle}>
+                    · key: <strong>{snippet.key}</strong> ({Math.round(keyConfidence * 100)}%)
+                  </span>
+                : <span className="snippet-key-inline snippet-key-empty">· no key detected</span>}
               {snippet.savedPath ? <span className="snippet-saved"> · saved</span> : null}
             </div>
             <div className="snippet-actions">
+              <button
+                type="button"
+                onClick={handleDetectKey}
+                disabled={detecting}
+                title={hasKey ? "Re-detect the musical key from the audio" : "Detect the musical key from the audio"}
+              >
+                {detecting ? "Detecting…" : hasKey ? "↻ Re-detect key" : "Detect key"}
+              </button>
               <button type="button" onClick={handleSave} title="Save snippet to a WAV file">Save</button>
               <button type="button" onClick={handleReveal} disabled={!snippet.savedPath} title="Reveal saved file in Explorer">Reveal</button>
               <button type="button" className="danger" onClick={handleDelete} title="Delete snippet">Delete</button>
