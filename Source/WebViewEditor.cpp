@@ -197,6 +197,10 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
             if (folder.isDirectory())
                 folder.startAsProcess();
         })
+        .withEventListener(BluePrinterWebViewEditor::frontendRefreshLibraryEvent, [&processor](juce::var)
+        {
+            processor.refreshLibraryFromFolder();
+        })
         .withInitialisationData("parameters", initialData)
         .withInitialisationData("snippets", owner->makeSnippetsSnapshot())
         .withInitialisationData("transport", owner->makeTransportSnapshot());

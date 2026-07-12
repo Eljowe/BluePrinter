@@ -12,6 +12,7 @@ export const FRONTEND_EVENTS = {
   revealSnippet: "frontendRevealSnippet",
   chooseLibraryFolder: "frontendChooseLibraryFolder",
   openLibraryFolder: "frontendOpenLibraryFolder",
+  refreshLibrary: "frontendRefreshLibrary",
 };
 
 export const BACKEND_EVENTS = {

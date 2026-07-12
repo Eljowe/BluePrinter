@@ -195,25 +195,194 @@ bool SnippetLibrary::saveSnippetToFolder (const Snippet& snippet,
     }
 
     auto jsonFile = audioFile.getSiblingFile (audioFile.getFileNameWithoutExtension() + ".json");
-    {
-        auto* meta = new juce::DynamicObject();
-        meta->setProperty ("id", snippet.id);
-        meta->setProperty ("name", snippet.name);
-        meta->setProperty ("comments", snippet.comments);
-        meta->setProperty ("sampleRate", snippet.sampleRate);
-        meta->setProperty ("numChannels", snippet.numChannels);
-        meta->setProperty ("numSamples", static_cast<double> (snippet.numSamples));
-        meta->setProperty ("durationSeconds", snippet.numSamples / snippet.sampleRate);
-        meta->setProperty ("createdAt", snippet.creationTime.toISO8601 (true));
-        meta->setProperty ("audioFile", audioFile.getFileName());
-        meta->setProperty ("format", "WAV 16-bit PCM");
-
-        juce::FileOutputStream stream (jsonFile);
-        if (stream.openedOk())
-            juce::JSON::writeToStream (stream, juce::var (meta), true);
-    }
+    writeMetadataFile (snippet, jsonFile);
 
     outPath = audioFile.getFullPathName();
+    return true;
+}
+
+bool SnippetLibrary::loadFromFolder (const juce::File& folder, juce::String& outError)
+{
+    if (! folder.isDirectory())
+    {
+        outError = "Folder does not exist: " + folder.getFullPathName();
+        return false;
+    }
+
+    juce::AudioFormatManager formatManager;
+    formatManager.registerBasicFormats();
+
+    auto wavFiles = folder.findChildFiles (juce::File::findFiles, false, "*.wav");
+    if (wavFiles.isEmpty())
+        return true;
+
+    // Snapshot already-loaded paths and the current max id so we can skip
+    // duplicates and avoid assigning new ids that collide with existing ones.
+    juce::StringArray existingPaths;
+    int maxExistingId = 0;
+    {
+        const std::lock_guard<std::mutex> lock (mutex);
+        for (const auto& s : snippets)
+        {
+            if (s->savedPath.isNotEmpty())
+                existingPaths.addIfNotAlreadyThere (s->savedPath);
+            maxExistingId = juce::jmax (maxExistingId, s->id);
+        }
+    }
+
+    int loaded = 0;
+    int maxAssignedId = maxExistingId;
+
+    for (const auto& audioFile : wavFiles)
+    {
+        const auto fullPath = audioFile.getFullPathName();
+        if (existingPaths.contains (fullPath))
+            continue;
+
+        std::unique_ptr<juce::AudioFormatReader> reader (formatManager.createReaderFor (audioFile));
+        if (reader == nullptr)
+            continue;
+
+        const int numChannels = static_cast<int> (reader->numChannels);
+        const int numSamples  = static_cast<int> (reader->lengthInSamples);
+        if (numChannels <= 0 || numSamples <= 0)
+            continue;
+
+        auto buffer = std::make_shared<juce::AudioBuffer<float>> (numChannels, numSamples);
+        if (! reader->read (buffer.get(), 0, numSamples, 0, true, true))
+            continue;
+
+        // Read the sidecar JSON if it exists. Missing or malformed JSON is
+        // non-fatal: we just fall back to defaults.
+        juce::String name = audioFile.getFileNameWithoutExtension();
+        juce::String comments;
+        int idFromJson = 0;
+        juce::Time creationTime;
+        bool hasJson = false;
+
+        auto jsonFile = audioFile.getSiblingFile (audioFile.getFileNameWithoutExtension() + ".json");
+        if (jsonFile.existsAsFile())
+        {
+            auto parsed = juce::JSON::parse (jsonFile.loadFileAsString());
+            if (auto* obj = parsed.getDynamicObject())
+            {
+                hasJson = true;
+                auto nameFromJson = obj->getProperty ("name").toString();
+                if (nameFromJson.isNotEmpty())
+                    name = nameFromJson;
+                comments = obj->getProperty ("comments").toString();
+                idFromJson = static_cast<int> (obj->getProperty ("id"));
+
+                auto createdAtStr = obj->getProperty ("createdAt").toString();
+                if (createdAtStr.isNotEmpty())
+                {
+                    auto parsedTime = juce::Time::fromISO8601 (createdAtStr);
+                    if (parsedTime.toMilliseconds() > 0)
+                        creationTime = parsedTime;
+                }
+            }
+        }
+
+        auto snippet = std::make_shared<Snippet>();
+        snippet->audio        = buffer;
+        snippet->sampleRate   = reader->sampleRate > 0.0 ? reader->sampleRate : 44100.0;
+        snippet->numChannels  = numChannels;
+        snippet->numSamples   = numSamples;
+        snippet->name         = name;
+        snippet->comments     = comments;
+        snippet->savedPath    = fullPath;
+        snippet->creationTime = (hasJson && creationTime.toMilliseconds() > 0)
+                                    ? creationTime
+                                    : juce::Time::getCurrentTime();
+        snippet->peaks        = computePeaks (*buffer, peaksPerSnippet);
+
+        {
+            const std::lock_guard<std::mutex> lock (mutex);
+            snippet->id = (hasJson && idFromJson > 0) ? idFromJson : nextId++;
+            maxAssignedId = juce::jmax (maxAssignedId, snippet->id);
+            snippets.push_back (snippet);
+        }
+
+        existingPaths.addIfNotAlreadyThere (fullPath);
+        ++loaded;
+    }
+
+    // Make sure future addSnippet() calls don't collide with anything we
+    // just pulled in from disk.
+    {
+        const std::lock_guard<std::mutex> lock (mutex);
+        if (nextId <= maxAssignedId)
+            nextId = maxAssignedId + 1;
+    }
+
+    if (loaded == 0)
+    {
+        outError = "Found " + juce::String (wavFiles.size())
+                 + " WAV file(s) in the folder but could not decode any of them.";
+        return false;
+    }
+
+    return true;
+}
+
+bool SnippetLibrary::persistMetadata (int id)
+{
+    std::shared_ptr<Snippet> snippet;
+    {
+        const std::lock_guard<std::mutex> lock (mutex);
+        for (auto& s : snippets)
+        {
+            if (s->id == id)
+            {
+                snippet = s;
+                break;
+            }
+        }
+    }
+
+    if (snippet == nullptr || snippet->savedPath.isEmpty())
+        return false;
+
+    juce::File audioFile (snippet->savedPath);
+    auto jsonFile = audioFile.getSiblingFile (audioFile.getFileNameWithoutExtension() + ".json");
+    return writeMetadataFile (*snippet, jsonFile);
+}
+
+bool SnippetLibrary::deleteSavedFiles (const Snippet& snippet)
+{
+    if (snippet.savedPath.isEmpty())
+        return false;
+
+    bool anyDeleted = false;
+    juce::File audioFile (snippet.savedPath);
+    if (audioFile.existsAsFile())
+        anyDeleted = audioFile.deleteFile() || anyDeleted;
+
+    auto jsonFile = audioFile.getSiblingFile (audioFile.getFileNameWithoutExtension() + ".json");
+    if (jsonFile.existsAsFile())
+        anyDeleted = jsonFile.deleteFile() || anyDeleted;
+
+    return anyDeleted;
+}
+
+bool SnippetLibrary::writeMetadataFile (const Snippet& snippet, const juce::File& jsonFile)
+{
+    auto* meta = new juce::DynamicObject();
+    meta->setProperty ("id", snippet.id);
+    meta->setProperty ("name", snippet.name);
+    meta->setProperty ("comments", snippet.comments);
+    meta->setProperty ("sampleRate", snippet.sampleRate);
+    meta->setProperty ("numChannels", snippet.numChannels);
+    meta->setProperty ("numSamples", static_cast<double> (snippet.numSamples));
+    meta->setProperty ("durationSeconds", snippet.sampleRate > 0.0 ? snippet.numSamples / snippet.sampleRate : 0.0);
+    meta->setProperty ("createdAt", snippet.creationTime.toISO8601 (true));
+    meta->setProperty ("audioFile", jsonFile.getSiblingFile (jsonFile.getFileNameWithoutExtension() + ".wav").getFileName());
+    meta->setProperty ("format", "WAV 16-bit PCM");
+
+    juce::FileOutputStream stream (jsonFile);
+    if (! stream.openedOk())
+        return false;
+    juce::JSON::writeToStream (stream, juce::var (meta), true);
     return true;
 }
 

@@ -394,11 +394,19 @@ void BluePrinterAudioProcessor::stopPlayback()
 
 bool BluePrinterAudioProcessor::deleteSnippet (int id)
 {
+    // Hold a strong ref to the snippet so its data is still valid when we
+    // remove the files from disk after the library forgets about it.
+    auto snippet = library.findById (id);
+
     const bool removed = library.removeSnippet (id);
     if (removed)
     {
         if (playingSnippetId.load() == id)
             stopPlayback();
+
+        if (snippet != nullptr)
+            SnippetLibrary::deleteSavedFiles (*snippet);
+
         listeners.call ([](Listener& l) { l.libraryChanged(); l.transportChanged(); });
     }
     return removed;
@@ -408,7 +416,12 @@ bool BluePrinterAudioProcessor::updateSnippetMeta (int id, const juce::String& n
 {
     const bool ok = library.updateMeta (id, name, comments);
     if (ok)
+    {
+        // Persist the change to the sidecar JSON so the edit survives a
+        // reload of the library folder.
+        library.persistMetadata (id);
         listeners.call ([](Listener& l) { l.libraryChanged(); });
+    }
     return ok;
 }
 
@@ -424,6 +437,32 @@ void BluePrinterAudioProcessor::setLibraryFolder (const juce::File& folder)
         juce::ScopedLock lock (libraryFolderLock);
         libraryFolder = folder;
     }
+
+    // Pull any pre-existing recordings from the folder so the user can
+    // listen to, edit, or delete them. Skips files that are already loaded.
+    if (folder.isDirectory())
+    {
+        juce::String loadError;
+        library.loadFromFolder (folder, loadError);
+    }
+
+    listeners.call ([](Listener& l) { l.libraryChanged(); });
+}
+
+void BluePrinterAudioProcessor::refreshLibraryFromFolder()
+{
+    juce::File folder;
+    {
+        juce::ScopedLock lock (libraryFolderLock);
+        folder = libraryFolder;
+    }
+
+    if (folder.isDirectory())
+    {
+        juce::String loadError;
+        library.loadFromFolder (folder, loadError);
+    }
+
     listeners.call ([](Listener& l) { l.libraryChanged(); });
 }
 
