@@ -16,6 +16,13 @@ export const FRONTEND_EVENTS = {
   setMetronome: "frontendSetMetronome",
   setBpm: "frontendSetBpm",
   setCountInBeats: "frontendSetCountInBeats",
+  addVst3: "frontendAddVst3",
+  removeVst3: "frontendRemoveVst3",
+  setVst3Bypass: "frontendSetVst3Bypass",
+  openVst3Editor: "frontendOpenVst3Editor",
+  closeVst3Editor: "frontendCloseVst3Editor",
+  scanVst3Folder: "frontendScanVst3Folder",
+  getVst3Chain: "frontendGetVst3Chain",
 };
 
 export const BACKEND_EVENTS = {
@@ -23,6 +30,8 @@ export const BACKEND_EVENTS = {
   snippets: "backendSnippets",
   transport: "backendTransport",
   notify: "backendNotify",
+  vst3Chain: "backendVst3Chain",
+  vst3ScanProgress: "backendVst3ScanProgress",
 };
 
 export function getBackend() {

@@ -386,6 +386,256 @@ body, html, #root {
   cursor: not-allowed;
 }
 
+/* ---- FX chain ---- */
+
+.fx-chain {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 18px;
+  background: #161a21;
+  border: 1px solid #232a36;
+  border-radius: 12px;
+}
+
+.fx-chain-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.fx-chain-title h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: #e8ecf1;
+}
+
+.fx-chain-folder {
+  margin: 2px 0 0 0;
+  font-size: 0.72rem;
+  color: #6b7180;
+  font-family: ui-monospace, "Cascadia Code", "Source Code Pro", Consolas, monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 480px;
+}
+
+.fx-chain-folder.is-scanning {
+  color: #d97706;
+  font-weight: 600;
+}
+
+.fx-chain-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.fx-button {
+  background: #2a3140;
+  color: #e8ecf1;
+  border: 1px solid #364154;
+  padding: 7px 13px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-family: inherit;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.fx-button:hover {
+  background: #364154;
+  border-color: #4a5260;
+}
+
+.fx-button-small {
+  padding: 4px 10px;
+  font-size: 0.78rem;
+}
+
+.fx-button-danger {
+  color: #e07a3a;
+  border-color: #4a2c1f;
+}
+
+.fx-button-danger:hover {
+  background: #3a1f1a;
+  border-color: #6a3a26;
+}
+
+.fx-chain-empty {
+  margin: 0;
+  padding: 12px 14px;
+  background: #0d1116;
+  border: 1px dashed #2a3140;
+  border-radius: 8px;
+  color: #6b7180;
+  font-size: 0.88rem;
+  text-align: center;
+}
+
+.fx-chain-slots {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fx-slot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: #0d1116;
+  border: 1px solid #232a36;
+  border-radius: 8px;
+  transition: border-color 0.12s, opacity 0.12s;
+}
+
+.fx-slot.is-bypassed {
+  opacity: 0.55;
+  border-color: #1c2129;
+}
+
+.fx-slot-index {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #2a3140;
+  color: #aab2c0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.fx-slot-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.fx-slot-name {
+  color: #e8ecf1;
+  font-size: 0.92rem;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fx-slot-path {
+  color: #6b7180;
+  font-size: 0.72rem;
+  font-family: ui-monospace, "Cascadia Code", "Source Code Pro", Consolas, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fx-toggle {
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid #364154;
+  background: #1c2129;
+  color: #aab2c0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  font-family: inherit;
+  min-width: 84px;
+  text-align: center;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+
+.fx-toggle.is-on {
+  background: #1a2a3a;
+  border-color: #4a9eff;
+  color: #cfe2ff;
+}
+
+.fx-toggle.is-off {
+  background: #2a1f1a;
+  border-color: #4a2c1f;
+  color: #e07a3a;
+}
+
+.fx-available {
+  border-top: 1px solid #232a36;
+  padding-top: 8px;
+}
+
+.fx-available-toggle {
+  background: transparent;
+  border: none;
+  color: #7a8392;
+  font-size: 0.82rem;
+  cursor: pointer;
+  padding: 4px 0;
+  font-family: inherit;
+}
+
+.fx-available-toggle:hover {
+  color: #e8ecf1;
+}
+
+.fx-available-list {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 0 0;
+  max-height: 240px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fx-available-item {
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 10px;
+  background: #0d1116;
+  border: 1px solid #232a36;
+  border-radius: 6px;
+  color: #e8ecf1;
+  font-family: inherit;
+  font-size: 0.85rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.1s, border-color 0.1s;
+}
+
+.fx-available-item:hover {
+  background: #1c2129;
+  border-color: #4a9eff;
+}
+
+.fx-available-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fx-available-meta {
+  color: #6b7180;
+  font-size: 0.72rem;
+  flex-shrink: 0;
+}
+
 /* ---- snippet list ---- */
 
 .snippet-list-header h2 {

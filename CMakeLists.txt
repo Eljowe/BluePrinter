@@ -26,7 +26,8 @@ target_sources(BluePrinter PRIVATE
     Source/PluginProcessor.cpp
     Source/PluginEditor.cpp
     Source/WebViewEditor.cpp
-    Source/SnippetLibrary.cpp)
+    Source/SnippetLibrary.cpp
+    Source/PluginChain.cpp)
 
 target_include_directories(BluePrinter PRIVATE
     ${CMAKE_CURRENT_BINARY_DIR})
@@ -35,6 +36,7 @@ target_compile_definitions(BluePrinter PRIVATE
     JUCE_WEB_BROWSER=1
     JUCE_USE_WIN_WEBVIEW2=1
     JUCE_USE_CURL=0
+    JUCE_PLUGINHOST_VST3=1
     JUCE_IGNORE_VST3_MISMATCHED_PARAMETER_ID_WARNING=1)
 
 target_link_libraries(BluePrinter PRIVATE
