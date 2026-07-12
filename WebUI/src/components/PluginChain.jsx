@@ -10,6 +10,10 @@ function basename(path) {
 export function PluginChain({ chainState, availablePlugins, defaultFolder, scanState }) {
   const slots = Array.isArray(chainState?.slots) ? chainState.slots : [];
   const available = Array.isArray(availablePlugins) ? availablePlugins : [];
+  // The backend pushes a list of slot indices whose native editor
+  // windows are currently open, so the row can show "Close" instead
+  // of "Edit" and let the user tear the window down from here.
+  const openEditors = Array.isArray(chainState?.openEditors) ? chainState.openEditors : [];
   const [showAdd, setShowAdd] = useState(false);
 
   const scanning = Boolean(scanState?.active);
@@ -47,6 +51,15 @@ export function PluginChain({ chainState, availablePlugins, defaultFolder, scanS
 
   const handleCloseEditor = (index) => {
     emit(FRONTEND_EVENTS.closeVst3Editor, { index });
+  };
+
+  // Reorder: emit a single move request and let the backend swap the
+  // slots in place. Both the ↑/↓ buttons and drag-and-drop funnel
+  // through here so the two input methods stay consistent.
+  const handleMove = (from, to) => {
+    if (from === to) return;
+    if (to < 0 || to >= slots.length) return;
+    emit(FRONTEND_EVENTS.moveVst3, { from, to });
   };
 
   const handleAdd = (path) => {
@@ -90,10 +103,10 @@ export function PluginChain({ chainState, availablePlugins, defaultFolder, scanS
             type="button"
             className="fx-button"
             onClick={handleScanFolder}
-            title="Pick a folder and scan it for VST3 plugins"
+            title="Scan the default VST3 folder for installed plugins"
             disabled={scanning}
           >
-            {scanning ? "Scanning…" : "Scan folder…"}
+            {scanning ? "Scanning…" : "Scan VST3 folder"}
           </button>
         </div>
       </header>
@@ -102,45 +115,106 @@ export function PluginChain({ chainState, availablePlugins, defaultFolder, scanS
         <p className="fx-chain-empty">No plugins loaded. The signal passes through dry.</p>
       ) : (
         <ol className="fx-chain-slots">
-          {slots.map((slot, index) => (
-            <li
-              key={`${slot.path || slot.name || "slot"}-${index}`}
-              className={`fx-slot ${slot.bypassed ? "is-bypassed" : ""}`}
-            >
-              <span className="fx-slot-index">{index + 1}</span>
-              <div className="fx-slot-info">
-                <span className="fx-slot-name" title={slot.path || ""}>
-                  {slot.name || basename(slot.path) || "Unknown plugin"}
-                </span>
-                <span className="fx-slot-path">{basename(slot.path)}</span>
-              </div>
-              <button
-                type="button"
-                className={`fx-toggle ${slot.bypassed ? "is-off" : "is-on"}`}
-                onClick={() => handleBypassToggle(index, slot.bypassed)}
-                title={slot.bypassed ? "Bypassed — click to enable" : "Enabled — click to bypass"}
-                aria-pressed={!slot.bypassed}
+          {slots.map((slot, index) => {
+            const editorOpen = openEditors.includes(index);
+            return (
+              <li
+                key={`${slot.path || slot.name || "slot"}-${index}`}
+                className={`fx-slot ${slot.bypassed ? "is-bypassed" : ""}`}
+                draggable
+                onDragStart={(event) => {
+                  event.dataTransfer.effectAllowed = "move";
+                  event.dataTransfer.setData("text/x-fx-slot", String(index));
+                }}
+                onDragOver={(event) => {
+                  if (event.dataTransfer.types.includes("text/x-fx-slot")) {
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = "move";
+                    event.currentTarget.classList.add("is-drop-target");
+                  }
+                }}
+                onDragLeave={(event) => {
+                  event.currentTarget.classList.remove("is-drop-target");
+                }}
+                onDrop={(event) => {
+                  event.currentTarget.classList.remove("is-drop-target");
+                  const raw = event.dataTransfer.getData("text/x-fx-slot");
+                  if (raw === "") return;
+                  const from = Number.parseInt(raw, 10);
+                  if (Number.isNaN(from)) return;
+                  handleMove(from, index);
+                }}
+                onDragEnd={(event) => {
+                  event.currentTarget.classList.remove("is-drop-target");
+                }}
               >
-                {slot.bypassed ? "Bypassed" : "On"}
-              </button>
-              <button
-                type="button"
-                className="fx-button fx-button-small"
-                onClick={() => handleOpenEditor(index)}
-                title="Open the plugin's native editor in a separate window"
-              >
-                Edit
-              </button>
-              <button
-                type="button"
-                className="fx-button fx-button-small fx-button-danger"
-                onClick={() => handleRemove(index)}
-                title="Remove this plugin from the chain"
-              >
-                Remove
-              </button>
-            </li>
-          ))}
+                <span className="fx-slot-handle" title="Drag to reorder" aria-hidden="true">⋮⋮</span>
+                <span className="fx-slot-index">{index + 1}</span>
+                <div className="fx-slot-info">
+                  <span className="fx-slot-name" title={slot.path || ""}>
+                    {slot.name || basename(slot.path) || "Unknown plugin"}
+                  </span>
+                  <span className="fx-slot-path">{basename(slot.path)}</span>
+                </div>
+                <button
+                  type="button"
+                  className="fx-button fx-button-small fx-button-icon"
+                  onClick={() => handleMove(index, index - 1)}
+                  disabled={index === 0}
+                  title="Move this plugin earlier in the chain"
+                  aria-label="Move up"
+                >
+                  ↑
+                </button>
+                <button
+                  type="button"
+                  className="fx-button fx-button-small fx-button-icon"
+                  onClick={() => handleMove(index, index + 1)}
+                  disabled={index === slots.length - 1}
+                  title="Move this plugin later in the chain"
+                  aria-label="Move down"
+                >
+                  ↓
+                </button>
+                <button
+                  type="button"
+                  className={`fx-toggle ${slot.bypassed ? "is-off" : "is-on"}`}
+                  onClick={() => handleBypassToggle(index, slot.bypassed)}
+                  title={slot.bypassed ? "Bypassed — click to enable" : "Enabled — click to bypass"}
+                  aria-pressed={!slot.bypassed}
+                >
+                  {slot.bypassed ? "Bypassed" : "On"}
+                </button>
+                {editorOpen ? (
+                  <button
+                    type="button"
+                    className="fx-button fx-button-small"
+                    onClick={() => handleCloseEditor(index)}
+                    title="Close the plugin's native editor window"
+                  >
+                    Close
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="fx-button fx-button-small"
+                    onClick={() => handleOpenEditor(index)}
+                    title="Open the plugin's native editor in a separate window"
+                  >
+                    Edit
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="fx-button fx-button-small fx-button-danger"
+                  onClick={() => handleRemove(index)}
+                  title="Remove this plugin from the chain"
+                >
+                  Remove
+                </button>
+              </li>
+            );
+          })}
         </ol>
       )}
 

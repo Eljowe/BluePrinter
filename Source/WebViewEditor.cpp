@@ -3,6 +3,33 @@
 
 namespace
 {
+// A DialogWindow that routes the native close (X) button to a
+// std::function, so the editor can drop the matching entry from
+// vst3EditorWindows. The default DialogWindow::closeButtonPressed()
+// only hides the window, which leaves a dangling unique_ptr in the
+// map and makes the next "Edit" click a no-op.
+class Vst3EditorWindow : public juce::DialogWindow
+{
+public:
+    Vst3EditorWindow (const juce::String& name,
+                      juce::Colour bg,
+                      bool escapeCloses,
+                      bool hasTitleBar)
+        : juce::DialogWindow (name, bg, escapeCloses, hasTitleBar)
+    {
+    }
+
+    std::function<void()> onCloseRequested;
+
+    void closeButtonPressed() override
+    {
+        if (onCloseRequested)
+            onCloseRequested();
+        else
+            juce::DialogWindow::closeButtonPressed();
+    }
+};
+
 juce::String getMimeTypeForExtension(const juce::String& extension)
 {
     if (extension == ".html") return "text/html";
@@ -217,9 +244,18 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
             if (auto* obj = data.getDynamicObject())
                 processor.setCountInBeats (static_cast<int> (obj->getProperty ("beats")));
         })
-        .withEventListener(BluePrinterWebViewEditor::frontendAddVst3Event, [owner](juce::var)
+        .withEventListener(BluePrinterWebViewEditor::frontendAddVst3Event, [owner](juce::var data)
         {
-            if (owner != nullptr)
+            if (owner == nullptr)
+                return;
+
+            // The "+ Add plugin…" button sends an empty payload and
+            // wants the file picker. The available-plugins list sends
+            // { path: "C:\\…\\Foo.vst3" } and wants a direct add.
+            const auto path = data.getProperty ("path", {}).toString();
+            if (path.isNotEmpty())
+                owner->addVst3FromPath (juce::File (path));
+            else
                 owner->pickVst3FileAndAdd();
         })
         .withEventListener(BluePrinterWebViewEditor::frontendRemoveVst3Event, [&processor, owner](juce::var data)
@@ -232,6 +268,24 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
                 processor.getPluginChain().removePlugin (index);
                 if (owner != nullptr)
                     owner->emitVst3ChainSnapshot();
+            }
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendMoveVst3Event, [&processor, owner](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+            {
+                const int from = static_cast<int> (obj->getProperty ("from"));
+                const int to   = static_cast<int> (obj->getProperty ("to"));
+                if (processor.getPluginChain().movePlugin (from, to) && owner != nullptr)
+                {
+                    // The slots behind the moved one shifted index, so
+                    // any open editor window keyed by the old index is
+                    // now looking at the wrong plugin. Re-key the map
+                    // by matching the window's plugin path against
+                    // the new chain before the snapshot goes out.
+                    owner->rekeyVst3EditorWindows();
+                    owner->emitVst3ChainSnapshot();
+                }
             }
         })
         .withEventListener(BluePrinterWebViewEditor::frontendSetVst3BypassEvent, [&processor, owner](juce::var data)
@@ -266,12 +320,38 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
         .withEventListener(BluePrinterWebViewEditor::frontendScanVst3FolderEvent, [owner](juce::var)
         {
             if (owner != nullptr)
-                owner->pickVst3FolderAndScan();
+                owner->scanDefaultVst3Folder();
         })
         .withEventListener(BluePrinterWebViewEditor::frontendGetVst3ChainEvent, [owner](juce::var)
         {
             if (owner != nullptr)
                 owner->emitVst3ChainSnapshot();
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendBlockVst3PluginEvent, [&processor, owner](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+            {
+                const auto path = obj->getProperty("path").toString();
+                if (path.isNotEmpty())
+                {
+                    processor.getPluginChain().addToBlocklist (juce::File (path));
+                    if (owner != nullptr)
+                        owner->emitVst3ChainSnapshot();
+                }
+            }
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendUnblockVst3PluginEvent, [&processor, owner](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+            {
+                const auto path = obj->getProperty("path").toString();
+                if (path.isNotEmpty())
+                {
+                    processor.getPluginChain().removeFromBlocklist (juce::File (path));
+                    if (owner != nullptr)
+                        owner->emitVst3ChainSnapshot();
+                }
+            }
         })
         .withInitialisationData("parameters", initialData)
         .withInitialisationData("snippets", owner->makeSnippetsSnapshot())
@@ -348,18 +428,22 @@ BluePrinterWebViewEditor::BluePrinterWebViewEditor(BluePrinterAudioProcessor& p)
 
 BluePrinterWebViewEditor::~BluePrinterWebViewEditor()
 {
+    // Expire any in-flight scan callbacks before tearing other state
+    // down. describeVst3FileAsync captures a weak_ptr<int> to
+    // aliveToken; resetting the token here invalidates that weak_ptr
+    // and turns the callback into a no-op even if its timer fires
+    // after this destructor returns. Set the disposed flag for the
+    // same reason — the callback checks both before touching the
+    // editor.
+    aliveToken.reset();
+    disposed.store (true, std::memory_order_release);
+
     cancelPendingUpdate();
     stopTimer();
+    activeScan.reset();
     audioProcessor.apvts.removeParameterListener(paramGain, this);
     audioProcessor.removeListener (this);
     closeAllVst3Editors();
-
-    // Wait for any in-flight VST3 scan to finish. The scan thread only
-    // touches the webView via MessageManager::callAsync and checks the
-    // SafePointer before dereferencing, so it won't touch us after the
-    // join returns.
-    if (scanThread != nullptr && scanThread->joinable())
-        scanThread->join();
 }
 
 void BluePrinterWebViewEditor::paint(juce::Graphics& g)
@@ -422,6 +506,11 @@ void BluePrinterWebViewEditor::timerCallback()
 {
     // Throttled push: always push transport so the meter / timecode moves.
     emitTransportToFrontend();
+
+    // Drive the VST3 scan one file at a time on the message thread so
+    // the VST3 module is only touched from the right thread.
+    if (activeScan != nullptr)
+        runScanStep();
 }
 
 void BluePrinterWebViewEditor::libraryChanged()
@@ -677,7 +766,11 @@ void BluePrinterWebViewEditor::openVst3Editor (int slotIndex)
 {
     // If there's already an editor open for this slot, just bring it forward.
     if (vst3EditorWindows.count (slotIndex) > 0)
+    {
+        if (auto* existing = vst3EditorWindows[slotIndex].get())
+            existing->toFront (true);
         return;
+    }
 
     auto* plugin = audioProcessor.getPluginChain().getPlugin (slotIndex);
     if (plugin == nullptr)
@@ -691,16 +784,25 @@ void BluePrinterWebViewEditor::openVst3Editor (int slotIndex)
     }
 
     auto title = plugin->getName() + " (FX slot " + juce::String (slotIndex + 1) + ")";
-    auto window = std::make_unique<juce::DialogWindow> (title,
+    auto window = std::make_unique<Vst3EditorWindow> (title,
                                                       juce::Colours::darkgrey,
                                                       true,  // has close button
                                                       true); // has title bar
+    // The native X button must clean up the vst3EditorWindows entry.
+    // Without this the window just hides, the map keeps a stale
+    // unique_ptr, and the next "Edit" click is a no-op because
+    // openVst3Editor thinks the editor is already open.
+    window->onCloseRequested = [this, slotIndex]()
+    {
+        closeVst3Editor (slotIndex, true);
+    };
     window->setContentOwned (editor.release(), true);
     window->centreWithSize (window->getContentComponent()->getWidth(),
                             window->getContentComponent()->getHeight());
     window->setVisible (true);
 
     vst3EditorWindows[slotIndex] = std::move (window);
+    emitVst3ChainSnapshot();
 }
 
 void BluePrinterWebViewEditor::closeVst3Editor (int slotIndex, bool deleteAfterClose)
@@ -709,14 +811,59 @@ void BluePrinterWebViewEditor::closeVst3Editor (int slotIndex, bool deleteAfterC
     const auto it = vst3EditorWindows.find (slotIndex);
     if (it == vst3EditorWindows.end())
         return;
+    // Clear the close callback before destroying the window so a
+    // re-entrant closeButtonPressed() (e.g. from the native X being
+    // clicked as we're tearing down) doesn't try to call back into us
+    // mid-destruction. The map's pointer type is juce::DialogWindow;
+    // the actual object is a Vst3EditorWindow.
+    if (auto* w = static_cast<Vst3EditorWindow*> (it->second.get()))
+        w->onCloseRequested = nullptr;
     // Dropping the unique_ptr deletes the DialogWindow, which deletes the
     // AudioProcessorEditor (set via setContentOwned).
     vst3EditorWindows.erase (it);
+    emitVst3ChainSnapshot();
 }
 
 void BluePrinterWebViewEditor::closeAllVst3Editors()
 {
     vst3EditorWindows.clear();
+}
+
+void BluePrinterWebViewEditor::rekeyVst3EditorWindows()
+{
+    if (vst3EditorWindows.empty())
+        return;
+
+    // For each open window, find the slot index whose path matches
+    // the slot the window was opened for. The plugin instance
+    // survives the move (the move just shifts the slot index), so the
+    // AudioProcessorEditor the window owns is still valid — we just
+    // need to update the map key so emitVst3ChainSnapshot reports the
+    // right openEditors list and the "Close" button stays on the same
+    // row the user dragged.
+    auto& chain = audioProcessor.getPluginChain();
+    std::map<int, std::unique_ptr<juce::DialogWindow>> rebuilt;
+    for (auto& entry : vst3EditorWindows)
+    {
+        const juce::String oldPath = chain.getSlotPath (entry.first);
+        int newIndex = -1;
+        if (oldPath.isNotEmpty())
+        {
+            for (int i = 0; i < chain.getNumPlugins(); ++i)
+            {
+                if (chain.getSlotPath (i) == oldPath)
+                {
+                    newIndex = i;
+                    break;
+                }
+            }
+        }
+        if (newIndex >= 0)
+            rebuilt[newIndex] = std::move (entry.second);
+        // If the path is gone (e.g. the slot was removed) the unique_ptr
+        // drops here, closing the window.
+    }
+    vst3EditorWindows = std::move (rebuilt);
 }
 
 void BluePrinterWebViewEditor::emitVst3ChainSnapshot()
@@ -725,123 +872,220 @@ void BluePrinterWebViewEditor::emitVst3ChainSnapshot()
     obj->setProperty ("folder",     PluginChain::getDefaultVst3Folder().getFullPathName());
     obj->setProperty ("chain",      audioProcessor.getPluginChain().getChainState());
 
+    // The cached scan result is owned by PluginChain so it survives
+    // host save/load — see PluginChain::setAvailablePlugins /
+    // getAvailablePlugins. Reading it here means the "Available
+    // plugins" list is restored on launch without re-walking the
+    // VST3 folder.
     {
-        const juce::ScopedLock sl (vst3ScanLock);
-        auto* scanObj = lastVst3Scan.getDynamicObject();
-        if (scanObj != nullptr)
-            obj->setProperty ("plugins", scanObj->getProperty ("plugins"));
+        const auto available = audioProcessor.getPluginChain().getAvailablePlugins();
+        if (auto* arr = available.getArray())
+            obj->setProperty ("plugins", juce::var (*arr));
         else
             obj->setProperty ("plugins", juce::var (juce::Array<juce::var>()));
     }
+
+    // Hand the blocklist to the UI so it can show the user which plugins
+    // are being skipped and let them unblock entries.
+    {
+        juce::Array<juce::var> blocklist;
+        for (const auto& path : audioProcessor.getPluginChain().getBlocklist())
+            blocklist.add (path);
+        obj->setProperty ("blocklist", blocklist);
+    }
+
+    // Tell the UI which FX slots currently have an open native editor
+    // window, so it can show "Close" instead of "Edit" for those rows
+    // and let the user close the window from the FX chain panel.
+    {
+        juce::Array<juce::var> openEditors;
+        for (const auto& entry : vst3EditorWindows)
+            openEditors.add (entry.first);
+        obj->setProperty ("openEditors", openEditors);
+    }
+
+    obj->setProperty ("restoreError", audioProcessor.getLastChainRestoreError());
 
     webView.emitEventIfBrowserIsVisible (juce::Identifier (backendVst3ChainEvent), juce::var (obj));
 }
 
 void BluePrinterWebViewEditor::scanVst3Folder (const juce::File& folder)
 {
-    // Drop the request if a scan is already in flight so we don't race on
-    // lastVst3Scan / the UI state.
-    if (scanThread != nullptr && scanThread->joinable())
+    // Drop the request if a scan is already in flight so we don't race
+    // on the active scan state.
+    if (activeScan != nullptr)
         return;
 
-    // The SafePointer is heap-allocated so the worker thread (and the
-    // message-thread callbacks it schedules) can hold it past the
-    // editor's lifetime. It is freed exactly once, by the very last
-    // message-thread callback the worker schedules.
-    auto* weakThis = new juce::Component::SafePointer<BluePrinterWebViewEditor>(this);
-
-    scanThread = std::make_unique<std::thread> ([weakThis, folder]()
+    if (! folder.isDirectory())
     {
-        const auto postChain = [weakThis] (juce::var payload, bool final)
-        {
-            juce::MessageManager::callAsync ([weakThis, payload, final]()
-            {
-                if (auto* self = weakThis->getComponent())
-                {
-                    {
-                        const juce::ScopedLock sl (self->vst3ScanLock);
-                        self->lastVst3Scan = payload;
-                    }
-                    self->webView.emitEventIfBrowserIsVisible (
-                        juce::Identifier (BluePrinterWebViewEditor::backendVst3ChainEvent),
-                        payload);
-                }
-                if (final)
-                    delete weakThis;
-            });
-        };
+        sendNotification ("Folder not found: " + folder.getFullPathName(), "error");
+        return;
+    }
 
-        const auto postProgress = [weakThis] (juce::var payload)
-        {
-            juce::MessageManager::callAsync ([weakThis, payload]()
-            {
-                if (auto* self = weakThis->getComponent())
-                    self->webView.emitEventIfBrowserIsVisible (
-                        juce::Identifier (BluePrinterWebViewEditor::backendVst3ScanProgressEvent),
-                        payload);
-            });
-        };
+    auto state = std::make_unique<Vst3ScanState>();
+    state->folder = folder;
+    state->files  = folder.findChildFiles (juce::File::findFiles, false, "*.vst3");
+    activeScan = std::move (state);
 
-        auto buildProgress = [&folder] (bool active, int current, int total, const juce::String& currentFile)
-        {
-            auto* p = new juce::DynamicObject();
-            p->setProperty ("active", active);
-            p->setProperty ("current", current);
-            p->setProperty ("total", total);
-            p->setProperty ("folder", folder.getFullPathName());
-            p->setProperty ("currentFile", currentFile);
-            return juce::var (p);
-        };
+    // Push an empty chain snapshot so the UI can show the folder path
+    // right away. The PluginChain's cached scan result is left alone
+    // until the scan finishes; this just refreshes the frontend.
+    {
+        auto* empty = new juce::DynamicObject();
+        empty->setProperty ("folder", folder.getFullPathName());
+        empty->setProperty ("plugins", juce::var (juce::Array<juce::var>()));
+        webView.emitEventIfBrowserIsVisible (juce::Identifier (backendVst3ChainEvent), juce::var (empty));
+    }
 
-        if (! folder.isDirectory())
-        {
-            // No chain event for errors; the progress event is the last
-            // callback so it owns the weakThis free.
-            postProgress (buildProgress (false, 0, 0, juce::String()));
-            juce::MessageManager::callAsync ([weakThis]()
-            {
-                delete weakThis;
-            });
-            return;
-        }
+    emitScanProgress (true, 0, activeScan->files.size(), juce::String());
+}
 
-        auto files = folder.findChildFiles (juce::File::findFiles, false, "*.vst3");
-        const int total = static_cast<int> (files.size());
+void BluePrinterWebViewEditor::scanDefaultVst3Folder()
+{
+    scanVst3Folder (PluginChain::getDefaultVst3Folder());
+}
 
-        // Push an empty chain snapshot so the UI can show the folder path
-        // right away.
-        {
-            auto* empty = new juce::DynamicObject();
-            empty->setProperty ("folder", folder.getFullPathName());
-            empty->setProperty ("plugins", juce::var (juce::Array<juce::var>()));
-            postChain (juce::var (empty), /*final=*/ false);
-        }
+void BluePrinterWebViewEditor::runScanStep()
+{
+    if (activeScan == nullptr)
+        return;
 
-        postProgress (buildProgress (true, 0, total, juce::String()));
+    // The per-file describe runs on a worker thread (see
+    // PluginChain::describeVst3FileAsync) so a misbehaving .vst3 —
+    // modal license dialog, hung initialize(), throwing factory call —
+    // can be timed out and skipped without ever blocking the message
+    // thread. While a describe is in flight we just wait for its
+    // callback to advance the index.
+    if (activeScan->asyncScanInFlight)
+        return;
 
-        juce::Array<juce::var> pluginArray;
-        for (int i = 0; i < total; ++i)
-        {
-            const auto& file = files[static_cast<size_t> (i)];
+    const int idx = activeScan->currentIndex;
+    const int total = activeScan->files.size();
 
-            juce::String perFileError;
-            if (auto* arr = PluginChain::describeVst3File (file, perFileError).getArray())
-                for (const auto& v : *arr)
-                    pluginArray.add (v);
-
-            postProgress (buildProgress (true, i + 1, total, file.getFileName()));
-        }
-
-        // Final chain snapshot. This is the last callAsync we schedule,
-        // so it owns the weakThis free. Posted as a separate call so it
-        // runs after every per-file progress on the message thread.
+    if (idx >= total)
+    {
+        // Commit the accumulated plugin list to the PluginChain (which
+        // persists it in the host state) and push the final snapshot.
+        audioProcessor.getPluginChain().setAvailablePlugins (juce::var (activeScan->pluginArray));
         {
             auto* result = new juce::DynamicObject();
-            result->setProperty ("folder", folder.getFullPathName());
-            result->setProperty ("plugins", juce::var (pluginArray));
-            postChain (juce::var (result), /*final=*/ true);
+            result->setProperty ("folder", activeScan->folder.getFullPathName());
+            result->setProperty ("plugins", juce::var (activeScan->pluginArray));
+            webView.emitEventIfBrowserIsVisible (juce::Identifier (backendVst3ChainEvent), juce::var (result));
         }
-    });
+
+        emitScanProgress (false, total, total, juce::String());
+        activeScan.reset();
+        return;
+    }
+
+    const auto& file = activeScan->files[idx];
+    activeScan->asyncScanInFlight = true;
+
+    // Same timeout as addPluginAsync: 10s is enough for any well-behaved
+    // VST3 factory call, and short enough that one bad plugin doesn't
+    // stall the whole folder scan.
+    constexpr int kDescribeTimeoutMs = 10000;
+
+    audioProcessor.getPluginChain().describeVst3FileAsync (
+        file, kDescribeTimeoutMs,
+        [this, file, weakToken = std::weak_ptr<int> (aliveToken)]
+        (const PluginChain::DescribeResult& result)
+        {
+            // The editor may have been destroyed (or the scan reset)
+            // while the worker was running. Bail out without touching
+            // any editor state in that case — the DescribeWaiter is
+            // self-deleting so we don't have to clean it up here.
+            if (weakToken.expired() || disposed.load (std::memory_order_acquire))
+                return;
+            if (activeScan == nullptr)
+                return;
+
+            if (result.timedOut)
+            {
+                sendNotification ("Timed out scanning " + file.getFileName()
+                                  + ". You can block this plugin so it isn't tried again.",
+                                  "error");
+            }
+            else if (result.error.isNotEmpty())
+            {
+                sendNotification ("Failed to scan " + file.getFileName() + ": "
+                                  + result.error, "error");
+            }
+            else if (auto* arr = result.descriptions.getArray())
+            {
+                for (const auto& v : *arr)
+                    activeScan->pluginArray.add (v);
+            }
+
+            const int nextIndex = activeScan->currentIndex + 1;
+            emitScanProgress (true, nextIndex, activeScan->files.size(), file.getFileName());
+            activeScan->asyncScanInFlight = false;
+            activeScan->currentIndex = nextIndex;
+        });
+}
+
+void BluePrinterWebViewEditor::emitScanProgress (bool active, int current, int total, const juce::String& currentFile)
+{
+    auto* p = new juce::DynamicObject();
+    p->setProperty ("active", active);
+    p->setProperty ("current", current);
+    p->setProperty ("total", total);
+    p->setProperty ("folder", activeScan != nullptr ? activeScan->folder.getFullPathName() : juce::String());
+    p->setProperty ("currentFile", currentFile);
+    webView.emitEventIfBrowserIsVisible (juce::Identifier (backendVst3ScanProgressEvent), juce::var (p));
+}
+
+void BluePrinterWebViewEditor::addVst3FromPath (const juce::File& vst3File)
+{
+    if (! vst3File.existsAsFile())
+    {
+        sendNotification ("Plugin file not found: " + vst3File.getFullPathName(), "error");
+        return;
+    }
+
+    // Async load with a 10s timeout. The worker thread runs the
+    // VST3 factory call (which can pop up a modal license dialog
+    // for expired-license plugins), so the message thread stays
+    // responsive and we can bail out if the plugin hangs.
+    constexpr int kLoadTimeoutMs = 10000;
+    audioProcessor.getPluginChain().addPluginAsync (
+        vst3File, kLoadTimeoutMs,
+        [this, vst3File](int slotIndex,
+                         const juce::String& name,
+                         const juce::String& error,
+                         bool timedOut)
+        {
+            if (timedOut)
+            {
+                auto* payload = new juce::DynamicObject();
+                payload->setProperty ("path",   vst3File.getFullPathName());
+                payload->setProperty ("name",   vst3File.getFileName());
+                payload->setProperty ("error",  error);
+                payload->setProperty ("timedOut", true);
+                webView.emitEventIfBrowserIsVisible (
+                    juce::Identifier (backendVst3LoadFailedEvent), juce::var (payload));
+                sendNotification ("Timed out loading " + vst3File.getFileName()
+                                  + ". You can block this plugin so it isn't tried again.", "error");
+                return;
+            }
+
+            if (slotIndex < 0)
+            {
+                auto* payload = new juce::DynamicObject();
+                payload->setProperty ("path",   vst3File.getFullPathName());
+                payload->setProperty ("name",   vst3File.getFileName());
+                payload->setProperty ("error",  error);
+                payload->setProperty ("timedOut", false);
+                webView.emitEventIfBrowserIsVisible (
+                    juce::Identifier (backendVst3LoadFailedEvent), juce::var (payload));
+                sendNotification ("Failed to add plugin: " + error, "error");
+                return;
+            }
+
+            sendNotification ("Added " + vst3File.getFileName() + " (" + name + ")", "ok");
+            emitVst3ChainSnapshot();
+        });
 }
 
 void BluePrinterWebViewEditor::pickVst3FileAndAdd()
@@ -869,43 +1113,6 @@ void BluePrinterWebViewEditor::pickVst3FileAndAdd()
             return;
         }
 
-        juce::String error;
-        const int index = audioProcessor.getPluginChain().addPlugin (result, error);
-        if (index < 0)
-        {
-            sendNotification ("Failed to add plugin: " + error, "error");
-            return;
-        }
-
-        sendNotification ("Added " + result.getFileName(), "ok");
-        emitVst3ChainSnapshot();
-    });
-}
-
-void BluePrinterWebViewEditor::pickVst3FolderAndScan()
-{
-    auto start = PluginChain::getDefaultVst3Folder();
-    if (! start.isDirectory())
-        start = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory);
-
-    activeFileChooser = std::make_unique<juce::FileChooser> (
-        "Pick a folder to scan for VST3 plugins",
-        start,
-        "",
-        true);
-
-    auto flags = juce::FileBrowserComponent::openMode
-               | juce::FileBrowserComponent::canSelectDirectories;
-
-    activeFileChooser->launchAsync (flags, [this](const juce::FileChooser& chooser)
-    {
-        auto folder = chooser.getResult();
-        activeFileChooser.reset();
-        if (folder == juce::File())
-        {
-            sendNotification ("Folder scan cancelled.", "info");
-            return;
-        }
-        scanVst3Folder (folder);
+        addVst3FromPath (result);
     });
 }
