@@ -24,7 +24,14 @@ function readInitialSnippets() {
 
 function readInitialTransport() {
   const raw = getInitialData().transport;
-  if (!raw) return { recording: false, recordingLength: 0, recordingSampleRate: 0, playingSnippetId: -1, playingPosition: 0, inputLevel: 0, inputPeak: 0, libraryFolder: "", lastSaveError: "" };
+  if (!raw) return {
+    recording: false, recordingLength: 0, recordingSampleRate: 0,
+    playingSnippetId: -1, playingPosition: 0,
+    inputLevel: 0, inputPeak: 0,
+    libraryFolder: "", lastSaveError: "",
+    metronomeEnabled: true, bpm: 120, countInBeats: 4,
+    preRollActive: false, transportPosition: 0,
+  };
   return {
     ...raw,
     inputLevel: Number(raw.inputLevel ?? 0),
@@ -34,6 +41,11 @@ function readInitialTransport() {
     recordingSampleRate: Number(raw.recordingSampleRate ?? 0),
     playingSnippetId: Number(raw.playingSnippetId ?? -1),
     playingPosition: Number(raw.playingPosition ?? 0),
+    metronomeEnabled: raw.metronomeEnabled !== false,
+    bpm: Number(raw.bpm ?? 120),
+    countInBeats: Number(raw.countInBeats ?? 4),
+    preRollActive: Boolean(raw.preRollActive),
+    transportPosition: Number(raw.transportPosition ?? 0),
   };
 }
 
@@ -84,6 +96,11 @@ export default function App() {
         inputPeak: Number(payload.inputPeak ?? 0),
         libraryFolder: payload.libraryFolder ?? prev.libraryFolder,
         lastSaveError: payload.lastSaveError ?? prev.lastSaveError,
+        metronomeEnabled: payload.metronomeEnabled !== undefined ? Boolean(payload.metronomeEnabled) : prev.metronomeEnabled,
+        bpm:              payload.bpm !== undefined              ? Number(payload.bpm)              : prev.bpm,
+        countInBeats:     payload.countInBeats !== undefined     ? Number(payload.countInBeats)     : prev.countInBeats,
+        preRollActive:    Boolean(payload.preRollActive),
+        transportPosition: Number(payload.transportPosition ?? 0),
       }));
     });
     return unsubTransport;
@@ -100,6 +117,21 @@ export default function App() {
   const handleGainChange = (next) => {
     setGain(next);
     emit(FRONTEND_EVENTS.setParameter, { id: PARAM_IDS.gain, value: next });
+  };
+
+  const handleMetronomeChange = (enabled) => {
+    setTransport((prev) => ({ ...prev, metronomeEnabled: enabled }));
+    emit(FRONTEND_EVENTS.setMetronome, { enabled });
+  };
+
+  const handleBpmChange = (next) => {
+    setTransport((prev) => ({ ...prev, bpm: next }));
+    emit(FRONTEND_EVENTS.setBpm, { bpm: next });
+  };
+
+  const handleCountInBeatsChange = (next) => {
+    setTransport((prev) => ({ ...prev, countInBeats: next }));
+    emit(FRONTEND_EVENTS.setCountInBeats, { beats: next });
   };
 
   const playingSnippet = transport.playingSnippetId >= 0 ? snippets.find((s) => s.id === transport.playingSnippetId) : null;
@@ -120,6 +152,12 @@ export default function App() {
         transport={transport}
         gain={gain}
         onGainChange={handleGainChange}
+        metronomeEnabled={transport.metronomeEnabled}
+        bpm={transport.bpm}
+        countInBeats={transport.countInBeats}
+        onMetronomeChange={handleMetronomeChange}
+        onBpmChange={handleBpmChange}
+        onCountInBeatsChange={handleCountInBeatsChange}
       />
 
       <LibraryFolderRow

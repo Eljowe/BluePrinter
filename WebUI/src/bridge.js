@@ -13,6 +13,9 @@ export const FRONTEND_EVENTS = {
   chooseLibraryFolder: "frontendChooseLibraryFolder",
   openLibraryFolder: "frontendOpenLibraryFolder",
   refreshLibrary: "frontendRefreshLibrary",
+  setMetronome: "frontendSetMetronome",
+  setBpm: "frontendSetBpm",
+  setCountInBeats: "frontendSetCountInBeats",
 };
 
 export const BACKEND_EVENTS = {

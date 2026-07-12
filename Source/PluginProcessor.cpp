@@ -107,12 +107,33 @@ void BluePrinterAudioProcessor::prepareToPlay (double sampleRate, int samplesPer
     maxRecordSamples = maxSamples;
     recordWritePos.store (0, std::memory_order_release);
 
+    currentSampleRate = sampleRate;
+
+    // Synthesize a 50 ms percussive click: fundamental 800 Hz + a couple of
+    // harmonics, fast exponential decay. Single-channel, mixed into all
+    // output channels.
+    const double clickDuration = 0.05;
+    const int clickSamples = juce::jmax (1, static_cast<int> (sampleRate * clickDuration));
+    clickBuffer.assign (static_cast<size_t> (clickSamples), 0.0f);
+    for (int i = 0; i < clickSamples; ++i)
+    {
+        const float t = static_cast<float> (i) / static_cast<float> (sampleRate);
+        const float envelope = std::exp (-t * 80.0f);
+        float s = 0.0f;
+        s += std::sin (2.0f * juce::MathConstants<float>::twoPi *  800.0f * t) * 0.55f;
+        s += std::sin (2.0f * juce::MathConstants<float>::twoPi * 1600.0f * t) * 0.30f;
+        s += std::sin (2.0f * juce::MathConstants<float>::twoPi * 2400.0f * t) * 0.15f;
+        clickBuffer[static_cast<size_t> (i)] = s * envelope * 0.40f;
+    }
+
     startTimerHz (transportTimerHz);
 }
 
 void BluePrinterAudioProcessor::releaseResources()
 {
     stopTimer();
+    preRollActive.store (false, std::memory_order_release);
+    transportPosition.store (0, std::memory_order_release);
     if (recordingRequested.load())
         stopRecording();
     if (playbackActive.load())
@@ -170,22 +191,65 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     for (int channel = 0; channel < numChannels; ++channel)
         buffer.applyGain (channel, 0, numSamples, gain);
 
-    // Recording: capture the post-gain signal into the pre-allocated record
-    // buffer. All math here is allocation-free, and access to recordBuffer is
-    // serialised with the message thread via recordLock.
+    // 1. Record the clean (post-gain, pre-click) input. Access to the
+    //    record buffer is serialised with the message thread via recordLock.
     {
         const juce::ScopedLock sl (recordLock);
         if (recordingRequested.load (std::memory_order_acquire))
             writeRecording (buffer, numSamples);
     }
 
+    // 2. Compute input levels from the still-clean signal so the click
+    //    doesn't pump the meter.
     computeLevels (buffer, numSamples);
 
-    // Playback: overwrite the output with the stored snippet. We do this
-    // after recording so any monitoring of the input stops while a snippet
-    // is playing.
+    // 3. Playback overwrites the output buffer. Done after recording so
+    //    monitoring of the input stops while a snippet is playing.
     if (playbackActive.load (std::memory_order_acquire))
         renderPlayback (buffer, numSamples);
+
+    // 4. Pre-roll (count-in): add the click to the output, advance the
+    //    position, and flip into recording once the configured number of
+    //    beats has elapsed. The transition is deferred to the next block
+    //    so this block's audio is still pure input + click.
+    if (preRollActive.load (std::memory_order_acquire))
+    {
+        const int64_t startPos = transportPosition.load (std::memory_order_acquire);
+        renderMetronomeInBlock (buffer, startPos, numSamples);
+
+        const int64_t newPos = startPos + numSamples;
+        const double bpmValue = bpm.load (std::memory_order_acquire);
+        const int beatsTarget   = countInBeats.load (std::memory_order_acquire);
+
+        bool done = true;
+        if (bpmValue > 0.0 && currentSampleRate > 0.0)
+        {
+            const double samplesPerBeat = 60.0 / bpmValue * currentSampleRate;
+            const int beatsElapsed = static_cast<int> (newPos / samplesPerBeat);
+            done = beatsElapsed >= beatsTarget;
+        }
+
+        if (done)
+        {
+            preRollActive.store (false, std::memory_order_release);
+            transportPosition.store (0, std::memory_order_release);
+            beginActualRecording();
+        }
+        else
+        {
+            transportPosition.store (newPos, std::memory_order_release);
+        }
+    }
+
+    // 5. Click during recording. Added after the record write so the click
+    //    is in the output but never in the recording.
+    if (recordingRequested.load (std::memory_order_acquire)
+        && metronomeEnabled.load (std::memory_order_acquire))
+    {
+        const int64_t startPos = transportPosition.load (std::memory_order_acquire);
+        renderMetronomeInBlock (buffer, startPos, numSamples);
+        transportPosition.store (startPos + numSamples, std::memory_order_release);
+    }
 }
 
 void BluePrinterAudioProcessor::writeRecording (const juce::AudioBuffer<float>& source, int numSamples)
@@ -211,6 +275,46 @@ void BluePrinterAudioProcessor::writeRecording (const juce::AudioBuffer<float>& 
         recordingRequested.store (false, std::memory_order_release);
         recordingState.store (RecordingState::Idle, std::memory_order_release);
         recordingFinalizePending.store (true, std::memory_order_release);
+    }
+}
+
+void BluePrinterAudioProcessor::renderMetronomeInBlock (juce::AudioBuffer<float>& buffer,
+                                                        int64_t startPos,
+                                                        int numSamples)
+{
+    if (clickBuffer.empty() || numSamples <= 0)
+        return;
+
+    const double bpmValue = bpm.load (std::memory_order_acquire);
+    if (bpmValue <= 0.0 || currentSampleRate <= 0.0)
+        return;
+
+    const double samplesPerBeat = 60.0 / bpmValue * currentSampleRate;
+    if (samplesPerBeat <= 0.0)
+        return;
+
+    const int numChannels = buffer.getNumChannels();
+    const int clickLen    = static_cast<int> (clickBuffer.size());
+
+    // Beat boundaries that fall inside [startPos, startPos + numSamples).
+    const int64_t endPos = startPos + numSamples;
+    const int firstBeat  = static_cast<int> (std::ceil (static_cast<double> (startPos) / samplesPerBeat));
+    const int lastBeat   = static_cast<int> (std::floor (static_cast<double> (endPos)   / samplesPerBeat));
+
+    for (int beat = firstBeat; beat <= lastBeat; ++beat)
+    {
+        const int64_t beatSample = static_cast<int64_t> (beat * samplesPerBeat);
+        const int blockOffset = static_cast<int> (beatSample - startPos);
+        if (blockOffset < 0 || blockOffset >= numSamples)
+            continue;
+
+        const int remaining = juce::jmin (clickLen, numSamples - blockOffset);
+        for (int j = 0; j < remaining; ++j)
+        {
+            const float sample = clickBuffer[static_cast<size_t> (j)];
+            for (int ch = 0; ch < numChannels; ++ch)
+                buffer.addSample (ch, blockOffset + j, sample);
+        }
     }
 }
 
@@ -314,7 +418,8 @@ void BluePrinterAudioProcessor::computeLevels (const juce::AudioBuffer<float>& s
 //==============================================================================
 void BluePrinterAudioProcessor::startRecording()
 {
-    if (recordingRequested.load (std::memory_order_acquire))
+    if (recordingRequested.load (std::memory_order_acquire)
+        || preRollActive.load (std::memory_order_acquire))
         return;
 
     if (playbackActive.load (std::memory_order_acquire))
@@ -323,6 +428,26 @@ void BluePrinterAudioProcessor::startRecording()
     if (recordBuffer == nullptr || maxRecordSamples <= 0)
         return;
 
+    const int beats = countInBeats.load (std::memory_order_acquire);
+    if (metronomeEnabled.load (std::memory_order_acquire) && beats > 0)
+    {
+        // Count-in: play N beats of click, then start recording. The
+        // transition to actual recording happens in processBlock.
+        transportPosition.store (0, std::memory_order_release);
+        preRollActive.store (true, std::memory_order_release);
+        recordingState.store (RecordingState::Recording, std::memory_order_release);
+        recordingFinalizePending.store (false, std::memory_order_release);
+    }
+    else
+    {
+        beginActualRecording();
+    }
+
+    listeners.call ([](Listener& l) { l.transportChanged(); });
+}
+
+void BluePrinterAudioProcessor::beginActualRecording()
+{
     {
         const juce::ScopedLock sl (recordLock);
         recordBuffer->clear();
@@ -331,12 +456,24 @@ void BluePrinterAudioProcessor::startRecording()
         recordingFinalizePending.store (false, std::memory_order_release);
     }
     recordingRequested.store (true, std::memory_order_release);
-
-    listeners.call ([](Listener& l) { l.transportChanged(); });
+    transportPosition.store (0, std::memory_order_release);
 }
 
 void BluePrinterAudioProcessor::stopRecording()
 {
+    // Cancel count-in if one is running. Nothing was recorded.
+    if (preRollActive.load (std::memory_order_acquire))
+    {
+        preRollActive.store (false, std::memory_order_release);
+        transportPosition.store (0, std::memory_order_release);
+        if (recordingState.load() != RecordingState::Idle)
+        {
+            recordingState.store (RecordingState::Idle, std::memory_order_release);
+            listeners.call ([](Listener& l) { l.transportChanged(); });
+        }
+        return;
+    }
+
     if (! recordingRequested.load (std::memory_order_acquire)
         && ! recordingFinalizePending.load (std::memory_order_acquire))
     {
@@ -350,6 +487,7 @@ void BluePrinterAudioProcessor::stopRecording()
 
     recordingRequested.store (false, std::memory_order_release);
     recordingState.store (RecordingState::Idle, std::memory_order_release);
+    transportPosition.store (0, std::memory_order_release);
     recordingFinalizePending.store (true, std::memory_order_release);
 
     // The message thread is finalising as fast as possible so the snippet
@@ -466,6 +604,32 @@ void BluePrinterAudioProcessor::refreshLibraryFromFolder()
     listeners.call ([](Listener& l) { l.libraryChanged(); });
 }
 
+void BluePrinterAudioProcessor::setMetronomeEnabled (bool enabled)
+{
+    if (metronomeEnabled.load (std::memory_order_acquire) == enabled)
+        return;
+    metronomeEnabled.store (enabled, std::memory_order_release);
+    listeners.call ([](Listener& l) { l.transportChanged(); });
+}
+
+void BluePrinterAudioProcessor::setBpm (float newBpm)
+{
+    const float clamped = juce::jlimit (20.0f, 300.0f, newBpm);
+    if (juce::approximatelyEqual (bpm.load (std::memory_order_acquire), clamped))
+        return;
+    bpm.store (clamped, std::memory_order_release);
+    listeners.call ([](Listener& l) { l.transportChanged(); });
+}
+
+void BluePrinterAudioProcessor::setCountInBeats (int beats)
+{
+    const int clamped = juce::jlimit (0, 16, beats);
+    if (countInBeats.load (std::memory_order_acquire) == clamped)
+        return;
+    countInBeats.store (clamped, std::memory_order_release);
+    listeners.call ([](Listener& l) { l.transportChanged(); });
+}
+
 juce::String BluePrinterAudioProcessor::getLastSaveError() const
 {
     juce::ScopedLock lock (libraryFolderLock);
@@ -558,6 +722,11 @@ bool BluePrinterAudioProcessor::hasEditor() const
 void BluePrinterAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     auto state = apvts.copyState();
+    // Stash the non-automatable metronome settings in the same ValueTree
+    // so they survive a project save/load.
+    state.setProperty ("metronomeEnabled", metronomeEnabled.load(), nullptr);
+    state.setProperty ("bpm",              bpm.load(),              nullptr);
+    state.setProperty ("countInBeats",     countInBeats.load(),     nullptr);
     std::unique_ptr<juce::XmlElement> xml (state.createXml());
     copyXmlToBinary (*xml, destData);
 }
@@ -567,8 +736,17 @@ void BluePrinterAudioProcessor::setStateInformation (const void* data, int sizeI
     std::unique_ptr<juce::XmlElement> xmlState (getXmlFromBinary (data, sizeInBytes));
 
     if (xmlState.get() != nullptr)
+    {
         if (xmlState->hasTagName (apvts.state.getType()))
-            apvts.replaceState (juce::ValueTree::fromXml (*xmlState));
+        {
+            auto state = juce::ValueTree::fromXml (*xmlState);
+            apvts.replaceState (state);
+
+            metronomeEnabled.store (static_cast<bool>  (state.getProperty ("metronomeEnabled", true)));
+            bpm.store              (static_cast<float> (state.getProperty ("bpm",              120.0f)));
+            countInBeats.store     (static_cast<int>   (state.getProperty ("countInBeats",     4)));
+        }
+    }
 }
 
 juce::AudioProcessorValueTreeState::ParameterLayout BluePrinterAudioProcessor::createParameterLayout()

@@ -201,6 +201,21 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
         {
             processor.refreshLibraryFromFolder();
         })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetMetronomeEvent, [&processor](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+                processor.setMetronomeEnabled (static_cast<bool> (obj->getProperty ("enabled")));
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetBpmEvent, [&processor](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+                processor.setBpm (static_cast<float> (obj->getProperty ("bpm")));
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetCountInBeatsEvent, [&processor](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+                processor.setCountInBeats (static_cast<int> (obj->getProperty ("beats")));
+        })
         .withInitialisationData("parameters", initialData)
         .withInitialisationData("snippets", owner->makeSnippetsSnapshot())
         .withInitialisationData("transport", owner->makeTransportSnapshot());
@@ -376,6 +391,11 @@ juce::var BluePrinterWebViewEditor::makeTransportSnapshot() const
     obj->setProperty ("inputPeak",  juce::jlimit (0.0f, 1.0f, audioProcessor.getCurrentInputPeak()));
     obj->setProperty ("libraryFolder", audioProcessor.getLibraryFolder());
     obj->setProperty ("lastSaveError", audioProcessor.getLastSaveError());
+    obj->setProperty ("metronomeEnabled", audioProcessor.getMetronomeEnabled());
+    obj->setProperty ("bpm",              audioProcessor.getBpm());
+    obj->setProperty ("countInBeats",     audioProcessor.getCountInBeats());
+    obj->setProperty ("preRollActive",    audioProcessor.isPreRollActive());
+    obj->setProperty ("transportPosition", static_cast<double> (audioProcessor.getTransportPosition()));
     return juce::var (obj);
 }
 
