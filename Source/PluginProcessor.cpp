@@ -184,8 +184,8 @@ void ObstacleAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     fuzzDcBlockX1 = { 0.0f, 0.0f };
     fuzzDcBlockY1 = { 0.0f, 0.0f };
     fuzzBiasFollower = { 0.0f, 0.0f };
-    octaveLastInput = { 0.0f, 0.0f };
     octaveFlipFlopState = { false, false };
+    octaveArmedHighState = { true, true };
     octaveTrackingFilterState = { 0.0f, 0.0f };
     octaveOutputLpfState = { 0.0f, 0.0f };
     octaveEnvState = { 0.0f, 0.0f };
@@ -917,8 +917,8 @@ void ObstacleAudioProcessor::applyOctave(juce::AudioBuffer<float>& buffer, const
     // in slots 0/1 so that stereo widening can still happen on the wet side.
     constexpr size_t engineIndex = 0;
     auto& trackingLpf  = octaveTrackingFilterState[engineIndex];
-    auto& lastInput    = octaveLastInput[engineIndex];
     auto& flipFlop     = octaveFlipFlopState[engineIndex];
+    auto& armedHigh    = octaveArmedHighState[engineIndex];
     auto& envState     = octaveEnvState[engineIndex];
     auto& holdCounter  = octaveHoldCounter[engineIndex];
 
@@ -945,9 +945,15 @@ void ObstacleAudioProcessor::applyOctave(juce::AudioBuffer<float>& buffer, const
         // 3. Schmitt-trigger zero-cross detector. The flip-flop toggles on
         //    rising edges only (half-rate -> sub-octave). Hysteresis around
         //    the band means noisy signals near zero don't chatter.
-        if (lastInput <= +hysteresisBand && trackingLpf > +hysteresisBand)
-            flipFlop = !flipFlop;
-        lastInput = trackingLpf;
+        if (armedHigh && trackingLpf > +hysteresisBand)
+        {
+            flipFlop  = !flipFlop;
+            armedHigh = false;
+        }
+        else if (!armedHigh && trackingLpf < -hysteresisBand)
+        {
+            armedHigh = true;
+        }
 
         // 4. Square-wave sub voice. Multiplied by the envelope so it tracks
         //    playing dynamics rather than sitting at a fixed amplitude.
@@ -1476,7 +1482,17 @@ void ObstacleAudioProcessor::applySynthFuzz(juce::AudioBuffer<float>& buffer, co
     const auto sampleRate = static_cast<float>(juce::jmax(1.0, getSampleRate()));
     const auto baseDelaySamples = juce::jlimit(0.0f, static_cast<float>(DelayLine::size - 2),
                                                chainSettings.synthFuzzDelayMs * sampleRate / 1000.0f);
-    const auto detuneRatio = std::pow(2.0f, chainSettings.synthFuzzDetuneCents / 1200.0f);
+    // GranularPitchShifter::processSample internally hard-clamps the ratio to
+    // [0.25, 4.0] (see PluginProcessor.h), so anything outside +/- 1 octave here
+    // would just collapse to the same extreme anyway. Clamping at the cents
+    // level keeps the parameter's intent legible and documents the implicit
+    // bound for anyone who later widens the APVTS UI range.
+    constexpr float kSynthFuzzDetuneMinCents = -1200.0f;
+    constexpr float kSynthFuzzDetuneMaxCents = +1200.0f;
+    const auto detuneCents = juce::jlimit(kSynthFuzzDetuneMinCents,
+                                          kSynthFuzzDetuneMaxCents,
+                                          chainSettings.synthFuzzDetuneCents);
+    const auto detuneRatio = std::pow(2.0f, detuneCents / 1200.0f);
 
     // --- Fuzz stage coefficients ---------------------------------------
     constexpr float preEmphasisHz = 300.0f;
@@ -1513,16 +1529,17 @@ void ObstacleAudioProcessor::applySynthFuzz(juce::AudioBuffer<float>& buffer, co
         const auto dryRight = (rightRead != nullptr) ? rightRead[sample] : dryLeft;
 
         // High-pass pre-emphasis filter tracking the primary guitar signal (Left/Mono input)
-        hpfState += preEmphasisCoeff * (dryLeft - hpfState);
+        hpfState += preEmphasisCoeff * (dryLeft - hpfState) + 1.0e-25f;
         const auto highs = dryLeft - hpfState;
         
         // Optimized waveshaper loop calculation
         const auto fuzzed = std::tanh(highs * drive) * invTanhDrive;
 
         // Pseudo-Stereo Doubler
-        delayLine.push(fuzzed);
+        delayLine.push(highs);
         const auto delayed = delayLine.read(baseDelaySamples);
-        const auto doubled = shifter.processSample(delayed, detuneRatio);
+        const auto shiftedClean = shifter.processSample(delayed, detuneRatio);
+        const auto doubled = std::tanh(shiftedClean * drive) * invTanhDrive;
 
         if (rightWrite != nullptr)
         {

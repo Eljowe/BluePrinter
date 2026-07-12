@@ -278,14 +278,24 @@ juce::WebBrowserComponent::Options makeWebViewOptions(ObstacleAudioProcessor& pr
     auto gateBypassed = processor.apvts.getRawParameterValue("Gate Bypassed")->load() > 0.5f;
     auto analyzerEnabled = processor.apvts.getRawParameterValue("Analyzer Enabled")->load() > 0.5f;
 
-    const auto userDataFolder = juce::File::getSpecialLocation(juce::File::tempDirectory)
-                                    .getChildFile("ObstacleWebView2Data");
+    juce::File userDataFolder;
+   #if JUCE_WINDOWS
+    userDataFolder = juce::File::getSpecialLocation(juce::File::windowsLocalAppData)
+                         .getChildFile("Retrokielto")
+                         .getChildFile("Obstacle")
+                         .getChildFile("WebView2Cache");
+    userDataFolder.createDirectory();
+   #else
+    userDataFolder = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                         .getChildFile("ObstacleWebView2Data");
+   #endif
 
     return juce::WebBrowserComponent::Options{}
         .withBackend(juce::WebBrowserComponent::Options::Backend::webview2)
         .withWinWebView2Options(juce::WebBrowserComponent::Options::WinWebView2{}
                                     .withUserDataFolder(userDataFolder)
-                                    .withStatusBarDisabled())
+                                    .withStatusBarDisabled()
+                                    .withAdditionalBrowserArguments(juce::String::fromUTF8("--allow-no-sandbox-job --disable-gpu")))
         .withResourceProvider([distRoot](const juce::String& path) -> std::optional<juce::WebBrowserComponent::Resource>
         {
             if (!distRoot.isDirectory())

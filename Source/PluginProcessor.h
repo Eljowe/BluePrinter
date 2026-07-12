@@ -524,8 +524,8 @@ private:
     std::array<float, 2> gateEnvelope { 0.0f, 0.0f };
     std::array<GranularPitchShifter, 2> octavePitchShifters {};
     std::array<DelayLine, 2>          octavePadDelay {};
-    std::array<float, 2> octaveLastInput { 0.0f, 0.0f };
     std::array<bool, 2> octaveFlipFlopState { false, false };
+    std::array<bool, 2> octaveArmedHighState { true, true };
     std::array<float, 2> octaveTrackingFilterState { 0.0f, 0.0f };
     std::array<float, 2> octaveOutputLpfState { 0.0f, 0.0f };
     std::array<float, 2> octaveEnvState { 0.0f, 0.0f };
