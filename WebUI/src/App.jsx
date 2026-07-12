@@ -1,70 +1,145 @@
-import { useEffect, useState } from "react";
-import { Knob } from "./components/controls";
-
-const FRONTEND_EVENT = "frontendSetParameter";
-const BACKEND_EVENT = "backendParameters";
+import { useEffect, useMemo, useState } from "react";
+import { Transport } from "./components/Transport";
+import { LibraryFolderRow } from "./components/LibraryFolderRow";
+import { SnippetList } from "./components/SnippetList";
+import { Notification } from "./components/Notification";
+import { BACKEND_EVENTS, FRONTEND_EVENTS, emit, getInitialData, subscribe } from "./bridge";
 
 const PARAM_IDS = {
   gain: "Gain",
 };
 
-function getBackend() {
-  return window.__JUCE__?.backend;
+function readInitialParameters() {
+  const first = getInitialData().parameters?.[0];
+  if (!first) return { gain: 0.7 };
+  return { gain: Number(first.gain ?? 0.7) };
 }
 
-function emitParameterChange(id, value) {
-  const backend = getBackend();
-  if (!backend?.emitEvent) return;
-  backend.emitEvent(FRONTEND_EVENT, { id, value });
+function readInitialSnippets() {
+  const raw = getInitialData().snippets;
+  if (Array.isArray(raw)) return raw;
+  if (raw && Array.isArray(raw.snippets)) return raw.snippets;
+  return [];
 }
 
-function readInitialParametersFromJuce() {
-  const first = window.__JUCE__?.initialisationData?.parameters?.[0];
-  if (!first) return null;
-  return { gain: Number(first.gain ?? 0.5) };
+function readInitialTransport() {
+  const raw = getInitialData().transport;
+  if (!raw) return { recording: false, recordingLength: 0, recordingSampleRate: 0, playingSnippetId: -1, playingPosition: 0, inputLevel: 0, inputPeak: 0, libraryFolder: "", lastSaveError: "" };
+  return {
+    ...raw,
+    inputLevel: Number(raw.inputLevel ?? 0),
+    inputPeak: Number(raw.inputPeak ?? 0),
+    recording: Boolean(raw.recording),
+    recordingLength: Number(raw.recordingLength ?? 0),
+    recordingSampleRate: Number(raw.recordingSampleRate ?? 0),
+    playingSnippetId: Number(raw.playingSnippetId ?? -1),
+    playingPosition: Number(raw.playingPosition ?? 0),
+  };
 }
 
 export default function App() {
-  const initial = readInitialParametersFromJuce();
-  const [gain, setGain] = useState(initial?.gain ?? 0.5);
+  const initial = useMemo(readInitialParameters, []);
+  const [gain, setGain] = useState(initial.gain);
+  const [snippets, setSnippets] = useState(readInitialSnippets);
+  const [transport, setTransport] = useState(readInitialTransport);
+  const [notification, setNotification] = useState(null);
 
   useEffect(() => {
-    const backend = getBackend();
-    if (!backend?.addEventListener) return undefined;
-
-    const token = backend.addEventListener(BACKEND_EVENT, (payload) => {
+    const unsubParam = subscribe(BACKEND_EVENTS.parameters, (payload) => {
       if (typeof payload !== "object" || payload == null) return;
       if (payload.gain !== undefined) setGain(Number(payload.gain));
     });
-
-    return () => {
-      if (backend.removeEventListener && token !== undefined) {
-        backend.removeEventListener(token);
-      }
-    };
+    return unsubParam;
   }, []);
+
+  useEffect(() => {
+    const unsubSnippets = subscribe(BACKEND_EVENTS.snippets, (payload) => {
+      if (Array.isArray(payload)) {
+        setSnippets(payload);
+        return;
+      }
+      if (typeof payload === "object" && payload !== null) {
+        if (Array.isArray(payload.snippets)) setSnippets(payload.snippets);
+        setTransport((prev) => ({
+          ...prev,
+          libraryFolder: payload.libraryFolder ?? prev.libraryFolder,
+          lastSaveError: payload.lastSaveError ?? "",
+        }));
+      }
+    });
+    return unsubSnippets;
+  }, []);
+
+  useEffect(() => {
+    const unsubTransport = subscribe(BACKEND_EVENTS.transport, (payload) => {
+      if (typeof payload !== "object" || payload == null) return;
+      setTransport((prev) => ({
+        ...prev,
+        recording: Boolean(payload.recording),
+        recordingLength: Number(payload.recordingLength ?? 0),
+        recordingSampleRate: Number(payload.recordingSampleRate ?? prev.recordingSampleRate),
+        playingSnippetId: Number(payload.playingSnippetId ?? -1),
+        playingPosition: Number(payload.playingPosition ?? 0),
+        inputLevel: Number(payload.inputLevel ?? 0),
+        inputPeak: Number(payload.inputPeak ?? 0),
+        libraryFolder: payload.libraryFolder ?? prev.libraryFolder,
+        lastSaveError: payload.lastSaveError ?? prev.lastSaveError,
+      }));
+    });
+    return unsubTransport;
+  }, []);
+
+  useEffect(() => {
+    const unsubNotify = subscribe(BACKEND_EVENTS.notify, (payload) => {
+      if (typeof payload !== "object" || payload == null) return;
+      setNotification({ message: String(payload.message ?? ""), level: String(payload.level ?? "info") });
+    });
+    return unsubNotify;
+  }, []);
+
+  const handleGainChange = (next) => {
+    setGain(next);
+    emit(FRONTEND_EVENTS.setParameter, { id: PARAM_IDS.gain, value: next });
+  };
+
+  const playingSnippet = transport.playingSnippetId >= 0 ? snippets.find((s) => s.id === transport.playingSnippetId) : null;
+  const playPositionSeconds = playingSnippet && playingSnippet.sampleRate > 0
+    ? transport.playingPosition / playingSnippet.sampleRate
+    : 0;
 
   return (
     <main className="app">
       <header className="app-header">
-        <h1>BluePrinter Template</h1>
-        <p>JUCE + React + WebView2 bridge example</p>
+        <div>
+          <h1>BluePrinter</h1>
+          <p>Record a guitar take, name it, write down what to work on.</p>
+        </div>
       </header>
-      <section className="app-body">
-        <Knob
-          label="Gain"
-          min={0}
-          max={1}
-          value={gain}
-          onChange={(next) => {
-            setGain(next);
-            emitParameterChange(PARAM_IDS.gain, next);
-          }}
-          decimals={2}
-        />
-      </section>
+
+      <Transport
+        transport={transport}
+        gain={gain}
+        onGainChange={handleGainChange}
+      />
+
+      <LibraryFolderRow
+        folder={transport.libraryFolder}
+        error={transport.lastSaveError}
+      />
+
+      <SnippetList
+        snippets={snippets}
+        playingSnippetId={transport.playingSnippetId}
+        playPositionSeconds={playPositionSeconds}
+      />
+
+      <Notification
+        notification={notification}
+        onDismiss={() => setNotification(null)}
+      />
+
       <footer className="app-footer">
-        <span>Edit WebUI/src/App.jsx to build your own UI.</span>
+        Recordings stay in memory until you save them. Pick a library folder for one-click auto-save.
       </footer>
     </main>
   );
