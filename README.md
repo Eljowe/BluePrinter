@@ -1,126 +1,168 @@
-# Obstacle (JUCE + CMake)
+# BluePrinter (JUCE + CMake + WebView2)
 
-This project builds a JUCE plugin in these formats:
+A minimal JUCE audio plugin template with a WebView2 (Edge) editor and a React +
+Vite frontend. Designed to be forked and customised.
 
-- VST3
-- Standalone app
+The plugin currently implements a single `Gain` parameter (linear, 0..1)
+passed straight to the audio buffer — a working pass-through you can replace
+with real DSP.
+
+## What's in the box
+
+- **JUCE audio processor** (`Source/PluginProcessor.{h,cpp}`) — pass-through
+  with a `Gain` parameter wired through an `AudioProcessorValueTreeState`.
+- **Native fallback editor** (`Source/PluginEditor.{h,cpp}`) — a simple
+  "WebView2 is not available" message used when the WebView2 runtime is
+  missing.
+- **WebView2 editor** (`Source/WebViewEditor.{h,cpp}`) — the main editor. It
+  serves the built React app from `WebUI/dist/` via JUCE's resource provider
+  and bridges parameter changes between the APVTS and the frontend.
+- **React + Vite frontend** (`WebUI/`) — a single `Knob` component bound to
+  the `Gain` parameter. Edit `WebUI/src/App.jsx` to build your own UI.
 
 ## Prerequisites
 
-- Windows
-- Visual Studio 2022 (Desktop development with C++)
+- Windows 10/11
+- Visual Studio 2022 with the *Desktop development with C++* workload
 - CMake 3.22+
-- JUCE source at C:/JUCE/JUCE (default in CMakeLists.txt)
-
-If JUCE is in a different location, pass JUCE_DIR during configure.
+- Node.js 18+ and npm
+- JUCE source tree at `C:/JUCE/JUCE` (override with `-DJUCE_DIR=...` if yours
+  is elsewhere)
+- Microsoft Edge **WebView2 Runtime** (preinstalled on Windows 10/11 in
+  most setups; otherwise the editor falls back to a plain message)
 
 ## Configure
 
-From the project root, run:
+From the project root:
 
+```
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+```
 
 If JUCE is elsewhere:
 
+```
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DJUCE_DIR="C:/path/to/JUCE"
+```
 
 ## Build
 
-Build Debug (all default targets):
-
+```
 cmake --build build --config Debug
-
-Rebuild Debug from clean:
-
-cmake --build build --config Debug --clean-first
+```
 
 Build only the standalone app target:
 
-cmake --build build --config Debug --target Obstacle_Standalone
+```
+cmake --build build --config Debug --target BluePrinter_Standalone
+```
 
 Build only the VST3 target:
 
-cmake --build build --config Debug --target Obstacle_VST3
+```
+cmake --build build --config Debug --target BluePrinter_VST3
+```
 
 ## Run
 
-Run the standalone app after building:
+```
+.\build\BluePrinter_artefacts\Debug\Standalone\BluePrinter.exe
+```
 
-.\build\Obstacle_artefacts\Debug\Standalone\Obstacle.exe
+Or in one PowerShell command:
 
-Or build and launch in one PowerShell command:
-
-cmake --build build --config Debug --target Obstacle_Standalone; Start-Process -FilePath ".\\build\\Obstacle_artefacts\\Debug\\Standalone\\Obstacle.exe"
-
-You can also use the VS Code task named: Run Obstacle Debug
-
-## Testing
-
-This repository currently has no automated CTest tests configured.
-
-You can check anyway with:
-
-ctest --test-dir build -C Debug --output-on-failure
-
-If no tests are registered, CTest will report that no tests were found.
-
-Recommended manual test flow:
-
-1. Build Debug.
-2. Run the Standalone app and verify UI controls react correctly.
-3. Load the VST3 in a host DAW and verify audio passes through.
-4. Toggle bypass controls (LowCut, Peak, HighCut, Distortion) and verify behavior.
-5. Enable analyzer and verify response/FFT display updates during playback.
+```
+cmake --build build --config Debug --target BluePrinter_Standalone; Start-Process -FilePath ".\build\BluePrinter_artefacts\Debug\Standalone\BluePrinter.exe"
+```
 
 ## WebView UI (React + Vite)
 
-This project now includes a WebView-based editor implementation in [Source/WebViewEditor.cpp](Source/WebViewEditor.cpp), powered by a React + Vite app in [WebUI](WebUI).
+The editor loads the built frontend from `WebUI/dist/index.html`. The Vite
+output is bundled into the plugin and served by the WebView2 component.
 
-### 1) Frontend setup
+### 1) Install dependencies
 
-From the project root:
-
+```
 cd WebUI
 npm install
+```
 
-### 2) Build frontend assets for JUCE WebView
+### 2) Build the frontend
 
+```
 cd WebUI
 npm run build
+```
 
-This creates: WebUI/dist/index.html
+This produces `WebUI/dist/index.html` plus the hashed assets. The editor
+picks them up automatically.
 
-The JUCE editor tries to load this file automatically.
+### 3) Hot-reload dev server (optional)
 
-### 3) Optional: load a custom URL (dev server)
+Start the Vite dev server:
 
-You can override the loaded URL with an environment variable:
-
-set Obstacle_WEB_UI_URL=http://127.0.0.1:5173
-
-Then run:
-
+```
 cd WebUI
 npm run dev
+```
 
-And launch the plugin/standalone in the same shell session where the environment variable is set.
+In the same shell session, point the editor at it before launching the
+plugin:
 
-### 4) Build JUCE plugin/app
+```
+$env:BLUEPRINTER_WEB_UI_URL="http://127.0.0.1:5173"
+cmake --build build --config Debug --target BluePrinter_Standalone; Start-Process -FilePath ".\build\BluePrinter_artefacts\Debug\Standalone\BluePrinter.exe"
+```
 
-cmake --build build --config Debug --target Obstacle_Standalone
-cmake --build build --config Debug --target Obstacle_VST3
+## How the bridge works
 
-### Notes
+- **Backend → frontend** — the editor's `timerCallback` (60 Hz) and the
+  `parameterChanged` callback emit a `backendParameters` event whose payload
+  is the current `AudioProcessorValueTreeState` snapshot. The React app
+  subscribes via `window.__JUCE__.backend.addEventListener`.
+- **Frontend → backend** — when a control changes, the React app calls
+  `window.__JUCE__.backend.emitEvent("frontendSetParameter", { id, value })`.
+  The C++ listener looks up the parameter by id in the APVTS and calls
+  `setValueNotifyingHost`.
+- **Initial state** — the editor injects the current parameter values via
+  `withInitialisationData("parameters", ...)`; the React app reads them from
+  `window.__JUCE__.initialisationData.parameters[0]`.
 
-- Web browser support is enabled via JUCE_WEB_BROWSER=1 in [CMakeLists.txt](CMakeLists.txt).
-- Initial bridge wiring from React controls to APVTS parameters is not implemented yet.
+To add a new parameter:
 
-## VS Code Tasks
+1. Add it to `createParameterLayout()` in `Source/PluginProcessor.cpp`.
+2. Add a matching `addParameterListener` in `BluePrinterWebViewEditor`'s
+   constructor (and the matching `removeParameterListener` in the
+   destructor).
+3. Include the value in `makeParameterSnapshot()`.
+4. Read/write it from `WebUI/src/App.jsx`.
 
-This workspace already includes these tasks:
+## Renaming the plugin
 
-- Build Obstacle Debug
-- Rebuild Obstacle Debug
-- Run Obstacle Debug
+Update these together:
 
-Run them from Terminal -> Run Task.
+- `CMakeLists.txt` — `project(...)`, `juce_add_plugin(... PRODUCT_NAME ...)`,
+  `BUNDLE_ID`, `PLUGIN_MANUFACTURER_CODE`, `PLUGIN_CODE`, and the
+  `WebView2Cache` folder name in `Source/WebViewEditor.cpp`.
+- `Source/PluginProcessor.{h,cpp}` — class name and `createFilter()`.
+- `Source/PluginEditor.{h,cpp}` — class name.
+- `Source/WebViewEditor.{h,cpp}` — class name.
+- `WebUI/index.html` — `<title>`.
+- `WebUI/package.json` — `name`.
+- `WebUI/src/App.jsx` — branding.
+- `.vscode/tasks.json` — task labels and the `BLUEPRINTER_WEB_UI_URL` env var.
+
+## Testing
+
+This repository has no CTest tests configured. Run the standalone, drag the
+`Gain` knob, and verify the level changes.
+
+## VS Code tasks
+
+Provided under Terminal -> Run Task:
+
+- **Install WebUI dependencies**
+- **Build WebUI**
+- **Build BluePrinter Debug**
+- **Rebuild BluePrinter Debug**
+- **Run BluePrinter Debug**

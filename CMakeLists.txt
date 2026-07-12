@@ -1,17 +1,17 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(Obstacle VERSION 1.0.0)
+project(BluePrinter VERSION 1.0.0)
 
 set(JUCE_DIR "C:/JUCE/JUCE" CACHE PATH "Path to the JUCE source tree")
 
 add_subdirectory(${JUCE_DIR} JUCE)
 
-juce_add_plugin(Obstacle
+juce_add_plugin(BluePrinter
     COMPANY_NAME "Retrokielto"
-    PRODUCT_NAME "Obstacle"
-    BUNDLE_ID "com.retrokielto.Obstacle"
+    PRODUCT_NAME "BluePrinter"
+    BUNDLE_ID "com.retrokielto.BluePrinter"
     PLUGIN_MANUFACTURER_CODE Rtrk
-    PLUGIN_CODE Obst
+    PLUGIN_CODE BlPt
     FORMATS VST3 Standalone
     NEEDS_WEBVIEW2 TRUE
     COPY_PLUGIN_AFTER_BUILD FALSE
@@ -20,23 +20,23 @@ juce_add_plugin(Obstacle
     IS_MIDI_EFFECT FALSE
     EDITOR_WANTS_KEYBOARD_FOCUS FALSE)
 
-juce_generate_juce_header(Obstacle)
+juce_generate_juce_header(BluePrinter)
 
-target_sources(Obstacle PRIVATE
+target_sources(BluePrinter PRIVATE
     Source/PluginProcessor.cpp
     Source/PluginEditor.cpp
     Source/WebViewEditor.cpp)
 
-target_include_directories(Obstacle PRIVATE
+target_include_directories(BluePrinter PRIVATE
     ${CMAKE_CURRENT_BINARY_DIR})
 
-target_compile_definitions(Obstacle PRIVATE
+target_compile_definitions(BluePrinter PRIVATE
     JUCE_WEB_BROWSER=1
     JUCE_USE_WIN_WEBVIEW2=1
     JUCE_USE_CURL=0
     JUCE_IGNORE_VST3_MISMATCHED_PARAMETER_ID_WARNING=1)
 
-target_link_libraries(Obstacle PRIVATE
+target_link_libraries(BluePrinter PRIVATE
     juce::juce_audio_basics
     juce::juce_audio_devices
     juce::juce_audio_formats
