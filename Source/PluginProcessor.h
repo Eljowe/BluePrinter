@@ -87,6 +87,17 @@ public:
     // them to the in-memory library. Already-loaded files are skipped.
     void refreshLibraryFromFolder();
 
+    // Metronome / count-in settings. Persisted in plugin state.
+    bool    getMetronomeEnabled() const { return metronomeEnabled.load (std::memory_order_acquire); }
+    float   getBpm()              const { return bpm.load (std::memory_order_acquire); }
+    int     getCountInBeats()     const { return countInBeats.load (std::memory_order_acquire); }
+    int64_t getTransportPosition() const { return transportPosition.load (std::memory_order_acquire); }
+    bool    isPreRollActive()     const { return preRollActive.load (std::memory_order_acquire); }
+
+    void setMetronomeEnabled (bool enabled);
+    void setBpm (float newBpm);
+    void setCountInBeats (int beats);
+
     juce::String getLastSaveError() const;
 
     // Meter values updated by the audio thread (peak + RMS over the last block).
@@ -117,10 +128,12 @@ public:
 private:
     void timerCallback();
     void finalizeRecordingOnMessageThread();
+    void beginActualRecording();
 
     void writeRecording (const juce::AudioBuffer<float>& source, int numSamples);
     void renderPlayback (juce::AudioBuffer<float>& destination, int numSamples);
     void computeLevels  (const juce::AudioBuffer<float>& source, int numSamples);
+    void renderMetronomeInBlock (juce::AudioBuffer<float>& buffer, int64_t startPos, int numSamples);
 
     juce::ListenerList<Listener> listeners;
 
@@ -140,6 +153,19 @@ private:
     std::atomic<bool> playbackActive { false };
     std::atomic<int> playingSnippetId { -1 };
     std::atomic<int64_t> playbackReadPos { 0 };
+
+    // Metronome / count-in. Settings are user-tweakable and persisted; the
+    // preRoll* / transportPosition fields are audio-thread runtime state.
+    std::atomic<bool>    metronomeEnabled { true };
+    std::atomic<float>   bpm              { 120.0f };
+    std::atomic<int>     countInBeats     { 4 };
+    std::atomic<bool>    preRollActive    { false };
+    std::atomic<int64_t> transportPosition { 0 };
+
+    // Pre-rendered click sample (50 ms of decaying harmonics). Filled in
+    // prepareToPlay, read-only on the audio thread.
+    std::vector<float> clickBuffer;
+    double currentSampleRate = 44100.0;
 
     // Cached audio-thread copies. Updated under the library lock briefly,
     // then held as shared_ptrs so playback can't dangle.
