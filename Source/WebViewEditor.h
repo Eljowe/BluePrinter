@@ -1,7 +1,6 @@
 #pragma once
 
 #include <JuceHeader.h>
-#include <thread>
 #include "PluginProcessor.h"
 
 class BluePrinterWebViewEditor : public juce::AudioProcessorEditor
@@ -37,14 +36,18 @@ public:
     static constexpr const char* frontendSetCountInBeatsEvent  = "frontendSetCountInBeats";
     static constexpr const char* frontendAddVst3Event          = "frontendAddVst3";
     static constexpr const char* frontendRemoveVst3Event       = "frontendRemoveVst3";
+    static constexpr const char* frontendMoveVst3Event         = "frontendMoveVst3";
     static constexpr const char* frontendSetVst3BypassEvent    = "frontendSetVst3Bypass";
     static constexpr const char* frontendOpenVst3EditorEvent   = "frontendOpenVst3Editor";
     static constexpr const char* frontendCloseVst3EditorEvent  = "frontendCloseVst3Editor";
     static constexpr const char* frontendScanVst3FolderEvent   = "frontendScanVst3Folder";
     static constexpr const char* frontendGetVst3ChainEvent     = "frontendGetVst3Chain";
+    static constexpr const char* frontendBlockVst3PluginEvent  = "frontendBlockVst3Plugin";
+    static constexpr const char* frontendUnblockVst3PluginEvent = "frontendUnblockVst3Plugin";
 
     static constexpr const char* backendVst3ChainEvent        = "backendVst3Chain";
     static constexpr const char* backendVst3ScanProgressEvent = "backendVst3ScanProgress";
+    static constexpr const char* backendVst3LoadFailedEvent   = "backendVst3LoadFailed";
 
     static constexpr const char* backendParametersEvent = "backendParameters";
     static constexpr const char* backendSnippetsEvent   = "backendSnippets";
@@ -63,9 +66,16 @@ public:
     void closeVst3Editor (int slotIndex, bool deleteAfterClose);
     void closeAllVst3Editors();
     void emitVst3ChainSnapshot();
+    // Rebuild the vst3EditorWindows map so the windows are keyed by
+    // their plugin's current slot index. Called after a reorder so
+    // windows that survived the move stay attached to the right slot
+    // (the underlying plugin instance is unchanged — only the index
+    // shifted). Matches by slot path.
+    void rekeyVst3EditorWindows();
     void scanVst3Folder (const juce::File& folder);
+    void scanDefaultVst3Folder();
     void pickVst3FileAndAdd();
-    void pickVst3FolderAndScan();
+    void addVst3FromPath (const juce::File& vst3File);
 
     // Snapshot helpers — public so the listener lambdas can use them.
     juce::var makeSnippetsSnapshot() const;
@@ -88,6 +98,11 @@ private:
     void emitLibraryToFrontend();
     juce::var makeParameterSnapshot() const;
 
+    // Drives the next file of an in-flight VST3 scan. Called from
+    // timerCallback on the message thread.
+    void runScanStep();
+    void emitScanProgress (bool active, int current, int total, const juce::String& currentFile);
+
     void saveSnippetWithDialog(int snippetId, const juce::File& startingFolder);
     void pickLibraryFolder(const juce::File& startingFolder);
     void pickLibraryFolderThenSave(int pendingSnippetId);
@@ -99,13 +114,12 @@ private:
 
     // Per-slot native VST3 editor windows. Index in the map matches the
     // slot's index in the chain. The unique_ptr owns the DialogWindow,
-    // which in turn owns the AudioProcessorEditor.
+    // which in turn owns the AudioProcessorEditor. The actual stored
+    // type is the Vst3EditorWindow subclass declared in
+    // WebViewEditor.cpp; we keep the map's pointer type as
+    // DialogWindow because the subclass lives in an anonymous namespace
+    // and can't be named in this header.
     std::map<int, std::unique_ptr<juce::DialogWindow>> vst3EditorWindows;
-
-    // Last scan result (list of available plugins), kept so the chain
-    // snapshot can include it.
-    juce::var lastVst3Scan { new juce::DynamicObject() };
-    juce::CriticalSection vst3ScanLock;
 
     std::atomic<bool> parameterUpdatePending { false };
     std::atomic<bool> libraryUpdatePending   { false };
@@ -115,10 +129,34 @@ private:
     // Held by the FileChooser callbacks. Reset once the dialog closes.
     std::unique_ptr<juce::FileChooser> activeFileChooser;
 
-    // Background VST3 scanner. Owned by the editor for its lifetime; the
-    // thread emits progress through juce::MessageManager::callAsync so it
-    // always runs back on the message thread.
-    std::unique_ptr<std::thread> scanThread;
+    // In-flight VST3 scan. Lives on the message thread and is driven one
+    // file at a time from timerCallback() so per-file progress is visible
+    // without blocking the message loop. The per-file describe runs on a
+    // worker thread (see PluginChain::describeVst3FileAsync) so a
+    // misbehaving .vst3 — modal license dialog, hung initialize(),
+    // throwing factory call — can be timed out and skipped without
+    // bringing the message thread (and the whole UI) down.
+    struct Vst3ScanState
+    {
+        juce::File folder;
+        juce::Array<juce::File> files;
+        int currentIndex = 0;
+        juce::Array<juce::var> pluginArray;
+        // True between the kick-off of an async describe and its
+        // completion callback. runScanStep uses this to avoid stacking
+        // multiple per-file workers.
+        bool asyncScanInFlight = false;
+    };
+    std::unique_ptr<Vst3ScanState> activeScan;
+
+    // Lifetime guard for async scan callbacks. The DescribeWaiter
+    // posted by describeVst3FileAsync captures a weak_ptr to aliveToken
+    // and bails out if the editor has been destroyed (or the token
+    // explicitly reset) before the worker finishes. Set in the
+    // destructor before other members are torn down so any in-flight
+    // callback that fires after the destructor returns is a no-op.
+    std::shared_ptr<int> aliveToken = std::make_shared<int> (0);
+    std::atomic<bool> disposed { false };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(BluePrinterWebViewEditor)
 };

@@ -494,12 +494,41 @@ body, html, #root {
   background: #0d1116;
   border: 1px solid #232a36;
   border-radius: 8px;
-  transition: border-color 0.12s, opacity 0.12s;
+  transition: border-color 0.12s, opacity 0.12s, transform 0.12s;
 }
 
 .fx-slot.is-bypassed {
   opacity: 0.55;
   border-color: #1c2129;
+}
+
+.fx-slot.is-drop-target {
+  border-color: #6aa9ff;
+  box-shadow: 0 0 0 1px #6aa9ff inset;
+}
+
+.fx-slot-handle {
+  color: #4d5667;
+  font-size: 1rem;
+  letter-spacing: -1px;
+  cursor: grab;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.fx-slot-handle:active {
+  cursor: grabbing;
+}
+
+.fx-button-icon {
+  min-width: 28px;
+  padding: 4px 8px;
+  font-size: 0.85rem;
+}
+
+.fx-button-icon:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 
 .fx-slot-index {

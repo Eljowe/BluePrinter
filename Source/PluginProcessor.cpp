@@ -650,6 +650,16 @@ juce::String BluePrinterAudioProcessor::getLastSaveError() const
     return lastSaveError;
 }
 
+juce::String BluePrinterAudioProcessor::getLastChainRestoreError() const
+{
+    return lastChainRestoreError;
+}
+
+void BluePrinterAudioProcessor::clearLastChainRestoreError()
+{
+    lastChainRestoreError.clear();
+}
+
 //==============================================================================
 void BluePrinterAudioProcessor::timerCallback()
 {
@@ -769,6 +779,11 @@ void BluePrinterAudioProcessor::setStateInformation (const void* data, int sizeI
                 const auto chainVar = juce::JSON::parse (chainJson);
                 juce::String error;
                 pluginChain.setChainState (chainVar, error);
+                if (error.isNotEmpty())
+                {
+                    // Stash for the UI to display when it opens.
+                    lastChainRestoreError = error;
+                }
             }
         }
     }

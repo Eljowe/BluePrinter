@@ -106,6 +106,12 @@ public:
 
     juce::String getLastSaveError() const;
 
+    // Set by setStateInformation when the saved VST3 chain couldn't be
+    // fully restored (e.g. a plugin's license expired). Read by the UI
+    // so the user knows what was skipped. Cleared explicitly.
+    juce::String getLastChainRestoreError() const;
+    void clearLastChainRestoreError();
+
     // Meter values updated by the audio thread (peak + RMS over the last block).
     float getCurrentInputLevel() const { return inputLevel.load (std::memory_order_acquire); }
     float getCurrentInputPeak() const  { return inputPeak.load  (std::memory_order_acquire); }
@@ -185,6 +191,11 @@ private:
     juce::File libraryFolder;
     juce::CriticalSection libraryFolderLock;
     juce::String lastSaveError;
+
+    // Stashed when setStateInformation fails to restore one or more
+    // chain plugins (e.g. expired-license VST3s). Read by the UI on
+    // open so the user knows what was skipped.
+    juce::String lastChainRestoreError;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BluePrinterAudioProcessor)
 };

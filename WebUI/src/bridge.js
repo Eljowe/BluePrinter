@@ -18,6 +18,7 @@ export const FRONTEND_EVENTS = {
   setCountInBeats: "frontendSetCountInBeats",
   addVst3: "frontendAddVst3",
   removeVst3: "frontendRemoveVst3",
+  moveVst3: "frontendMoveVst3",
   setVst3Bypass: "frontendSetVst3Bypass",
   openVst3Editor: "frontendOpenVst3Editor",
   closeVst3Editor: "frontendCloseVst3Editor",
