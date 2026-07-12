@@ -3,18 +3,18 @@
 #include <JuceHeader.h>
 #include "PluginProcessor.h"
 
-class ObstacleAudioProcessorEditor : public juce::AudioProcessorEditor
+class BluePrinterAudioProcessorEditor : public juce::AudioProcessorEditor
 {
 public:
-    explicit ObstacleAudioProcessorEditor (ObstacleAudioProcessor&);
-    ~ObstacleAudioProcessorEditor() override = default;
+    explicit BluePrinterAudioProcessorEditor (BluePrinterAudioProcessor&);
+    ~BluePrinterAudioProcessorEditor() override = default;
 
     void paint (juce::Graphics&) override;
     void resized() override;
 
 private:
     juce::Label fallbackLabel;
-    ObstacleAudioProcessor& audioProcessor;
+    BluePrinterAudioProcessor& audioProcessor;
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ObstacleAudioProcessorEditor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BluePrinterAudioProcessorEditor)
 };

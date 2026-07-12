@@ -13,7 +13,7 @@ function snapToStep(value, min, step) {
   return Number(snapped.toFixed(precision));
 }
 
-export function Knob({ label, min, max, value, onChange, unit = "", step = "0.1", className = "", accent = "orange", decimals = 1, disabled = false }) {
+export function Knob({ label, min, max, value, onChange, unit = "", step = "0.01", className = "", decimals = 1, disabled = false }) {
   const normalized = (value - min) / (max - min);
   const rotation = -140 + normalized * 280;
   const dragState = useRef(null);
@@ -94,7 +94,7 @@ export function Knob({ label, min, max, value, onChange, unit = "", step = "0.1"
   };
 
   return (
-    <div className={`knob-wrap knob-${accent} ${className} ${disabled ? "is-disabled" : ""}`.trim()}>
+    <div className={`knob-wrap ${className} ${disabled ? "is-disabled" : ""}`.trim()}>
       <div
         className="knob-shell"
         role="slider"
@@ -120,17 +120,5 @@ export function Knob({ label, min, max, value, onChange, unit = "", step = "0.1"
         {unit ? ` ${unit}` : ""}
       </div>
     </div>
-  );
-}
-
-export function BypassButton({ label, enabled, onToggle, className = "" }) {
-  return (
-    <button
-      className={`bypass-button ${!enabled ? "active" : ""} ${className}`.trim()}
-      type="button"
-      onClick={onToggle}
-      aria-label={label}
-      title={label}
-    />
   );
 }

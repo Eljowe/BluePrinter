@@ -1,7 +1,7 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
-ObstacleAudioProcessorEditor::ObstacleAudioProcessorEditor (ObstacleAudioProcessor& p)
+BluePrinterAudioProcessorEditor::BluePrinterAudioProcessorEditor (BluePrinterAudioProcessor& p)
     : AudioProcessorEditor(&p), audioProcessor(p)
 {
     fallbackLabel.setJustificationType(juce::Justification::centred);
@@ -13,12 +13,12 @@ ObstacleAudioProcessorEditor::ObstacleAudioProcessorEditor (ObstacleAudioProcess
     setSize(960, 640);
 }
 
-void ObstacleAudioProcessorEditor::paint (juce::Graphics& g)
+void BluePrinterAudioProcessorEditor::paint (juce::Graphics& g)
 {
     g.fillAll(juce::Colours::black);
 }
 
-void ObstacleAudioProcessorEditor::resized()
+void BluePrinterAudioProcessorEditor::resized()
 {
     fallbackLabel.setBounds(getLocalBounds().reduced(20));
 }

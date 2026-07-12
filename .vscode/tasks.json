@@ -27,7 +27,7 @@
       "dependsOn": "Install WebUI dependencies"
     },
     {
-      "label": "Build Obstacle Debug",
+      "label": "Build BluePrinter Debug",
       "type": "shell",
       "command": "cmake",
       "args": ["--build", "build", "--config", "Debug"],
@@ -37,7 +37,7 @@
       "dependsOn": "Build WebUI"
     },
     {
-      "label": "Rebuild Obstacle Debug",
+      "label": "Rebuild BluePrinter Debug",
       "type": "shell",
       "command": "powershell",
       "args": ["-NoProfile", "-Command", "cmake --build build --config Debug --clean-first"],
@@ -47,13 +47,13 @@
       "dependsOn": "Build WebUI"
     },
     {
-      "label": "Run Obstacle Debug",
+      "label": "Run BluePrinter Debug",
       "type": "shell",
       "command": "powershell",
       "args": [
         "-NoProfile",
         "-Command",
-        "cmake --build build --config Debug --target Obstacle_Standalone; Start-Process -FilePath \".\\build\\Obstacle_artefacts\\Debug\\Standalone\\Obstacle.exe\""
+        "cmake --build build --config Debug --target BluePrinter_Standalone; Start-Process -FilePath \".\\build\\BluePrinter_artefacts\\Debug\\Standalone\\BluePrinter.exe\""
       ],
       "isBackground": false,
       "problemMatcher": ["$msCompile"],
