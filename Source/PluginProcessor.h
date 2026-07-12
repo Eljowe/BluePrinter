@@ -10,6 +10,7 @@
 
 #include <JuceHeader.h>
 #include "SnippetLibrary.h"
+#include "PluginChain.h"
 
 //==============================================================================
 /**
@@ -87,6 +88,11 @@ public:
     // them to the in-memory library. Already-loaded files are skipped.
     void refreshLibraryFromFolder();
 
+    // VST3 FX chain. The chain runs between the input and the recording
+    // tap, so the recording captures the processed signal.
+    PluginChain&       getPluginChain()       { return pluginChain; }
+    const PluginChain& getPluginChain() const { return pluginChain; }
+
     // Metronome / count-in settings. Persisted in plugin state.
     bool    getMetronomeEnabled() const { return metronomeEnabled.load (std::memory_order_acquire); }
     float   getBpm()              const { return bpm.load (std::memory_order_acquire); }
@@ -117,6 +123,7 @@ public:
         virtual ~Listener() = default;
         virtual void libraryChanged() {}
         virtual void transportChanged() {}
+        virtual void pluginChainChanged() {}
     };
     void addListener (Listener* l) { listeners.add (l); }
     void removeListener (Listener* l) { listeners.remove (l); }
@@ -138,6 +145,7 @@ private:
     juce::ListenerList<Listener> listeners;
 
     SnippetLibrary library;
+    PluginChain    pluginChain;
 
     // Pre-allocated record buffer. Allocated on the message thread inside
     // prepareToPlay, written to from the audio thread — no allocations there.

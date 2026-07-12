@@ -109,6 +109,10 @@ void BluePrinterAudioProcessor::prepareToPlay (double sampleRate, int samplesPer
 
     currentSampleRate = sampleRate;
 
+    // Hand the new rate/block size to the FX chain so every loaded plugin
+    // is prepared with the right values.
+    pluginChain.prepareToPlay (sampleRate, samplesPerBlock);
+
     // Synthesize a 50 ms percussive click: fundamental 800 Hz + a couple of
     // harmonics, fast exponential decay. Single-channel, mixed into all
     // output channels.
@@ -152,6 +156,9 @@ void BluePrinterAudioProcessor::releaseResources()
     maxRecordSamples = 0;
     recordWritePos.store (0, std::memory_order_release);
     playbackSnippet.reset();
+
+    pluginChain.releaseResources();
+    clickBuffer.clear();
 }
 
 #ifndef JucePlugin_PreferredChannelConfigurations
@@ -190,6 +197,13 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     const auto gain = apvts.getRawParameterValue ("Gain")->load();
     for (int channel = 0; channel < numChannels; ++channel)
         buffer.applyGain (channel, 0, numSamples, gain);
+
+    // 0. Run the VST3 FX chain in place. Done after the input gain so
+    //    the chain processes the post-gain signal; done before the
+    //    recording tap so the recorded file captures the processed
+    //    signal. Each plugin is responsible for matching the buffer's
+    //    channel layout.
+    pluginChain.processBlock (buffer, midiMessages);
 
     // 1. Record the clean (post-gain, pre-click) input. Access to the
     //    record buffer is serialised with the message thread via recordLock.
@@ -727,6 +741,9 @@ void BluePrinterAudioProcessor::getStateInformation (juce::MemoryBlock& destData
     state.setProperty ("metronomeEnabled", metronomeEnabled.load(), nullptr);
     state.setProperty ("bpm",              bpm.load(),              nullptr);
     state.setProperty ("countInBeats",     countInBeats.load(),     nullptr);
+    // VST3 chain: per-slot path + bypass + base64 plugin state, stored
+    // as a JSON string so ValueTree can carry an arbitrary blob.
+    state.setProperty ("pluginChain", juce::JSON::toString (pluginChain.getChainState(), true), nullptr);
     std::unique_ptr<juce::XmlElement> xml (state.createXml());
     copyXmlToBinary (*xml, destData);
 }
@@ -745,6 +762,14 @@ void BluePrinterAudioProcessor::setStateInformation (const void* data, int sizeI
             metronomeEnabled.store (static_cast<bool>  (state.getProperty ("metronomeEnabled", true)));
             bpm.store              (static_cast<float> (state.getProperty ("bpm",              120.0f)));
             countInBeats.store     (static_cast<int>   (state.getProperty ("countInBeats",     4)));
+
+            const auto chainJson = state.getProperty ("pluginChain").toString();
+            if (chainJson.isNotEmpty())
+            {
+                const auto chainVar = juce::JSON::parse (chainJson);
+                juce::String error;
+                pluginChain.setChainState (chainVar, error);
+            }
         }
     }
 }

@@ -3,6 +3,7 @@ import { Transport } from "./components/Transport";
 import { LibraryFolderRow } from "./components/LibraryFolderRow";
 import { SnippetList } from "./components/SnippetList";
 import { Notification } from "./components/Notification";
+import { PluginChain } from "./components/PluginChain";
 import { BACKEND_EVENTS, FRONTEND_EVENTS, emit, getInitialData, subscribe } from "./bridge";
 
 const PARAM_IDS = {
@@ -55,6 +56,8 @@ export default function App() {
   const [snippets, setSnippets] = useState(readInitialSnippets);
   const [transport, setTransport] = useState(readInitialTransport);
   const [notification, setNotification] = useState(null);
+  const [vst3, setVst3] = useState({ chain: { slots: [] }, available: [], defaultFolder: "" });
+  const [scanState, setScanState] = useState({ active: false, current: 0, total: 0, currentFile: "", folder: "" });
 
   useEffect(() => {
     const unsubParam = subscribe(BACKEND_EVENTS.parameters, (payload) => {
@@ -114,6 +117,31 @@ export default function App() {
     return unsubNotify;
   }, []);
 
+  useEffect(() => {
+    const unsubChain = subscribe(BACKEND_EVENTS.vst3Chain, (payload) => {
+      if (typeof payload !== "object" || payload == null) return;
+      const chain = payload.chain ?? { slots: [] };
+      const available = Array.isArray(payload.plugins) ? payload.plugins : [];
+      const defaultFolder = typeof payload.folder === "string" ? payload.folder : "";
+      setVst3({ chain, available, defaultFolder });
+    });
+    return unsubChain;
+  }, []);
+
+  useEffect(() => {
+    const unsubScan = subscribe(BACKEND_EVENTS.vst3ScanProgress, (payload) => {
+      if (typeof payload !== "object" || payload == null) return;
+      setScanState({
+        active: Boolean(payload.active),
+        current: Number(payload.current ?? 0),
+        total: Number(payload.total ?? 0),
+        currentFile: typeof payload.currentFile === "string" ? payload.currentFile : "",
+        folder: typeof payload.folder === "string" ? payload.folder : "",
+      });
+    });
+    return unsubScan;
+  }, []);
+
   const handleGainChange = (next) => {
     setGain(next);
     emit(FRONTEND_EVENTS.setParameter, { id: PARAM_IDS.gain, value: next });
@@ -163,6 +191,13 @@ export default function App() {
       <LibraryFolderRow
         folder={transport.libraryFolder}
         error={transport.lastSaveError}
+      />
+
+      <PluginChain
+        chainState={vst3.chain}
+        availablePlugins={vst3.available}
+        defaultFolder={vst3.defaultFolder}
+        scanState={scanState}
       />
 
       <SnippetList
