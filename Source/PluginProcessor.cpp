@@ -10,6 +10,8 @@
 #include "PluginEditor.h"
 #include "WebViewEditor.h"
 
+#include <thread>
+
 //==============================================================================
 BluePrinterAudioProcessor::BluePrinterAudioProcessor()
 #ifndef JucePlugin_PreferredChannelConfigurations
@@ -575,6 +577,51 @@ bool BluePrinterAudioProcessor::updateSnippetMeta (int id, const juce::String& n
         listeners.call ([](Listener& l) { l.libraryChanged(); });
     }
     return ok;
+}
+
+void BluePrinterAudioProcessor::detectSnippetKey (int id)
+{
+    // Hold a strong ref to the snippet's audio so the worker thread
+    // can run KeyDetector on it without racing against a later
+    // deleteSnippet. The actual snippet mutation happens back on the
+    // message thread inside the callAsync below.
+    std::shared_ptr<const juce::AudioBuffer<float>> audio;
+    double sampleRate = 0.0;
+    {
+        auto snippet = library.findById (id);
+        if (snippet == nullptr || snippet->audio == nullptr)
+            return;
+        audio = snippet->audio;
+        sampleRate = snippet->sampleRate;
+    }
+
+    // Clear the existing key immediately so the UI flips into the
+    // "detecting" state without waiting for the worker. If the worker
+    // later reports no key, the snippet stays empty.
+    if (auto snippet = library.findById (id))
+    {
+        snippet->key.clear();
+        snippet->keyConfidence = 0.0f;
+        listeners.call ([](Listener& l) { l.libraryChanged(); });
+    }
+
+    // The detection walks the entire audio buffer and does a 4096-point
+    // FFT per frame, so it can take a few hundred ms on a long
+    // snippet. Run it on a worker thread and post the result back.
+    std::thread ([this, id, audio, sampleRate]()
+    {
+        const KeyDetectionResult result = KeyDetector::detectKey (*audio, sampleRate);
+        juce::MessageManager::callAsync ([this, id, result]()
+        {
+            auto snippet = library.findById (id);
+            if (snippet == nullptr)
+                return; // snippet was deleted while we were analysing
+            snippet->key = result.key;
+            snippet->keyConfidence = result.confidence;
+            library.persistMetadata (id);
+            listeners.call ([](Listener& l) { l.libraryChanged(); });
+        });
+    }).detach();
 }
 
 juce::String BluePrinterAudioProcessor::getLibraryFolder() const

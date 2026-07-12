@@ -11,6 +11,7 @@
 #include <JuceHeader.h>
 #include "SnippetLibrary.h"
 #include "PluginChain.h"
+#include "KeyDetector.h"
 
 //==============================================================================
 /**
@@ -77,6 +78,12 @@ public:
 
     bool deleteSnippet (int id);
     bool updateSnippetMeta (int id, const juce::String& name, const juce::String& comments);
+
+    // Run musical-key detection on the snippet's audio. The FFT-based
+    // chroma analysis runs on a worker thread; the snippet is updated
+    // and the sidecar JSON rewritten on the message thread, then
+    // listeners are notified. Replaces any previously detected key.
+    void detectSnippetKey (int id);
 
     SnippetLibrary& getLibrary() { return library; }
     const SnippetLibrary& getLibrary() const { return library; }

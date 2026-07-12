@@ -26,6 +26,7 @@ public:
     static constexpr const char* frontendStopPlaybackEvent     = "frontendStopPlayback";
     static constexpr const char* frontendUpdateSnippetEvent    = "frontendUpdateSnippetMeta";
     static constexpr const char* frontendDeleteSnippetEvent    = "frontendDeleteSnippet";
+    static constexpr const char* frontendDetectSnippetKeyEvent = "frontendDetectSnippetKey";
     static constexpr const char* frontendSaveSnippetEvent      = "frontendSaveSnippet";
     static constexpr const char* frontendRevealSnippetEvent    = "frontendRevealSnippet";
     static constexpr const char* frontendChooseFolderEvent     = "frontendChooseLibraryFolder";

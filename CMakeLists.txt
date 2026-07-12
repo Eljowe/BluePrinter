@@ -27,7 +27,8 @@ target_sources(BluePrinter PRIVATE
     Source/PluginEditor.cpp
     Source/WebViewEditor.cpp
     Source/SnippetLibrary.cpp
-    Source/PluginChain.cpp)
+    Source/PluginChain.cpp
+    Source/KeyDetector.cpp)
 
 target_include_directories(BluePrinter PRIVATE
     ${CMAKE_CURRENT_BINARY_DIR})
