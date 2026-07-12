@@ -9,6 +9,18 @@ export function formatTime(seconds) {
   return `${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}.${tenths}`;
 }
 
+export function formatDate(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  const hh = String(d.getHours()).padStart(2, "0");
+  const min = String(d.getMinutes()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd} ${hh}:${min}`;
+}
+
 export function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }

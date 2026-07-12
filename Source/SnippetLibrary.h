@@ -47,7 +47,32 @@ public:
                               juce::String& outPath,
                               juce::String& outError) const;
 
+    // Scans the given folder for .wav files and adds them to the library.
+    // Each .wav may have a matching .json sidecar with metadata; if missing,
+    // the basename is used as the snippet name. Files whose absolute path
+    // is already in the library (i.e. already loaded) are skipped so picking
+    // the same folder twice does not duplicate entries.
+    //
+    // @param folder    the library folder to scan
+    // @param outError  set on fatal errors (folder not found) or when files
+    //                  were found but none could be decoded
+    // @return true if at least one file was loaded (or the folder was empty)
+    bool loadFromFolder (const juce::File& folder, juce::String& outError);
+
+    // Rewrites the .json sidecar for an already-saved snippet so that edits
+    // to its name/comments survive a reload. No-op if the snippet has no
+    // savedPath or the sidecar cannot be written.
+    bool persistMetadata (int id);
+
+    // Removes the .wav and .json sidecar associated with a snippet's
+    // savedPath from disk. No-op if there is nothing to remove. Returns
+    // true if at least one file was deleted.
+    static bool deleteSavedFiles (const Snippet& snippet);
+
     static std::vector<float> computePeaks (const juce::AudioBuffer<float>& audio, int numBuckets);
+
+private:
+    static bool writeMetadataFile (const Snippet& snippet, const juce::File& jsonFile);
 
     static constexpr int peaksPerSnippet = 256;
     static constexpr int maxNameLength = 80;

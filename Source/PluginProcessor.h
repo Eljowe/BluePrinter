@@ -83,6 +83,10 @@ public:
     juce::String getLibraryFolder() const;
     void setLibraryFolder (const juce::File& folder);
 
+    // Re-scans the current library folder for any new .wav files and adds
+    // them to the in-memory library. Already-loaded files are skipped.
+    void refreshLibraryFromFolder();
+
     juce::String getLastSaveError() const;
 
     // Meter values updated by the audio thread (peak + RMS over the last block).

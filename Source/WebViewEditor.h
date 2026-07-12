@@ -30,6 +30,7 @@ public:
     static constexpr const char* frontendRevealSnippetEvent    = "frontendRevealSnippet";
     static constexpr const char* frontendChooseFolderEvent     = "frontendChooseLibraryFolder";
     static constexpr const char* frontendOpenFolderEvent       = "frontendOpenLibraryFolder";
+    static constexpr const char* frontendRefreshLibraryEvent   = "frontendRefreshLibrary";
 
     static constexpr const char* backendParametersEvent = "backendParameters";
     static constexpr const char* backendSnippetsEvent   = "backendSnippets";

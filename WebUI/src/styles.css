@@ -297,6 +297,11 @@ body, html, #root {
   transition: border-color 0.15s;
 }
 
+.snippet.is-mini {
+  padding: 8px 10px;
+  gap: 0;
+}
+
 .snippet.is-playing {
   border-color: #4a9eff;
   box-shadow: 0 0 0 1px rgba(74, 158, 255, 0.2);
@@ -305,26 +310,91 @@ body, html, #root {
 .snippet-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
 }
 
-.snippet-title {
+.snippet-summary {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
-  gap: 10px;
-  font-size: 0.85rem;
-  color: #7a8392;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 0.88rem;
+  color: #aab2c0;
   font-variant-numeric: tabular-nums;
 }
 
-.snippet-id {
-  color: #4a9eff;
-  font-weight: 600;
+.snippet-summary:hover {
+  background: #1c2129;
+  color: #e8ecf1;
+}
+
+.snippet-summary:focus-visible {
+  outline: 2px solid #4a9eff;
+  outline-offset: 2px;
+}
+
+.snippet-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #e8ecf1;
+  font-weight: 500;
+}
+
+.snippet-sep {
+  color: #4a5260;
 }
 
 .snippet-duration {
   color: #aab2c0;
+  white-space: nowrap;
+}
+
+.snippet-date {
+  color: #7a8392;
+  white-space: nowrap;
+  font-size: 0.82rem;
+}
+
+.snippet-expand-button {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid #2a3140;
+  background: transparent;
+  color: #7a8392;
+  font-size: 0.7rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.snippet-expand-button:hover {
+  background: #2a3140;
+  color: #e8ecf1;
+  border-color: #364154;
+}
+
+.snippet-expand-button:focus-visible {
+  outline: 2px solid #4a9eff;
+  outline-offset: 2px;
+}
+
+.snippet-details {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 4px;
 }
 
 .play-button {
@@ -339,6 +409,13 @@ body, html, #root {
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
+}
+
+.snippet.is-mini .play-button {
+  width: 30px;
+  height: 30px;
+  font-size: 0.8rem;
 }
 
 .play-button:hover {

@@ -18,6 +18,14 @@ export function LibraryFolderRow({ folder, error }) {
         <button
           type="button"
           disabled={!folder}
+          onClick={() => emit(FRONTEND_EVENTS.refreshLibrary)}
+          title={folder ? "Reload recordings from the library folder" : "Pick a library folder first"}
+        >
+          Refresh
+        </button>
+        <button
+          type="button"
+          disabled={!folder}
           onClick={() => emit(FRONTEND_EVENTS.openLibraryFolder)}
           title={folder ? "Open library folder" : "Pick a library folder first"}
         >
