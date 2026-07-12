@@ -25,6 +25,17 @@ BluePrinterAudioProcessor::BluePrinterAudioProcessor()
                        )
 #endif
 {
+    // Restore the standalone user state (library folder + VST3 chain)
+    // before any UI is built. setLibraryFolder auto-loads snippets from
+    // the folder; setChainState replays the saved chain. Both fire
+    // their own change events; that's fine because the chain's
+    // onChanged is wired below in restoreUserState()'s tail, after the
+    // restore itself completes.
+    restoreUserState();
+
+    // Wire the chain persistence AFTER the restore so we don't write
+    // the just-loaded state back over the file on startup.
+    pluginChain.onChanged = [this] { persistPluginChain(); };
 }
 
 BluePrinterAudioProcessor::~BluePrinterAudioProcessor()
@@ -579,7 +590,7 @@ bool BluePrinterAudioProcessor::updateSnippetMeta (int id, const juce::String& n
     return ok;
 }
 
-void BluePrinterAudioProcessor::detectSnippetKey (int id)
+void BluePrinterAudioProcessor::detectSnippetKeyAndNotes (int id)
 {
     // Hold a strong ref to the snippet's audio so the worker thread
     // can run KeyDetector on it without racing against a later
@@ -595,13 +606,14 @@ void BluePrinterAudioProcessor::detectSnippetKey (int id)
         sampleRate = snippet->sampleRate;
     }
 
-    // Clear the existing key immediately so the UI flips into the
+    // Clear the existing key/notes immediately so the UI flips into the
     // "detecting" state without waiting for the worker. If the worker
-    // later reports no key, the snippet stays empty.
+    // later reports nothing useful, the snippet stays empty.
     if (auto snippet = library.findById (id))
     {
         snippet->key.clear();
         snippet->keyConfidence = 0.0f;
+        snippet->detectedNotes.clear();
         listeners.call ([](Listener& l) { l.libraryChanged(); });
     }
 
@@ -616,8 +628,9 @@ void BluePrinterAudioProcessor::detectSnippetKey (int id)
             auto snippet = library.findById (id);
             if (snippet == nullptr)
                 return; // snippet was deleted while we were analysing
-            snippet->key = result.key;
-            snippet->keyConfidence = result.confidence;
+            snippet->key            = result.key;
+            snippet->keyConfidence  = result.confidence;
+            snippet->detectedNotes  = result.detectedNotes;
             library.persistMetadata (id);
             listeners.call ([](Listener& l) { l.libraryChanged(); });
         });
@@ -636,6 +649,13 @@ void BluePrinterAudioProcessor::setLibraryFolder (const juce::File& folder)
         juce::ScopedLock lock (libraryFolderLock);
         libraryFolder = folder;
     }
+
+    // Persist the new folder so the standalone remembers it on next
+    // launch. Done before loadFromFolder so a crash mid-load still
+    // leaves the folder choice saved. Must be called outside the lock
+    // because persistLibraryFolder re-acquires it (CriticalSection is
+    // non-reentrant).
+    persistLibraryFolder();
 
     // Pull any pre-existing recordings from the folder so the user can
     // listen to, edit, or delete them. Skips files that are already loaded.
@@ -853,4 +873,118 @@ juce::AudioProcessorValueTreeState::ParameterLayout BluePrinterAudioProcessor::c
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 {
     return new BluePrinterAudioProcessor();
+}
+
+//==============================================================================
+// User-state persistence (standalone-only — DAW hosts persist their own
+// state via getStateInformation/setStateInformation and we leave that
+// path alone).
+//
+// File (resolved by PropertiesFile::Options::getDefaultFile):
+//   Windows: %APPDATA%\Retrokielto\BluePrinter.properties
+//   macOS:   ~/Library/Application Support/Retrokielto/BluePrinter.properties
+//   Linux:   ~/.config/Retrokielto/BluePrinter.properties
+//
+// Failure mode: any disk error (read-only volume, missing perms) leaves
+// userState == nullptr and every save/restore call becomes a no-op. The
+// app still runs in-memory; only the remember-across-launches behaviour
+// degrades.
+
+juce::PropertiesFile* BluePrinterAudioProcessor::getUserState()
+{
+    if (userState == nullptr)
+    {
+        juce::PropertiesFile::Options opts;
+        opts.applicationName     = "BluePrinter";
+        opts.filenameSuffix      = ".properties";
+        opts.folderName          = "Retrokielto";
+        // Required on Mac — without it JUCE 8 asserts. "Application
+        // Support" is the Apple-recommended location.
+        opts.osxLibrarySubFolder = "Application Support";
+        opts.commonToAllUsers    = false;
+        // XML is the only StorageFormat option in JUCE 8 (INI was
+        // removed). The file is tiny so format doesn't matter.
+        opts.storageFormat       = juce::PropertiesFile::storeAsXML;
+        // Default is "save a few seconds after a change", which means a
+        // crash mid-session can lose the last mutation. Force synchronous
+        // writes so each setValue hits disk before we return.
+        opts.millisecondsBeforeSaving = 0;
+        userState = std::make_unique<juce::PropertiesFile> (opts);
+
+        // The default file lives under the per-platform app-data dir;
+        // PropertiesFile doesn't auto-create the parent directory, so
+        // make sure it exists before the first save.
+        if (auto* p = userState.get())
+            p->getFile().getParentDirectory().createDirectory();
+    }
+    return userState.get();
+}
+
+void BluePrinterAudioProcessor::restoreUserState()
+{
+    auto* props = getUserState();
+    if (props == nullptr)
+        return;
+
+    // 1. Library folder. Setting it auto-loads any .wav sidecars.
+    const auto folderPath = props->getValue ("libraryFolder");
+    if (folderPath.isNotEmpty())
+    {
+        juce::File folder (folderPath);
+        if (folder.isDirectory())
+        {
+            // setLibraryFolder also calls persistLibraryFolder(), which
+            // is a no-op write here (we just read the same value back).
+            setLibraryFolder (folder);
+        }
+        else
+        {
+            // The folder was moved or deleted since the last run. Keep
+            // the stale path in the file so the user can see what they
+            // had, but don't try to load it.
+            {
+                juce::ScopedLock lock (libraryFolderLock);
+                libraryFolder = folder;
+            }
+        }
+    }
+
+    // 2. VST3 chain. Guarded so the addPlugin calls inside don't
+    // trigger a redundant write back to the file.
+    const auto chainJson = props->getValue ("pluginChain");
+    if (chainJson.isNotEmpty())
+    {
+        const auto chainVar = juce::JSON::parse (chainJson);
+        if (chainVar.isObject())
+        {
+            persistingPluginChain = true;
+            juce::String error;
+            pluginChain.setChainState (chainVar, error);
+            persistingPluginChain = false;
+            if (error.isNotEmpty())
+                lastChainRestoreError = error;
+        }
+    }
+}
+
+void BluePrinterAudioProcessor::persistLibraryFolder()
+{
+    if (auto* props = getUserState())
+    {
+        juce::ScopedLock lock (libraryFolderLock);
+        props->setValue ("libraryFolder", libraryFolder.getFullPathName());
+        props->saveIfNeeded();
+    }
+}
+
+void BluePrinterAudioProcessor::persistPluginChain()
+{
+    if (persistingPluginChain)
+        return; // restore in progress, don't echo back
+    if (auto* props = getUserState())
+    {
+        props->setValue ("pluginChain",
+                         juce::JSON::toString (pluginChain.getChainState(), false));
+        props->saveIfNeeded();
+    }
 }

@@ -7,7 +7,7 @@ export function SnippetCard({ snippet, isPlaying, playPositionSeconds }) {
   const [name, setName] = useState(snippet.name ?? "");
   const [comments, setComments] = useState(snippet.comments ?? "");
   const [expanded, setExpanded] = useState(false);
-  // `detecting` flips on while a key-detection request is in flight
+  // `detecting` flips on while an analysis request is in flight
   // and clears when the backend echoes the (possibly empty) result
   // back through the snippet prop. We key it on the snippet id so
   // switching cards doesn't carry the spinner across.
@@ -31,10 +31,12 @@ export function SnippetCard({ snippet, isPlaying, playPositionSeconds }) {
   // The backend clears `key` immediately on a fresh detect request,
   // so the prop changing from "C major" -> "" signals that detection
   // is running. When it changes back to a value (or stays empty
-  // because the detector found nothing) the spinner clears.
+  // because the detector found nothing) the spinner clears. We also
+  // key on `notes` so re-runs that change the note list drop the
+  // spinner the same way.
   useEffect(() => {
     setDetecting(false);
-  }, [snippet.key]);
+  }, [snippet.key, snippet.notes]);
 
   const commitMeta = () => {
     if (name === snippet.name && comments === snippet.comments) return;
@@ -78,6 +80,8 @@ export function SnippetCard({ snippet, isPlaying, playPositionSeconds }) {
     ? `${formatTime(showPosition)} / ${formatTime(duration)}`
     : formatTime(duration);
   const hasKey = typeof snippet.key === "string" && snippet.key.length > 0;
+  const hasNotes = Array.isArray(snippet.notes) && snippet.notes.length > 0;
+  const hasAnalysis = hasKey || hasNotes;
   const keyConfidence = Number(snippet.keyConfidence) || 0;
   const keyTitle = hasKey
     ? `Detected key: ${snippet.key} (confidence ${Math.round(keyConfidence * 100)}%)`
@@ -117,6 +121,15 @@ export function SnippetCard({ snippet, isPlaying, playPositionSeconds }) {
               aria-label={keyTitle}
             >
               {snippet.key}
+            </span>
+          ) : null}
+          {hasNotes ? (
+            <span
+              className="snippet-notes-badge"
+              title={`Detected pitch classes: ${snippet.notes.join(", ")}`}
+              aria-label={`Detected notes: ${snippet.notes.join(", ")}`}
+            >
+              {snippet.notes.join(" ")}
             </span>
           ) : null}
           <span className="snippet-sep" aria-hidden="true">·</span>
@@ -185,6 +198,12 @@ export function SnippetCard({ snippet, isPlaying, playPositionSeconds }) {
                     · key: <strong>{snippet.key}</strong> ({Math.round(keyConfidence * 100)}%)
                   </span>
                 : <span className="snippet-key-inline snippet-key-empty">· no key detected</span>}
+              {hasNotes
+                ? <span
+                    className="snippet-notes-inline"
+                    title={`Detected pitch classes: ${snippet.notes.join(", ")}`}
+                  >· notes: <strong>{snippet.notes.join(" ")}</strong></span>
+                : null}
               {snippet.savedPath ? <span className="snippet-saved"> · saved</span> : null}
             </div>
             <div className="snippet-actions">
@@ -192,9 +211,13 @@ export function SnippetCard({ snippet, isPlaying, playPositionSeconds }) {
                 type="button"
                 onClick={handleDetectKey}
                 disabled={detecting}
-                title={hasKey ? "Re-detect the musical key from the audio" : "Detect the musical key from the audio"}
+                title={
+                  hasAnalysis
+                    ? "Re-analyse the snippet (key + detected notes)"
+                    : "Analyse the snippet to detect the key and notes"
+                }
               >
-                {detecting ? "Detecting…" : hasKey ? "↻ Re-detect key" : "Detect key"}
+                {detecting ? "Analysing…" : hasAnalysis ? "↻ Re-analyse" : "Analyse"}
               </button>
               <button type="button" onClick={handleSave} title="Save snippet to a WAV file">Save</button>
               <button type="button" onClick={handleReveal} disabled={!snippet.savedPath} title="Reveal saved file in Explorer">Reveal</button>

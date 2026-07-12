@@ -1,5 +1,6 @@
 #include "KeyDetector.h"
 
+#include <algorithm>
 #include <cmath>
 #include <vector>
 
@@ -189,5 +190,41 @@ KeyDetectionResult KeyDetector::detectKey (const juce::AudioBuffer<float>& audio
 
     result.key        = juce::String (kPitchClassNames[bestTonic]) + (bestIsMinor ? " minor" : " major");
     result.confidence = static_cast<float> (bestCorrelation);
+
+    // Derive a "used notes" list from the same chroma vector. We keep
+    // bins that are both above an absolute floor (so quiet material with
+    // a real key doesn't list every noise bin) and within a fraction of
+    // the strongest bin (so a single loud note doesn't drown the rest).
+    // Sorted strongest-first so the UI can just join with commas.
+    constexpr double kNoteAbsoluteFloor = 0.04; // 4% of total chroma energy
+    constexpr double kNoteRelativeFloor = 0.5;  // 50% of the strongest bin
+
+    double maxChroma = 0.0;
+    for (double c : chroma) maxChroma = juce::jmax (maxChroma, c);
+
+    if (maxChroma > 0.0)
+    {
+        const double relFloor = maxChroma * kNoteRelativeFloor;
+        // Indices in chroma order, tagged with magnitude, sorted desc.
+        struct Bin { int pc; double mag; };
+        std::vector<Bin> bins;
+        bins.reserve (12);
+        for (int pc = 0; pc < 12; ++pc)
+        {
+            if (chroma[pc] >= kNoteAbsoluteFloor && chroma[pc] >= relFloor)
+                bins.push_back ({ pc, chroma[pc] });
+        }
+        std::sort (bins.begin(), bins.end(),
+                   [](const Bin& a, const Bin& b) { return a.mag > b.mag; });
+
+        // A snippet that's basically one note (1 bin) or noise (0 bins)
+        // isn't useful to list. Keep the 2..12 range.
+        if (bins.size() >= 2)
+        {
+            for (const auto& b : bins)
+                result.detectedNotes.add (kPitchClassNames[b.pc]);
+        }
+    }
+
     return result;
 }

@@ -261,6 +261,7 @@ bool SnippetLibrary::loadFromFolder (const juce::File& folder, juce::String& out
         bool hasJson = false;
         juce::String key;
         float keyConfidence = 0.0f;
+        juce::StringArray detectedNotes;
 
         auto jsonFile = audioFile.getSiblingFile (audioFile.getFileNameWithoutExtension() + ".json");
         if (jsonFile.existsAsFile())
@@ -276,6 +277,13 @@ bool SnippetLibrary::loadFromFolder (const juce::File& folder, juce::String& out
                 idFromJson = static_cast<int> (obj->getProperty ("id"));
                 key = obj->getProperty ("key").toString();
                 keyConfidence = static_cast<float> (obj->getProperty ("keyConfidence"));
+
+                // Old sidecars won't have this; missing field is fine.
+                if (auto* notesArray = obj->getProperty ("notes").getArray())
+                {
+                    for (const auto& n : *notesArray)
+                        detectedNotes.add (n.toString());
+                }
 
                 auto createdAtStr = obj->getProperty ("createdAt").toString();
                 if (createdAtStr.isNotEmpty())
@@ -301,6 +309,7 @@ bool SnippetLibrary::loadFromFolder (const juce::File& folder, juce::String& out
         snippet->peaks        = computePeaks (*buffer, peaksPerSnippet);
         snippet->key          = key;
         snippet->keyConfidence = keyConfidence;
+        snippet->detectedNotes = detectedNotes;
 
         {
             const std::lock_guard<std::mutex> lock (mutex);
@@ -388,6 +397,13 @@ bool SnippetLibrary::writeMetadataFile (const Snippet& snippet, const juce::File
     {
         meta->setProperty ("key", snippet.key);
         meta->setProperty ("keyConfidence", snippet.keyConfidence);
+    }
+    if (snippet.detectedNotes.size() > 0)
+    {
+        juce::Array<juce::var> notesVar;
+        for (const auto& n : snippet.detectedNotes)
+            notesVar.add (n);
+        meta->setProperty ("notes", notesVar);
     }
 
     juce::FileOutputStream stream (jsonFile);
