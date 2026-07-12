@@ -25,7 +25,8 @@ juce_generate_juce_header(BluePrinter)
 target_sources(BluePrinter PRIVATE
     Source/PluginProcessor.cpp
     Source/PluginEditor.cpp
-    Source/WebViewEditor.cpp)
+    Source/WebViewEditor.cpp
+    Source/SnippetLibrary.cpp)
 
 target_include_directories(BluePrinter PRIVATE
     ${CMAKE_CURRENT_BINARY_DIR})

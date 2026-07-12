@@ -49,8 +49,33 @@ juce::File findLocalWebUiDistIndex()
     return {};
 }
 
+juce::var snippetToVar (const Snippet& s)
+{
+    auto* obj = new juce::DynamicObject();
+    obj->setProperty ("id", s.id);
+    obj->setProperty ("name", s.name);
+    obj->setProperty ("comments", s.comments);
+    obj->setProperty ("sampleRate", s.sampleRate);
+    obj->setProperty ("numChannels", s.numChannels);
+    obj->setProperty ("numSamples", static_cast<double> (s.numSamples));
+    obj->setProperty ("durationSeconds", s.sampleRate > 0.0 ? s.numSamples / s.sampleRate : 0.0);
+    obj->setProperty ("createdAt", s.creationTime.toISO8601 (true));
+    obj->setProperty ("savedPath", s.savedPath);
+
+    auto* peaks = new juce::DynamicObject();
+    juce::Array<juce::var> peakArray;
+    peakArray.ensureStorageAllocated (static_cast<int> (s.peaks.size()));
+    for (float p : s.peaks)
+        peakArray.add (juce::var (p));
+    obj->setProperty ("peaks", juce::var (peakArray));
+
+    return juce::var (obj);
+}
+}
+
 juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor& processor,
                                                       const juce::File& distRoot,
+                                                      BluePrinterWebViewEditor* owner,
                                                       const juce::var& initialData)
 {
     juce::File userDataFolder;
@@ -100,7 +125,7 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
         },
         juce::WebBrowserComponent::getResourceProviderRoot().upToLastOccurrenceOf("/", false, false))
         .withNativeIntegrationEnabled(true)
-        .withEventListener(BluePrinterWebViewEditor::frontendSetParameterEvent, [&processor](juce::var data)
+        .withEventListener(BluePrinterWebViewEditor::frontendSetParameterEvent, [&processor, owner](juce::var data)
         {
             if (auto* obj = data.getDynamicObject())
             {
@@ -110,15 +135,77 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
                 if (auto* parameter = processor.apvts.getParameter(parameterID))
                     parameter->setValueNotifyingHost(parameter->convertTo0to1(value));
             }
+            juce::ignoreUnused (owner);
         })
-        .withInitialisationData("parameters", initialData);
-}
+        .withEventListener(BluePrinterWebViewEditor::frontendStartRecordingEvent, [&processor](juce::var)
+        {
+            processor.startRecording();
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendStopRecordingEvent, [&processor](juce::var)
+        {
+            processor.stopRecording();
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendStartPlaybackEvent, [&processor](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+                processor.startPlayback (static_cast<int> (obj->getProperty("id")));
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendStopPlaybackEvent, [&processor](juce::var)
+        {
+            processor.stopPlayback();
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendUpdateSnippetEvent, [&processor](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+            {
+                const int id = static_cast<int> (obj->getProperty("id"));
+                processor.updateSnippetMeta (id, obj->getProperty("name").toString(), obj->getProperty("comments").toString());
+            }
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendDeleteSnippetEvent, [&processor, owner](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+            {
+                const int id = static_cast<int> (obj->getProperty("id"));
+                processor.deleteSnippet (id);
+            }
+            juce::ignoreUnused (owner);
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendSaveSnippetEvent, [owner](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+            {
+                const int id = static_cast<int> (obj->getProperty("id"));
+                if (owner != nullptr)
+                    owner->handleSaveSnippet (data);
+                juce::ignoreUnused (id);
+            }
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendRevealSnippetEvent, [owner](juce::var data)
+        {
+            if (owner != nullptr)
+                owner->handleRevealSnippet (data);
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendChooseFolderEvent, [owner](juce::var)
+        {
+            if (owner != nullptr)
+                owner->handleChooseLibraryFolder();
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendOpenFolderEvent, [&processor](juce::var)
+        {
+            auto folder = juce::File (processor.getLibraryFolder());
+            if (folder.isDirectory())
+                folder.startAsProcess();
+        })
+        .withInitialisationData("parameters", initialData)
+        .withInitialisationData("snippets", owner->makeSnippetsSnapshot())
+        .withInitialisationData("transport", owner->makeTransportSnapshot());
 }
 
 BluePrinterWebViewEditor::BluePrinterWebViewEditor(BluePrinterAudioProcessor& p)
     : AudioProcessorEditor(&p)
     , audioProcessor(p)
-    , webView(makeWebViewOptions(p, getWebUiDistRoot(), makeParameterSnapshot()))
+    , webView(makeWebViewOptions(p, getWebUiDistRoot(), this, makeParameterSnapshot()))
 {
     addAndMakeVisible(webView);
 
@@ -128,7 +215,7 @@ BluePrinterWebViewEditor::BluePrinterWebViewEditor(BluePrinterAudioProcessor& p)
                           juce::dontSendNotification);
     addAndMakeVisible(fallbackLabel);
 
-    if (!juce::WebBrowserComponent::areOptionsSupported(makeWebViewOptions(p, getWebUiDistRoot(), makeParameterSnapshot())))
+    if (!juce::WebBrowserComponent::areOptionsSupported(makeWebViewOptions(p, getWebUiDistRoot(), this, makeParameterSnapshot())))
     {
         webView.setVisible(false);
         fallbackLabel.setText("WebView2 backend is not available on this system. Install Microsoft Edge WebView2 Runtime.",
@@ -150,10 +237,11 @@ BluePrinterWebViewEditor::BluePrinterWebViewEditor(BluePrinterAudioProcessor& p)
     }
 
     audioProcessor.apvts.addParameterListener(paramGain, this);
+    audioProcessor.addListener (this);
 
-    startTimerHz(60);
+    startTimerHz (audioProcessor.transportTimerHz);
 
-    setSize(960, 640);
+    setSize(960, 700);
 }
 
 BluePrinterWebViewEditor::~BluePrinterWebViewEditor()
@@ -161,6 +249,7 @@ BluePrinterWebViewEditor::~BluePrinterWebViewEditor()
     cancelPendingUpdate();
     stopTimer();
     audioProcessor.apvts.removeParameterListener(paramGain, this);
+    audioProcessor.removeListener (this);
 }
 
 void BluePrinterWebViewEditor::paint(juce::Graphics& g)
@@ -209,15 +298,30 @@ void BluePrinterWebViewEditor::parameterChanged(const juce::String& parameterID,
 
 void BluePrinterWebViewEditor::handleAsyncUpdate()
 {
-    if (!parameterUpdatePending.exchange(false, std::memory_order_acq_rel))
-        return;
-
-    emitParameterSnapshotToFrontend();
+    if (parameterUpdatePending.exchange(false, std::memory_order_acq_rel))
+        emitParameterSnapshotToFrontend();
+    if (libraryUpdatePending.exchange(false, std::memory_order_acq_rel))
+        emitLibraryToFrontend();
+    if (transportUpdatePending.exchange(false, std::memory_order_acq_rel))
+        emitTransportToFrontend();
 }
 
 void BluePrinterWebViewEditor::timerCallback()
 {
-    emitParameterSnapshotToFrontend();
+    // Throttled push: always push transport so the meter / timecode moves.
+    emitTransportToFrontend();
+}
+
+void BluePrinterWebViewEditor::libraryChanged()
+{
+    libraryUpdatePending.store(true, std::memory_order_release);
+    triggerAsyncUpdate();
+}
+
+void BluePrinterWebViewEditor::transportChanged()
+{
+    transportUpdatePending.store(true, std::memory_order_release);
+    triggerAsyncUpdate();
 }
 
 void BluePrinterWebViewEditor::emitParameterSnapshotToFrontend()
@@ -225,9 +329,223 @@ void BluePrinterWebViewEditor::emitParameterSnapshotToFrontend()
     webView.emitEventIfBrowserIsVisible(juce::Identifier(backendParametersEvent), makeParameterSnapshot());
 }
 
+void BluePrinterWebViewEditor::emitTransportToFrontend()
+{
+    webView.emitEventIfBrowserIsVisible(juce::Identifier(backendTransportEvent), makeTransportSnapshot());
+}
+
+void BluePrinterWebViewEditor::emitLibraryToFrontend()
+{
+    auto* obj = new juce::DynamicObject();
+    obj->setProperty ("libraryFolder", audioProcessor.getLibraryFolder());
+    obj->setProperty ("lastSaveError", audioProcessor.getLastSaveError());
+    obj->setProperty ("snippets", makeSnippetsSnapshot());
+    webView.emitEventIfBrowserIsVisible(juce::Identifier(backendSnippetsEvent), juce::var (obj));
+}
+
 juce::var BluePrinterWebViewEditor::makeParameterSnapshot() const
 {
     auto* obj = new juce::DynamicObject();
     obj->setProperty("gain", audioProcessor.apvts.getRawParameterValue(paramGain)->load());
     return juce::var(obj);
+}
+
+juce::var BluePrinterWebViewEditor::makeSnippetsSnapshot() const
+{
+    auto snippets = audioProcessor.getLibrary().snapshot();
+    juce::Array<juce::var> arr;
+    arr.ensureStorageAllocated (static_cast<int> (snippets.size()));
+    for (auto& s : snippets)
+        arr.add (snippetToVar (*s));
+    return juce::var (arr);
+}
+
+juce::var BluePrinterWebViewEditor::makeTransportSnapshot() const
+{
+    auto* obj = new juce::DynamicObject();
+    obj->setProperty ("recording", audioProcessor.isRecordingRequested());
+    obj->setProperty ("recordingLength", audioProcessor.getRecordingLengthSamples());
+    obj->setProperty ("recordingSampleRate", audioProcessor.getSampleRate());
+    obj->setProperty ("playingSnippetId", audioProcessor.getPlayingSnippetId());
+    obj->setProperty ("playingPosition", audioProcessor.getPlaybackPositionSamples());
+    obj->setProperty ("inputLevel", juce::jlimit (0.0f, 1.0f, audioProcessor.getCurrentInputLevel()));
+    obj->setProperty ("inputPeak",  juce::jlimit (0.0f, 1.0f, audioProcessor.getCurrentInputPeak()));
+    obj->setProperty ("libraryFolder", audioProcessor.getLibraryFolder());
+    obj->setProperty ("lastSaveError", audioProcessor.getLastSaveError());
+    return juce::var (obj);
+}
+
+void BluePrinterWebViewEditor::handleSaveSnippet(const juce::var& data)
+{
+    if (auto* obj = data.getDynamicObject())
+    {
+        const int id = static_cast<int> (obj->getProperty("id"));
+        juce::String startingFolder = obj->getProperty("folder").toString();
+        juce::File folder (startingFolder);
+        if (! folder.isDirectory())
+            folder = juce::File (audioProcessor.getLibraryFolder());
+
+        if (folder.isDirectory())
+            saveSnippetWithDialog (id, folder);
+        else
+            pickLibraryFolderThenSave (id);
+    }
+}
+
+void BluePrinterWebViewEditor::handleRevealSnippet(const juce::var& data)
+{
+    if (auto* obj = data.getDynamicObject())
+    {
+        const int id = static_cast<int> (obj->getProperty("id"));
+        auto snippet = audioProcessor.getLibrary().findById (id);
+        if (snippet == nullptr)
+            return;
+        juce::File target;
+        if (snippet->savedPath.isNotEmpty())
+            target = juce::File (snippet->savedPath);
+        else
+            target = juce::File (audioProcessor.getLibraryFolder());
+        if (target.exists())
+            target.revealToUser();
+    }
+}
+
+void BluePrinterWebViewEditor::handleChooseLibraryFolder()
+{
+    juce::File start (audioProcessor.getLibraryFolder());
+    if (! start.isDirectory())
+        start = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory);
+    pickLibraryFolder (start);
+}
+
+void BluePrinterWebViewEditor::handleOpenLibraryFolder()
+{
+    auto folder = juce::File (audioProcessor.getLibraryFolder());
+    if (folder.isDirectory())
+        folder.startAsProcess();
+}
+
+void BluePrinterWebViewEditor::saveSnippetWithDialog(int snippetId, const juce::File& startingFolder)
+{
+    auto snippet = audioProcessor.getLibrary().findById (snippetId);
+    if (snippet == nullptr)
+    {
+        sendNotification ("Snippet no longer exists.", "error");
+        return;
+    }
+
+    auto defaultName = snippet->name.isNotEmpty() ? snippet->name : ("Snippet-" + juce::String (snippet->id));
+    auto sanitized = defaultName.replaceCharacters ("<>:\"/\\|?*", "_");
+    auto startingFile = startingFolder.getChildFile (sanitized + ".wav");
+
+    activeFileChooser = std::make_unique<juce::FileChooser> (
+        "Save snippet as WAV",
+        startingFile,
+        "*.wav",
+        true);
+
+    auto flags = juce::FileBrowserComponent::saveMode
+               | juce::FileBrowserComponent::canSelectFiles
+               | juce::FileBrowserComponent::warnAboutOverwriting;
+
+    activeFileChooser->launchAsync (flags, [this, snippetId](const juce::FileChooser& chooser)
+    {
+        auto result = chooser.getResult();
+        activeFileChooser.reset();
+
+        if (result == juce::File())
+        {
+            sendNotification ("Save cancelled.", "info");
+            return;
+        }
+
+        auto target = result;
+        if (target.isDirectory())
+            target = target.getChildFile ("snippet.wav");
+
+        if (! target.hasFileExtension (".wav"))
+            target = target.withFileExtension (".wav");
+
+        auto folder = target.getParentDirectory();
+        auto snippet = audioProcessor.getLibrary().findById (snippetId);
+        if (snippet == nullptr)
+        {
+            sendNotification ("Snippet no longer exists.", "error");
+            return;
+        }
+
+        juce::String outPath, outError;
+        if (audioProcessor.getLibrary().saveSnippetToFolder (*snippet, folder, outPath, outError))
+        {
+            audioProcessor.getLibrary().markSaved (snippetId, outPath);
+            audioProcessor.setLibraryFolder (folder);
+            sendNotification ("Saved snippet to " + outPath, "ok");
+        }
+        else
+        {
+            sendNotification ("Save failed: " + outError, "error");
+        }
+    });
+}
+
+void BluePrinterWebViewEditor::pickLibraryFolder(const juce::File& startingFolder)
+{
+    activeFileChooser = std::make_unique<juce::FileChooser> (
+        "Choose library folder",
+        startingFolder,
+        "",
+        true);
+
+    auto flags = juce::FileBrowserComponent::openMode
+               | juce::FileBrowserComponent::canSelectDirectories;
+
+    activeFileChooser->launchAsync (flags, [this](const juce::FileChooser& chooser)
+    {
+        auto result = chooser.getResult();
+        activeFileChooser.reset();
+        if (result == juce::File())
+        {
+            sendNotification ("Folder selection cancelled.", "info");
+            return;
+        }
+        audioProcessor.setLibraryFolder (result);
+        sendNotification ("Library folder set to " + result.getFullPathName(), "ok");
+    });
+}
+
+void BluePrinterWebViewEditor::pickLibraryFolderThenSave(int pendingSnippetId)
+{
+    juce::File start (audioProcessor.getLibraryFolder());
+    if (! start.isDirectory())
+        start = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory);
+
+    activeFileChooser = std::make_unique<juce::FileChooser> (
+        "Choose library folder, then save snippet",
+        start,
+        "",
+        true);
+
+    auto flags = juce::FileBrowserComponent::openMode
+               | juce::FileBrowserComponent::canSelectDirectories;
+
+    activeFileChooser->launchAsync (flags, [this, pendingSnippetId](const juce::FileChooser& chooser)
+    {
+        auto folder = chooser.getResult();
+        activeFileChooser.reset();
+        if (folder == juce::File())
+        {
+            sendNotification ("Folder selection cancelled.", "info");
+            return;
+        }
+        audioProcessor.setLibraryFolder (folder);
+        saveSnippetWithDialog (pendingSnippetId, folder);
+    });
+}
+
+void BluePrinterWebViewEditor::sendNotification(const juce::String& message, const juce::String& level)
+{
+    auto* obj = new juce::DynamicObject();
+    obj->setProperty ("message", message);
+    obj->setProperty ("level", level);
+    webView.emitEventIfBrowserIsVisible (juce::Identifier (backendNotifyEvent), juce::var (obj));
 }

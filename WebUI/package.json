@@ -1,5 +1,6 @@
 {
   "name": "blueprinter-webui",
+  "description": "React UI for the BluePrinter guitar take recorder JUCE plugin",
   "private": true,
   "version": "0.1.0",
   "type": "module",
