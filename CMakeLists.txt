@@ -18,7 +18,8 @@ juce_add_plugin(BluePrinter
     NEEDS_MIDI_INPUT FALSE
     NEEDS_MIDI_OUTPUT FALSE
     IS_MIDI_EFFECT FALSE
-    EDITOR_WANTS_KEYBOARD_FOCUS FALSE)
+    EDITOR_WANTS_KEYBOARD_FOCUS FALSE
+    ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/Source/icon.svg")
 
 juce_generate_juce_header(BluePrinter)
 
@@ -28,6 +29,7 @@ target_sources(BluePrinter PRIVATE
     Source/WebViewEditor.cpp
     Source/SnippetLibrary.cpp
     Source/PluginChain.cpp
+    Source/Vst3Library.cpp
     Source/KeyDetector.cpp)
 
 target_include_directories(BluePrinter PRIVATE
