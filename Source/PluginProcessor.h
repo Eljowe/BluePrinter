@@ -11,6 +11,7 @@
 #include <JuceHeader.h>
 #include "SnippetLibrary.h"
 #include "PluginChain.h"
+#include "Vst3Library.h"
 #include "KeyDetector.h"
 
 //==============================================================================
@@ -95,10 +96,33 @@ public:
     // them to the in-memory library. Already-loaded files are skipped.
     void refreshLibraryFromFolder();
 
-    // VST3 FX chain. The chain runs between the input and the recording
-    // tap, so the recording captures the processed signal.
-    PluginChain&       getPluginChain()       { return pluginChain; }
-    const PluginChain& getPluginChain() const { return pluginChain; }
+    // VST3 chains. Two parallel chains run between the input and the
+    // recording tap so the recording captures the processed signal:
+    //
+    //   1. The MIDI chain runs first. Its plugins see the raw input
+    //      MIDI (and audio) and may transform the MIDI buffer (e.g. an
+    //      arpeggiator, chord generator, MPE modifier) without touching
+    //      the audio. This is the natural home for MIDI-only plugins
+    //      and instruments.
+    //   2. The audio chain runs second. Its plugins see the (possibly
+    //      MIDI-altered) buffer. This is the natural home for audio
+    //      effects like amp sims, EQ, and reverb. The MIDI buffer is
+    //      still passed through, so note-aware plugins (e.g. some amp
+    //      sims) can react to the keys the user is holding.
+    //
+    // Splitting the chains solves the "MIDI plugin overwrites guitar"
+    // problem: a synth in the MIDI chain does not eat the guitar
+    // signal, and a guitar amp sim in the audio chain does not have
+    // to share a slot with a synth.
+    PluginChain&       getMidiPluginChain()        { return midiChain; }
+    const PluginChain& getMidiPluginChain()  const { return midiChain; }
+    PluginChain&       getAudioPluginChain()       { return audioChain; }
+    const PluginChain& getAudioPluginChain() const { return audioChain; }
+
+    // Folder-wide VST3 metadata shared between both chains: the
+    // blocklist of plugins to skip and the cached scan result.
+    Vst3Library&       getVst3Library()       { return vst3Library; }
+    const Vst3Library& getVst3Library() const { return vst3Library; }
 
     // Metronome / count-in settings. Persisted in plugin state.
     bool    getMetronomeEnabled() const { return metronomeEnabled.load (std::memory_order_acquire); }
@@ -158,13 +182,26 @@ private:
     juce::ListenerList<Listener> listeners;
 
     SnippetLibrary library;
-    PluginChain    pluginChain;
+    Vst3Library    vst3Library;
+    // The MIDI chain runs before the audio chain in processBlock.
+    // Plugins in the MIDI chain see (and may transform) the MIDI
+    // buffer; plugins in the audio chain see the (possibly altered)
+    // result.
+    PluginChain    midiChain;
+    PluginChain    audioChain;
 
     // Pre-allocated record buffer. Allocated on the message thread inside
     // prepareToPlay, written to from the audio thread — no allocations there.
     std::unique_ptr<juce::AudioBuffer<float>> recordBuffer;
     int maxRecordSamples = 0;
     juce::CriticalSection recordLock;
+
+    // Scratch buffer the MIDI chain runs on. We give the chain its own
+    // copy of the input audio so a synth in the MIDI chain can't clobber
+    // the analog signal the audio chain is about to process; we then
+    // sum the MIDI chain's output back into the main buffer so synths
+    // and arpeggiators still mix in. Sized in prepareToPlay.
+    juce::AudioBuffer<float> midiChainBuffer;
 
     std::atomic<RecordingState> recordingState { RecordingState::Idle };
     std::atomic<bool> recordingRequested { false };
@@ -227,6 +264,16 @@ private:
     // writing the just-loaded state back over the file.
     void persistPluginChain();
     bool persistingPluginChain = false;
+
+    // Build the combined plugin-chain bundle (both chains + library
+    // metadata) for persistence. See PluginProcessor.cpp for the
+    // exact format.
+    juce::var makeChainState() const;
+
+    // Inverse of makeChainState. Accepts both the new
+    // (midiChain/audioChain-keyed) format and the pre-split single-
+    // chain format — the latter is loaded into the audio chain.
+    void applyChainState (const juce::var& state, juce::String& outError);
 
     // Stashed when setStateInformation fails to restore one or more
     // chain plugins (e.g. expired-license VST3s). Read by the UI on

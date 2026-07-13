@@ -24,18 +24,23 @@ BluePrinterAudioProcessor::BluePrinterAudioProcessor()
                      #endif
                        )
 #endif
+    , midiChain  (vst3Library)
+    , audioChain (vst3Library)
 {
-    // Restore the standalone user state (library folder + VST3 chain)
+    // Restore the standalone user state (library folder + VST3 chains)
     // before any UI is built. setLibraryFolder auto-loads snippets from
-    // the folder; setChainState replays the saved chain. Both fire
-    // their own change events; that's fine because the chain's
+    // the folder; the chain restore replays the saved chains. Both
+    // fire their own change events; that's fine because the chains'
     // onChanged is wired below in restoreUserState()'s tail, after the
     // restore itself completes.
     restoreUserState();
 
     // Wire the chain persistence AFTER the restore so we don't write
-    // the just-loaded state back over the file on startup.
-    pluginChain.onChanged = [this] { persistPluginChain(); };
+    // the just-loaded state back over the file on startup. Both chains
+    // share one persistence callback because the save format is a
+    // single bundle containing both.
+    midiChain.onChanged  = [this] { persistPluginChain(); };
+    audioChain.onChanged = [this] { persistPluginChain(); };
 }
 
 BluePrinterAudioProcessor::~BluePrinterAudioProcessor()
@@ -110,8 +115,6 @@ void BluePrinterAudioProcessor::changeProgramName (int index, const juce::String
 //==============================================================================
 void BluePrinterAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
-    juce::ignoreUnused (samplesPerBlock);
-
     const int channels = juce::jmax (1, getTotalNumInputChannels());
     const auto maxSamples = static_cast<int> (sampleRate * maxRecordingSeconds);
 
@@ -120,11 +123,19 @@ void BluePrinterAudioProcessor::prepareToPlay (double sampleRate, int samplesPer
     maxRecordSamples = maxSamples;
     recordWritePos.store (0, std::memory_order_release);
 
+    // Per-block scratch for the MIDI chain — see the member comment.
+    midiChainBuffer.setSize (channels, samplesPerBlock, false, false, true);
+
     currentSampleRate = sampleRate;
 
-    // Hand the new rate/block size to the FX chain so every loaded plugin
-    // is prepared with the right values.
-    pluginChain.prepareToPlay (sampleRate, samplesPerBlock);
+    // Hand the new rate/block size to both chains so every loaded
+    // plugin is prepared with the right values. The MIDI chain is
+    // prepared first (it runs first in processBlock); the audio chain
+    // is prepared second. Order doesn't actually matter for prepare,
+    // but doing it in the same order as processBlock keeps the
+    // mental model consistent.
+    midiChain.prepareToPlay (sampleRate, samplesPerBlock);
+    audioChain.prepareToPlay (sampleRate, samplesPerBlock);
 
     // Synthesize a 50 ms percussive click: fundamental 800 Hz + a couple of
     // harmonics, fast exponential decay. Single-channel, mixed into all
@@ -170,7 +181,8 @@ void BluePrinterAudioProcessor::releaseResources()
     recordWritePos.store (0, std::memory_order_release);
     playbackSnippet.reset();
 
-    pluginChain.releaseResources();
+    midiChain.releaseResources();
+    audioChain.releaseResources();
     clickBuffer.clear();
 }
 
@@ -199,7 +211,6 @@ bool BluePrinterAudioProcessor::isBusesLayoutSupported (const BusesLayout& layou
 void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                                               juce::MidiBuffer& midiMessages)
 {
-    juce::ignoreUnused (midiMessages);
     juce::ScopedNoDenormals noDenormals;
 
     const int numSamples = buffer.getNumSamples();
@@ -211,12 +222,33 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     for (int channel = 0; channel < numChannels; ++channel)
         buffer.applyGain (channel, 0, numSamples, gain);
 
-    // 0. Run the VST3 FX chain in place. Done after the input gain so
-    //    the chain processes the post-gain signal; done before the
-    //    recording tap so the recorded file captures the processed
-    //    signal. Each plugin is responsible for matching the buffer's
-    //    channel layout.
-    pluginChain.processBlock (buffer, midiMessages);
+    // 0. Run the VST3 chains in parallel. The MIDI chain runs on its
+    //    own copy of the post-gain input so a synth/instrument in the
+    //    MIDI chain can't clobber the analog signal; its audio output
+    //    is then summed back into the main buffer so it mixes in
+    //    alongside the guitar. The audio chain runs second on the
+    //    summed buffer so note-aware plugins (e.g. some amp sims) can
+    //    react to the (possibly transformed) MIDI events, and so the
+    //    synth in the MIDI chain also picks up the audio FX.
+    //    The MIDI chain's MIDI output is still passed to the audio
+    //    chain via the shared midiMessages buffer.
+    {
+        const int midiCh = juce::jmin (numChannels, midiChainBuffer.getNumChannels());
+        for (int ch = 0; ch < midiCh; ++ch)
+            midiChainBuffer.copyFrom (ch, 0, buffer, ch, 0, numSamples);
+
+        // Clear any channels in the scratch beyond what we just filled
+        // in case a previous block had more channels (host channel-count
+        // change between prepareToPlay calls).
+        for (int ch = midiCh; ch < midiChainBuffer.getNumChannels(); ++ch)
+            midiChainBuffer.clear (ch, 0, numSamples);
+
+        midiChain.processBlock (midiChainBuffer, midiMessages);
+
+        for (int ch = 0; ch < midiCh; ++ch)
+            buffer.addFrom (ch, 0, midiChainBuffer, ch, 0, numSamples);
+    }
+    audioChain.processBlock (buffer, midiMessages);
 
     // 1. Record the clean (post-gain, pre-click) input. Access to the
     //    record buffer is serialised with the message thread via recordLock.
@@ -722,6 +754,131 @@ juce::String BluePrinterAudioProcessor::getLastChainRestoreError() const
     return lastChainRestoreError;
 }
 
+// Build the combined plugin-chain bundle that gets written to host
+// state and the standalone properties file. Holds both the MIDI
+// chain's slots and the audio chain's slots, plus the folder-wide
+// blocklist and cached scan result on the shared library. The MIDI
+// chain is intentionally named "midiChain" and the audio chain
+// "audioChain" so a future "sidechain" or "aux" chain slots in
+// without a backwards-compat break.
+//
+// Format:
+//   {
+//     "midiChain":  { "slots": [...] },
+//     "audioChain": { "slots": [...] },
+//     "blocklist":         ["...\\Foo.vst3", ...],
+//     "availablePlugins":  [{ "name": ..., "path": ..., ... }, ...]
+//   }
+juce::var BluePrinterAudioProcessor::makeChainState() const
+{
+    auto* obj = new juce::DynamicObject();
+    obj->setProperty ("midiChain",  midiChain.getChainState());
+    obj->setProperty ("audioChain", audioChain.getChainState());
+
+    {
+        juce::Array<juce::var> blocklistArray;
+        for (const auto& path : vst3Library.getBlocklist())
+            blocklistArray.add (path);
+        obj->setProperty ("blocklist", blocklistArray);
+    }
+
+    const auto available = vst3Library.getAvailablePlugins();
+    if (! available.isVoid())
+        obj->setProperty ("availablePlugins", available);
+
+    return juce::var (obj);
+}
+
+// Inverse of makeChainState. Accepts both the new (midiChain/
+// audioChain-keyed) format and the pre-split format where a single
+// top-level "slots" array was the only chain — that legacy state is
+// loaded into the audio chain so users keep their existing guitar FX.
+// Returns a (possibly empty) human-readable error string listing any
+// plugins that were skipped; the caller surfaces it to the UI.
+void BluePrinterAudioProcessor::applyChainState (const juce::var& state, juce::String& outError)
+{
+    auto* obj = state.getDynamicObject();
+    if (obj == nullptr)
+        return;
+
+    // Blocklist first so each chain's setChainState can check it. The
+    // blocklist is folder-wide, so restoring it is a single set
+    // regardless of which chains the state contains.
+    if (auto* blocklistVar = obj->getProperty ("blocklist").getArray())
+    {
+        juce::StringArray paths;
+        for (const auto& v : *blocklistVar)
+            paths.add (v.toString());
+        vst3Library.setBlocklist (paths);
+    }
+
+    // Cached scan result. Old saved states won't have this; in that
+    // case we leave availablePlugins untouched (it'll be an empty
+    // var and the UI will show no available plugins until the user
+    // re-scans).
+    if (obj->hasProperty ("availablePlugins"))
+        vst3Library.setAvailablePlugins (obj->getProperty ("availablePlugins"));
+
+    // Pre-split format detection: if the state has neither
+    // "midiChain" nor "audioChain" but does have a top-level
+    // "slots", it's the old single-chain format — load it into the
+    // audio chain so existing users keep their guitar FX.
+    const bool newFormat = obj->hasProperty ("midiChain")
+                        || obj->hasProperty ("audioChain");
+
+    if (! newFormat)
+    {
+        // Old { slots, blocklist, availablePlugins } shape.
+        // blocklist/availablePlugins were already handled above.
+        const auto slotsVar = obj->getProperty ("slots");
+
+        midiChain.clear();
+
+        juce::String audioError;
+        audioChain.setChainState (slotsVar, audioError);
+        if (audioError.isNotEmpty())
+        {
+            if (outError.isNotEmpty()) outError += "\n";
+            outError += "Audio chain: " + audioError;
+        }
+        return;
+    }
+
+    // New format. Either or both chains may be present; missing
+    // chains are simply left empty (the chain's clear() inside
+    // setChainState handles that for any key that IS present).
+    juce::String midiError, audioError;
+
+    if (obj->hasProperty ("midiChain"))
+    {
+        midiChain.setChainState (obj->getProperty ("midiChain"), midiError);
+    }
+    else
+    {
+        midiChain.clear();
+    }
+
+    if (obj->hasProperty ("audioChain"))
+    {
+        audioChain.setChainState (obj->getProperty ("audioChain"), audioError);
+    }
+    else
+    {
+        audioChain.clear();
+    }
+
+    if (midiError.isNotEmpty())
+    {
+        if (outError.isNotEmpty()) outError += "\n";
+        outError += "MIDI chain: " + midiError;
+    }
+    if (audioError.isNotEmpty())
+    {
+        if (outError.isNotEmpty()) outError += "\n";
+        outError += "Audio chain: " + audioError;
+    }
+}
+
 void BluePrinterAudioProcessor::clearLastChainRestoreError()
 {
     lastChainRestoreError.clear();
@@ -818,9 +975,11 @@ void BluePrinterAudioProcessor::getStateInformation (juce::MemoryBlock& destData
     state.setProperty ("metronomeEnabled", metronomeEnabled.load(), nullptr);
     state.setProperty ("bpm",              bpm.load(),              nullptr);
     state.setProperty ("countInBeats",     countInBeats.load(),     nullptr);
-    // VST3 chain: per-slot path + bypass + base64 plugin state, stored
-    // as a JSON string so ValueTree can carry an arbitrary blob.
-    state.setProperty ("pluginChain", juce::JSON::toString (pluginChain.getChainState(), true), nullptr);
+    // VST3 chains: per-slot path + bypass + base64 plugin state for
+    // both the MIDI and the audio chain, plus the folder-wide
+    // blocklist and cached scan result. Stored as a JSON string so
+    // ValueTree can carry an arbitrary blob.
+    state.setProperty ("pluginChains", juce::JSON::toString (makeChainState(), true), nullptr);
     std::unique_ptr<juce::XmlElement> xml (state.createXml());
     copyXmlToBinary (*xml, destData);
 }
@@ -840,12 +999,17 @@ void BluePrinterAudioProcessor::setStateInformation (const void* data, int sizeI
             bpm.store              (static_cast<float> (state.getProperty ("bpm",              120.0f)));
             countInBeats.store     (static_cast<int>   (state.getProperty ("countInBeats",     4)));
 
-            const auto chainJson = state.getProperty ("pluginChain").toString();
+            // Read either the new "pluginChains" key or the pre-split
+            // "pluginChain" key. The old key is the single-chain
+            // format that applyChainState maps onto the audio chain.
+            const auto chainJson = state.getProperty ("pluginChains").toString().isNotEmpty()
+                ? state.getProperty ("pluginChains").toString()
+                : state.getProperty ("pluginChain").toString();
             if (chainJson.isNotEmpty())
             {
                 const auto chainVar = juce::JSON::parse (chainJson);
                 juce::String error;
-                pluginChain.setChainState (chainVar, error);
+                applyChainState (chainVar, error);
                 if (error.isNotEmpty())
                 {
                     // Stash for the UI to display when it opens.
@@ -949,9 +1113,16 @@ void BluePrinterAudioProcessor::restoreUserState()
         }
     }
 
-    // 2. VST3 chain. Guarded so the addPlugin calls inside don't
-    // trigger a redundant write back to the file.
-    const auto chainJson = props->getValue ("pluginChain");
+    // 2. VST3 chains. Guarded so the addPlugin calls inside don't
+    // trigger a redundant write back to the file. The bundle holds
+    // both the MIDI and audio chain slots plus the shared library
+    // (blocklist + cached scan). Read both the new "pluginChains"
+    // key and the pre-split "pluginChain" key — the latter is the
+    // single-chain format that gets mapped to the audio chain in
+    // applyChainState.
+    const auto chainJson = props->getValue ("pluginChains").isNotEmpty()
+        ? props->getValue ("pluginChains")
+        : props->getValue ("pluginChain");
     if (chainJson.isNotEmpty())
     {
         const auto chainVar = juce::JSON::parse (chainJson);
@@ -959,7 +1130,7 @@ void BluePrinterAudioProcessor::restoreUserState()
         {
             persistingPluginChain = true;
             juce::String error;
-            pluginChain.setChainState (chainVar, error);
+            applyChainState (chainVar, error);
             persistingPluginChain = false;
             if (error.isNotEmpty())
                 lastChainRestoreError = error;
@@ -983,8 +1154,8 @@ void BluePrinterAudioProcessor::persistPluginChain()
         return; // restore in progress, don't echo back
     if (auto* props = getUserState())
     {
-        props->setValue ("pluginChain",
-                         juce::JSON::toString (pluginChain.getChainState(), false));
+        props->setValue ("pluginChains",
+                         juce::JSON::toString (makeChainState(), false));
         props->saveIfNeeded();
     }
 }

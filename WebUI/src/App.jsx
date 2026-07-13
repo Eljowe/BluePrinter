@@ -5,6 +5,7 @@ import { SnippetList } from "./components/SnippetList";
 import { Notification } from "./components/Notification";
 import { PluginChain } from "./components/PluginChain";
 import { BACKEND_EVENTS, FRONTEND_EVENTS, emit, getInitialData, subscribe } from "./bridge";
+import iconUrl from "./icon.svg";
 
 const PARAM_IDS = {
   gain: "Gain",
@@ -56,7 +57,11 @@ export default function App() {
   const [snippets, setSnippets] = useState(readInitialSnippets);
   const [transport, setTransport] = useState(readInitialTransport);
   const [notification, setNotification] = useState(null);
-  const [vst3, setVst3] = useState({ chain: { slots: [] }, available: [], defaultFolder: "" });
+  const [vst3, setVst3] = useState({
+    chain: { midiChain: { slots: [] }, audioChain: { slots: [] }, openEditors: [] },
+    available: [],
+    defaultFolder: "",
+  });
   const [scanState, setScanState] = useState({ active: false, current: 0, total: 0, currentFile: "", folder: "" });
 
   useEffect(() => {
@@ -83,6 +88,17 @@ export default function App() {
       }
     });
     return unsubSnippets;
+  }, []);
+
+  // Ask the backend for a fresh snippet snapshot once the page is
+  // ready. The processor's restoreUserState() loads snippets from
+  // disk in its constructor — before the editor is constructed —
+  // so the libraryChanged notification has no listener attached
+  // and is lost. The withInitialisationData blob can also race the
+  // page mount, so we don't rely on it. This explicit request is
+  // the same pattern the chain UI uses for frontendGetVst3Chain.
+  useEffect(() => {
+    emit(FRONTEND_EVENTS.getSnippets);
   }, []);
 
   useEffect(() => {
@@ -120,10 +136,18 @@ export default function App() {
   useEffect(() => {
     const unsubChain = subscribe(BACKEND_EVENTS.vst3Chain, (payload) => {
       if (typeof payload !== "object" || payload == null) return;
-      const chain = payload.chain ?? { slots: [] };
+      // The backend ships a single bundle per snapshot. Both chains
+      // are always present (possibly empty). Old single-chain
+      // snapshots aren't expected from the C++ side any more, but
+      // the { chain: { slots } } shape is kept as a defensive
+      // fallback so the UI doesn't blank out if a stale payload
+      // sneaks in.
+      const midiChain  = payload.midiChain  ?? { slots: [] };
+      const audioChain = payload.audioChain ?? (payload.chain ?? { slots: [] });
+      const openEditors = Array.isArray(payload.openEditors) ? payload.openEditors : [];
       const available = Array.isArray(payload.plugins) ? payload.plugins : [];
       const defaultFolder = typeof payload.folder === "string" ? payload.folder : "";
-      setVst3({ chain, available, defaultFolder });
+      setVst3({ chain: { midiChain, audioChain, openEditors }, available, defaultFolder });
     });
     return unsubChain;
   }, []);
@@ -212,7 +236,10 @@ export default function App() {
       />
 
       <footer className="app-footer">
-        Recordings stay in memory until you save them. Pick a library folder for one-click auto-save.
+        <img src={iconUrl} alt="" className="app-footer-icon" aria-hidden="true" />
+        <span>
+          Recordings stay in memory until you save them. Pick a library folder for one-click auto-save.
+        </span>
       </footer>
     </main>
   );

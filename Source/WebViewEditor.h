@@ -32,6 +32,16 @@ public:
     static constexpr const char* frontendChooseFolderEvent     = "frontendChooseLibraryFolder";
     static constexpr const char* frontendOpenFolderEvent       = "frontendOpenLibraryFolder";
     static constexpr const char* frontendRefreshLibraryEvent   = "frontendRefreshLibrary";
+    // Fired by the React app once the WebView has loaded, so the
+    // backend can push a fresh snippet snapshot. The processor's
+    // restoreUserState loads snippets from disk before the editor
+    // is constructed, so the corresponding libraryChanged listener
+    // notification fires before any listener is registered and is
+    // lost. The initial withInitialisationData blob can also race
+    // the page being ready to read it, so we don't rely on it
+    // either. Asking once on mount is the belt-and-suspenders fix
+    // that mirrors what the chain UI already does.
+    static constexpr const char* frontendGetSnippetsEvent      = "frontendGetSnippets";
     static constexpr const char* frontendSetMetronomeEvent     = "frontendSetMetronome";
     static constexpr const char* frontendSetBpmEvent           = "frontendSetBpm";
     static constexpr const char* frontendSetCountInBeatsEvent  = "frontendSetCountInBeats";
@@ -63,11 +73,20 @@ public:
     void handleOpenLibraryFolder();
 
     // VST3 chain handlers — public so the listener lambdas can drive them.
-    void openVst3Editor (int slotIndex);
-    void closeVst3Editor (int slotIndex, bool deleteAfterClose);
+    // The "chain" argument is "midiChain" or "audioChain" and picks
+    // which of the two chains the operation targets. Index is the
+    // slot index within that chain.
+    void openVst3Editor (const juce::String& chain, int slotIndex);
+    void closeVst3Editor (const juce::String& chain, int slotIndex, bool deleteAfterClose);
     void closeAllVst3Editors();
     void emitVst3ChainSnapshot();
-    // Rebuild the vst3EditorWindows map so the windows are keyed by
+    // Push a fresh snippet + library-folder snapshot to the
+    // WebView. The frontendGetSnippetsEvent listener inside
+    // makeWebViewOptions calls this when React asks for a fresh
+    // copy on mount, so it has to be public like the other
+    // emit*Snapshot methods.
+    void emitLibraryToFrontend();
+    // Rebuild the vst3EditorWindows maps so the windows are keyed by
     // their plugin's current slot index. Called after a reorder so
     // windows that survived the move stay attached to the right slot
     // (the underlying plugin instance is unchanged — only the index
@@ -75,8 +94,8 @@ public:
     void rekeyVst3EditorWindows();
     void scanVst3Folder (const juce::File& folder);
     void scanDefaultVst3Folder();
-    void pickVst3FileAndAdd();
-    void addVst3FromPath (const juce::File& vst3File);
+    void pickVst3FileAndAdd (const juce::String& chain);
+    void addVst3FromPath (const juce::String& chain, const juce::File& vst3File);
 
     // Snapshot helpers — public so the listener lambdas can use them.
     juce::var makeSnippetsSnapshot() const;
@@ -96,7 +115,6 @@ private:
     juce::File getWebUiDistRoot() const;
     void emitParameterSnapshotToFrontend();
     void emitTransportToFrontend();
-    void emitLibraryToFrontend();
     juce::var makeParameterSnapshot() const;
 
     // Drives the next file of an in-flight VST3 scan. Called from
@@ -113,14 +131,16 @@ private:
     juce::WebBrowserComponent webView;
     juce::Label fallbackLabel;
 
-    // Per-slot native VST3 editor windows. Index in the map matches the
-    // slot's index in the chain. The unique_ptr owns the DialogWindow,
-    // which in turn owns the AudioProcessorEditor. The actual stored
-    // type is the Vst3EditorWindow subclass declared in
-    // WebViewEditor.cpp; we keep the map's pointer type as
-    // DialogWindow because the subclass lives in an anonymous namespace
-    // and can't be named in this header.
-    std::map<int, std::unique_ptr<juce::DialogWindow>> vst3EditorWindows;
+    // Per-slot native VST3 editor windows, one map per chain. The key
+    // in each map matches the slot's index in that chain. The
+    // unique_ptr owns the DialogWindow, which in turn owns the
+    // AudioProcessorEditor. The actual stored type is the
+    // Vst3EditorWindow subclass declared in WebViewEditor.cpp; we
+    // keep the map's pointer type as DialogWindow because the
+    // subclass lives in an anonymous namespace and can't be named in
+    // this header.
+    std::map<int, std::unique_ptr<juce::DialogWindow>> midiEditorWindows;
+    std::map<int, std::unique_ptr<juce::DialogWindow>> audioEditorWindows;
 
     std::atomic<bool> parameterUpdatePending { false };
     std::atomic<bool> libraryUpdatePending   { false };
@@ -133,7 +153,7 @@ private:
     // In-flight VST3 scan. Lives on the message thread and is driven one
     // file at a time from timerCallback() so per-file progress is visible
     // without blocking the message loop. The per-file describe runs on a
-    // worker thread (see PluginChain::describeVst3FileAsync) so a
+    // worker thread (see Vst3Library::describeVst3FileAsync) so a
     // misbehaving .vst3 — modal license dialog, hung initialize(),
     // throwing factory call — can be timed out and skipped without
     // bringing the message thread (and the whole UI) down.

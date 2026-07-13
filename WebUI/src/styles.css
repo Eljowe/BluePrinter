@@ -39,10 +39,20 @@ body, html, #root {
 }
 
 .app-footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   color: #5b6371;
   font-size: 0.8rem;
-  text-align: center;
   padding-top: 6px;
+}
+
+.app-footer-icon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  opacity: 0.85;
 }
 
 /* ---- transport ---- */
@@ -396,6 +406,48 @@ body, html, #root {
   background: #161a21;
   border: 1px solid #232a36;
   border-radius: 12px;
+}
+
+.fx-chain-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.fx-chain-help {
+  margin: 0 0 4px 0;
+  font-size: 0.78rem;
+  color: #8a93a4;
+  line-height: 1.45;
+}
+
+.fx-chain-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  background: #1b2029;
+  border: 1px solid #262d3a;
+  border-radius: 10px;
+}
+
+.fx-chain-panel[data-chain="midiChain"] {
+  border-color: #2a4a5a;
+  background: #1a2229;
+}
+
+.fx-chain-panel .fx-chain-title h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #e8ecf1;
+}
+
+.fx-chain-subtitle {
+  margin: 2px 0 0 0;
+  font-size: 0.72rem;
+  color: #6b7180;
 }
 
 .fx-chain-header {

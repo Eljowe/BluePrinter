@@ -1,5 +1,6 @@
 #include "WebViewEditor.h"
 #include "PluginChain.h"
+#include "Vst3Library.h"
 
 namespace
 {
@@ -75,6 +76,20 @@ juce::File findLocalWebUiDistIndex()
     }
 
     return {};
+}
+
+// Read a string property from a juce::var (the type every
+// event-listener payload is), returning `defaultValue` if the
+// property is absent. var::operator[] has a const char* overload
+// and returns a void var for missing keys, so the usual
+// JS-style `data.chain ?? "audioChain"` translates cleanly. A
+// DynamicObject* also works because var has a converting
+// constructor from ReferenceCountedObject*, which DynamicObject
+// inherits from.
+juce::String getStringProp (const juce::var& v, const char* name, const juce::String& defaultValue)
+{
+    const auto& prop = v[name];
+    return prop.isVoid() ? defaultValue : prop.toString();
 }
 
 juce::var snippetToVar (const Snippet& s)
@@ -245,6 +260,16 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
         {
             processor.refreshLibraryFromFolder();
         })
+        .withEventListener(BluePrinterWebViewEditor::frontendGetSnippetsEvent, [owner](juce::var)
+        {
+            // React asks for a fresh snippet snapshot once the page
+            // is ready. The processor's constructor loads snippets
+            // from disk before the editor exists, so the matching
+            // libraryChanged notification has no listener and is
+            // lost; this event is the round-trip that delivers them.
+            if (owner != nullptr)
+                owner->emitLibraryToFrontend();
+        })
         .withEventListener(BluePrinterWebViewEditor::frontendSetMetronomeEvent, [&processor](juce::var data)
         {
             if (auto* obj = data.getDynamicObject())
@@ -268,31 +293,43 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
             // The "+ Add plugin…" button sends an empty payload and
             // wants the file picker. The available-plugins list sends
             // { path: "C:\\…\\Foo.vst3" } and wants a direct add.
-            const auto path = data.getProperty ("path", {}).toString();
+            // The "chain" field picks the target chain ("midiChain"
+            // or "audioChain"); absent means audio chain for
+            // backwards compatibility with the pre-split UI.
+            const auto chain = getStringProp (data, "chain", "audioChain");
+            const auto path  = getStringProp (data, "path", {});
             if (path.isNotEmpty())
-                owner->addVst3FromPath (juce::File (path));
+                owner->addVst3FromPath (chain, juce::File (path));
             else
-                owner->pickVst3FileAndAdd();
+                owner->pickVst3FileAndAdd (chain);
         })
         .withEventListener(BluePrinterWebViewEditor::frontendRemoveVst3Event, [&processor, owner](juce::var data)
         {
-            if (auto* obj = data.getDynamicObject())
+            if (data.getDynamicObject() != nullptr)
             {
-                const int index = static_cast<int> (obj->getProperty ("index"));
+                const auto chain = getStringProp (data, "chain", "audioChain");
+                const int index = static_cast<int> (data["index"]);
                 if (owner != nullptr)
-                    owner->closeVst3Editor (index, false);
-                processor.getPluginChain().removePlugin (index);
+                    owner->closeVst3Editor (chain, index, false);
+                auto& target = (chain == "midiChain")
+                    ? processor.getMidiPluginChain()
+                    : processor.getAudioPluginChain();
+                target.removePlugin (index);
                 if (owner != nullptr)
                     owner->emitVst3ChainSnapshot();
             }
         })
         .withEventListener(BluePrinterWebViewEditor::frontendMoveVst3Event, [&processor, owner](juce::var data)
         {
-            if (auto* obj = data.getDynamicObject())
+            if (data.getDynamicObject() != nullptr)
             {
-                const int from = static_cast<int> (obj->getProperty ("from"));
-                const int to   = static_cast<int> (obj->getProperty ("to"));
-                if (processor.getPluginChain().movePlugin (from, to) && owner != nullptr)
+                const auto chain = getStringProp (data, "chain", "audioChain");
+                const int from = static_cast<int> (data["from"]);
+                const int to   = static_cast<int> (data["to"]);
+                auto& target = (chain == "midiChain")
+                    ? processor.getMidiPluginChain()
+                    : processor.getAudioPluginChain();
+                if (target.movePlugin (from, to) && owner != nullptr)
                 {
                     // The slots behind the moved one shifted index, so
                     // any open editor window keyed by the old index is
@@ -306,31 +343,37 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
         })
         .withEventListener(BluePrinterWebViewEditor::frontendSetVst3BypassEvent, [&processor, owner](juce::var data)
         {
-            if (auto* obj = data.getDynamicObject())
+            if (data.getDynamicObject() != nullptr)
             {
-                const int index = static_cast<int> (obj->getProperty ("index"));
-                const bool bypass = static_cast<bool> (obj->getProperty ("bypassed"));
-                processor.getPluginChain().setBypass (index, bypass);
+                const auto chain = getStringProp (data, "chain", "audioChain");
+                const int index = static_cast<int> (data["index"]);
+                const bool bypass = static_cast<bool> (data["bypassed"]);
+                auto& target = (chain == "midiChain")
+                    ? processor.getMidiPluginChain()
+                    : processor.getAudioPluginChain();
+                target.setBypass (index, bypass);
                 if (owner != nullptr)
                     owner->emitVst3ChainSnapshot();
             }
         })
         .withEventListener(BluePrinterWebViewEditor::frontendOpenVst3EditorEvent, [owner](juce::var data)
         {
-            if (auto* obj = data.getDynamicObject())
+            if (data.getDynamicObject() != nullptr)
             {
-                const int index = static_cast<int> (obj->getProperty ("index"));
+                const auto chain = getStringProp (data, "chain", "audioChain");
+                const int index = static_cast<int> (data["index"]);
                 if (owner != nullptr)
-                    owner->openVst3Editor (index);
+                    owner->openVst3Editor (chain, index);
             }
         })
         .withEventListener(BluePrinterWebViewEditor::frontendCloseVst3EditorEvent, [owner](juce::var data)
         {
-            if (auto* obj = data.getDynamicObject())
+            if (data.getDynamicObject() != nullptr)
             {
-                const int index = static_cast<int> (obj->getProperty ("index"));
+                const auto chain = getStringProp (data, "chain", "audioChain");
+                const int index = static_cast<int> (data["index"]);
                 if (owner != nullptr)
-                    owner->closeVst3Editor (index, true);
+                    owner->closeVst3Editor (chain, index, true);
             }
         })
         .withEventListener(BluePrinterWebViewEditor::frontendScanVst3FolderEvent, [owner](juce::var)
@@ -350,7 +393,7 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
                 const auto path = obj->getProperty("path").toString();
                 if (path.isNotEmpty())
                 {
-                    processor.getPluginChain().addToBlocklist (juce::File (path));
+                    processor.getVst3Library().addToBlocklist (juce::File (path));
                     if (owner != nullptr)
                         owner->emitVst3ChainSnapshot();
                 }
@@ -363,7 +406,7 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
                 const auto path = obj->getProperty("path").toString();
                 if (path.isNotEmpty())
                 {
-                    processor.getPluginChain().removeFromBlocklist (juce::File (path));
+                    processor.getVst3Library().removeFromBlocklist (juce::File (path));
                     if (owner != nullptr)
                         owner->emitVst3ChainSnapshot();
                 }
@@ -383,13 +426,15 @@ BluePrinterWebViewEditor::BluePrinterWebViewEditor(BluePrinterAudioProcessor& p)
 
     // When a chain slot is removed (e.g. user removed the plugin), close
     // any open native editor for it so we don't leak a window with a
-    // dangling plugin pointer.
-    audioProcessor.getPluginChain().onSlotRemoved = [this] (int index)
+    // dangling plugin pointer. Each chain has its own map; the lambda
+    // captures a pointer to the right one.
+    audioProcessor.getMidiPluginChain().onSlotRemoved = [this] (int index)
     {
-        const auto it = vst3EditorWindows.find (index);
-        if (it != vst3EditorWindows.end())
-            it->second.reset();
-        vst3EditorWindows.erase (index);
+        midiEditorWindows.erase (index);
+    };
+    audioProcessor.getAudioPluginChain().onSlotRemoved = [this] (int index)
+    {
+        audioEditorWindows.erase (index);
     };
 
     // The processor installs its own pluginChain.onChanged hook (which
@@ -442,7 +487,7 @@ BluePrinterWebViewEditor::BluePrinterWebViewEditor(BluePrinterAudioProcessor& p)
 BluePrinterWebViewEditor::~BluePrinterWebViewEditor()
 {
     // Expire any in-flight scan callbacks before tearing other state
-    // down. describeVst3FileAsync captures a weak_ptr<int> to
+    // down. Vst3Library::describeVst3FileAsync captures a weak_ptr<int> to
     // aliveToken; resetting the token here invalidates that weak_ptr
     // and turns the callback into a no-op even if its timer fires
     // after this destructor returns. Set the disposed flag for the
@@ -775,17 +820,22 @@ void BluePrinterWebViewEditor::sendNotification(const juce::String& message, con
     webView.emitEventIfBrowserIsVisible (juce::Identifier (backendNotifyEvent), juce::var (obj));
 }
 
-void BluePrinterWebViewEditor::openVst3Editor (int slotIndex)
+void BluePrinterWebViewEditor::openVst3Editor (const juce::String& chain, int slotIndex)
 {
+    auto& target = (chain == "midiChain")
+        ? audioProcessor.getMidiPluginChain()
+        : audioProcessor.getAudioPluginChain();
+    auto& windowMap = (chain == "midiChain") ? midiEditorWindows : audioEditorWindows;
+
     // If there's already an editor open for this slot, just bring it forward.
-    if (vst3EditorWindows.count (slotIndex) > 0)
+    if (windowMap.count (slotIndex) > 0)
     {
-        if (auto* existing = vst3EditorWindows[slotIndex].get())
+        if (auto* existing = windowMap[slotIndex].get())
             existing->toFront (true);
         return;
     }
 
-    auto* plugin = audioProcessor.getPluginChain().getPlugin (slotIndex);
+    auto* plugin = target.getPlugin (slotIndex);
     if (plugin == nullptr)
         return;
 
@@ -796,33 +846,34 @@ void BluePrinterWebViewEditor::openVst3Editor (int slotIndex)
         return;
     }
 
-    auto title = plugin->getName() + " (FX slot " + juce::String (slotIndex + 1) + ")";
+    const auto label = (chain == "midiChain") ? "MIDI slot" : "FX slot";
+    auto title = plugin->getName() + " (" + label + " " + juce::String (slotIndex + 1) + ")";
     auto window = std::make_unique<Vst3EditorWindow> (title,
                                                       juce::Colours::darkgrey,
                                                       true,  // has close button
                                                       true); // has title bar
-    // The native X button must clean up the vst3EditorWindows entry.
-    // Without this the window just hides, the map keeps a stale
-    // unique_ptr, and the next "Edit" click is a no-op because
-    // openVst3Editor thinks the editor is already open.
-    window->onCloseRequested = [this, slotIndex]()
+    // The native X button must clean up the right editor-window map
+    // entry. Without this the window just hides, the map keeps a
+    // stale unique_ptr, and the next "Edit" click is a no-op.
+    window->onCloseRequested = [this, chain, slotIndex]()
     {
-        closeVst3Editor (slotIndex, true);
+        closeVst3Editor (chain, slotIndex, true);
     };
     window->setContentOwned (editor.release(), true);
     window->centreWithSize (window->getContentComponent()->getWidth(),
                             window->getContentComponent()->getHeight());
     window->setVisible (true);
 
-    vst3EditorWindows[slotIndex] = std::move (window);
+    windowMap[slotIndex] = std::move (window);
     emitVst3ChainSnapshot();
 }
 
-void BluePrinterWebViewEditor::closeVst3Editor (int slotIndex, bool deleteAfterClose)
+void BluePrinterWebViewEditor::closeVst3Editor (const juce::String& chain, int slotIndex, bool deleteAfterClose)
 {
     juce::ignoreUnused (deleteAfterClose);
-    const auto it = vst3EditorWindows.find (slotIndex);
-    if (it == vst3EditorWindows.end())
+    auto& windowMap = (chain == "midiChain") ? midiEditorWindows : audioEditorWindows;
+    const auto it = windowMap.find (slotIndex);
+    if (it == windowMap.end())
         return;
     // Clear the close callback before destroying the window so a
     // re-entrant closeButtonPressed() (e.g. from the native X being
@@ -833,87 +884,112 @@ void BluePrinterWebViewEditor::closeVst3Editor (int slotIndex, bool deleteAfterC
         w->onCloseRequested = nullptr;
     // Dropping the unique_ptr deletes the DialogWindow, which deletes the
     // AudioProcessorEditor (set via setContentOwned).
-    vst3EditorWindows.erase (it);
+    windowMap.erase (it);
     emitVst3ChainSnapshot();
 }
 
 void BluePrinterWebViewEditor::closeAllVst3Editors()
 {
-    vst3EditorWindows.clear();
+    midiEditorWindows.clear();
+    audioEditorWindows.clear();
 }
 
 void BluePrinterWebViewEditor::rekeyVst3EditorWindows()
 {
-    if (vst3EditorWindows.empty())
-        return;
-
-    // For each open window, find the slot index whose path matches
-    // the slot the window was opened for. The plugin instance
-    // survives the move (the move just shifts the slot index), so the
-    // AudioProcessorEditor the window owns is still valid — we just
-    // need to update the map key so emitVst3ChainSnapshot reports the
-    // right openEditors list and the "Close" button stays on the same
-    // row the user dragged.
-    auto& chain = audioProcessor.getPluginChain();
-    std::map<int, std::unique_ptr<juce::DialogWindow>> rebuilt;
-    for (auto& entry : vst3EditorWindows)
+    // Re-key both editor maps so a slot that was moved stays attached
+    // to its window. The plugin instance survives the move (the move
+    // just shifts the slot index), so the AudioProcessorEditor the
+    // window owns is still valid — we just need to update the map key
+    // so emitVst3ChainSnapshot reports the right openEditors list and
+    // the "Close" button stays on the same row the user dragged.
+    auto rekey = [this](PluginChain& chain,
+                        std::map<int, std::unique_ptr<juce::DialogWindow>>& windowMap)
     {
-        const juce::String oldPath = chain.getSlotPath (entry.first);
-        int newIndex = -1;
-        if (oldPath.isNotEmpty())
+        if (windowMap.empty())
+            return;
+        std::map<int, std::unique_ptr<juce::DialogWindow>> rebuilt;
+        for (auto& entry : windowMap)
         {
-            for (int i = 0; i < chain.getNumPlugins(); ++i)
+            const juce::String oldPath = chain.getSlotPath (entry.first);
+            int newIndex = -1;
+            if (oldPath.isNotEmpty())
             {
-                if (chain.getSlotPath (i) == oldPath)
+                for (int i = 0; i < chain.getNumPlugins(); ++i)
                 {
-                    newIndex = i;
-                    break;
+                    if (chain.getSlotPath (i) == oldPath)
+                    {
+                        newIndex = i;
+                        break;
+                    }
                 }
             }
+            if (newIndex >= 0)
+                rebuilt[newIndex] = std::move (entry.second);
+            // If the path is gone (e.g. the slot was removed) the
+            // unique_ptr drops here, closing the window.
         }
-        if (newIndex >= 0)
-            rebuilt[newIndex] = std::move (entry.second);
-        // If the path is gone (e.g. the slot was removed) the unique_ptr
-        // drops here, closing the window.
-    }
-    vst3EditorWindows = std::move (rebuilt);
+        windowMap = std::move (rebuilt);
+    };
+
+    rekey (audioProcessor.getMidiPluginChain(),  midiEditorWindows);
+    rekey (audioProcessor.getAudioPluginChain(), audioEditorWindows);
 }
 
 void BluePrinterWebViewEditor::emitVst3ChainSnapshot()
 {
     auto* obj = new juce::DynamicObject();
-    obj->setProperty ("folder",     PluginChain::getDefaultVst3Folder().getFullPathName());
-    obj->setProperty ("chain",      audioProcessor.getPluginChain().getChainState());
+    obj->setProperty ("folder", Vst3Library::getDefaultVst3Folder().getFullPathName());
 
-    // The cached scan result is owned by PluginChain so it survives
-    // host save/load — see PluginChain::setAvailablePlugins /
-    // getAvailablePlugins. Reading it here means the "Available
+    // Both chains. The UI uses the per-chain "chain" property to
+    // decide which panel (MIDI vs audio) the data belongs in. The
+    // shape of each chain's state is what PluginChain::getChainState
+    // emits — { slots: [{ path, bypassed, name }], ... } — so the
+    // frontend can re-use the same slot-row component for both.
+    obj->setProperty ("midiChain",  audioProcessor.getMidiPluginChain().getChainState());
+    obj->setProperty ("audioChain", audioProcessor.getAudioPluginChain().getChainState());
+
+    // The cached scan result is owned by the shared Vst3Library so it
+    // survives host save/load. Reading it here means the "Available
     // plugins" list is restored on launch without re-walking the
     // VST3 folder.
     {
-        const auto available = audioProcessor.getPluginChain().getAvailablePlugins();
+        const auto available = audioProcessor.getVst3Library().getAvailablePlugins();
         if (auto* arr = available.getArray())
             obj->setProperty ("plugins", juce::var (*arr));
         else
             obj->setProperty ("plugins", juce::var (juce::Array<juce::var>()));
     }
 
-    // Hand the blocklist to the UI so it can show the user which plugins
-    // are being skipped and let them unblock entries.
+    // Hand the blocklist to the UI so it can show the user which
+    // plugins are being skipped and let them unblock entries. The
+    // blocklist is folder-wide (shared between both chains).
     {
         juce::Array<juce::var> blocklist;
-        for (const auto& path : audioProcessor.getPluginChain().getBlocklist())
+        for (const auto& path : audioProcessor.getVst3Library().getBlocklist())
             blocklist.add (path);
         obj->setProperty ("blocklist", blocklist);
     }
 
-    // Tell the UI which FX slots currently have an open native editor
-    // window, so it can show "Close" instead of "Edit" for those rows
-    // and let the user close the window from the FX chain panel.
+    // Tell the UI which FX slots currently have an open native
+    // editor window, so it can show "Close" instead of "Edit" for
+    // those rows and let the user close the window from the chain
+    // panel. Each entry includes the chain id so the UI knows which
+    // panel's "Close" button to wire up.
     {
         juce::Array<juce::var> openEditors;
-        for (const auto& entry : vst3EditorWindows)
-            openEditors.add (entry.first);
+        auto pushOpen = [&openEditors](const juce::String& chain,
+                                       const std::map<int, std::unique_ptr<juce::DialogWindow>>& windowMap)
+        {
+            for (const auto& entry : windowMap)
+            {
+                auto* o = new juce::DynamicObject();
+                o->setProperty ("chain", chain);
+                o->setProperty ("index", entry.first);
+                openEditors.add (juce::var (o));
+            }
+        };
+        pushOpen ("midiChain",  midiEditorWindows);
+        pushOpen ("audioChain", audioEditorWindows);
         obj->setProperty ("openEditors", openEditors);
     }
 
@@ -955,7 +1031,7 @@ void BluePrinterWebViewEditor::scanVst3Folder (const juce::File& folder)
 
 void BluePrinterWebViewEditor::scanDefaultVst3Folder()
 {
-    scanVst3Folder (PluginChain::getDefaultVst3Folder());
+    scanVst3Folder (Vst3Library::getDefaultVst3Folder());
 }
 
 void BluePrinterWebViewEditor::runScanStep()
@@ -964,7 +1040,7 @@ void BluePrinterWebViewEditor::runScanStep()
         return;
 
     // The per-file describe runs on a worker thread (see
-    // PluginChain::describeVst3FileAsync) so a misbehaving .vst3 —
+    // Vst3Library::describeVst3FileAsync) so a misbehaving .vst3 —
     // modal license dialog, hung initialize(), throwing factory call —
     // can be timed out and skipped without ever blocking the message
     // thread. While a describe is in flight we just wait for its
@@ -977,9 +1053,9 @@ void BluePrinterWebViewEditor::runScanStep()
 
     if (idx >= total)
     {
-        // Commit the accumulated plugin list to the PluginChain (which
+        // Commit the accumulated plugin list to the Vst3Library (which
         // persists it in the host state) and push the final snapshot.
-        audioProcessor.getPluginChain().setAvailablePlugins (juce::var (activeScan->pluginArray));
+        audioProcessor.getVst3Library().setAvailablePlugins (juce::var (activeScan->pluginArray));
         {
             auto* result = new juce::DynamicObject();
             result->setProperty ("folder", activeScan->folder.getFullPathName());
@@ -1000,10 +1076,10 @@ void BluePrinterWebViewEditor::runScanStep()
     // stall the whole folder scan.
     constexpr int kDescribeTimeoutMs = 10000;
 
-    audioProcessor.getPluginChain().describeVst3FileAsync (
+    audioProcessor.getVst3Library().describeVst3FileAsync (
         file, kDescribeTimeoutMs,
         [this, file, weakToken = std::weak_ptr<int> (aliveToken)]
-        (const PluginChain::DescribeResult& result)
+        (const Vst3Library::DescribeResult& result)
         {
             // The editor may have been destroyed (or the scan reset)
             // while the worker was running. Bail out without touching
@@ -1049,7 +1125,7 @@ void BluePrinterWebViewEditor::emitScanProgress (bool active, int current, int t
     webView.emitEventIfBrowserIsVisible (juce::Identifier (backendVst3ScanProgressEvent), juce::var (p));
 }
 
-void BluePrinterWebViewEditor::addVst3FromPath (const juce::File& vst3File)
+void BluePrinterWebViewEditor::addVst3FromPath (const juce::String& chain, const juce::File& vst3File)
 {
     if (! vst3File.existsAsFile())
     {
@@ -1057,12 +1133,16 @@ void BluePrinterWebViewEditor::addVst3FromPath (const juce::File& vst3File)
         return;
     }
 
+    auto& target = (chain == "midiChain")
+        ? audioProcessor.getMidiPluginChain()
+        : audioProcessor.getAudioPluginChain();
+
     // Async load with a 10s timeout. The worker thread runs the
     // VST3 factory call (which can pop up a modal license dialog
     // for expired-license plugins), so the message thread stays
     // responsive and we can bail out if the plugin hangs.
     constexpr int kLoadTimeoutMs = 10000;
-    audioProcessor.getPluginChain().addPluginAsync (
+    target.addPluginAsync (
         vst3File, kLoadTimeoutMs,
         [this, vst3File](int slotIndex,
                          const juce::String& name,
@@ -1101,9 +1181,9 @@ void BluePrinterWebViewEditor::addVst3FromPath (const juce::File& vst3File)
         });
 }
 
-void BluePrinterWebViewEditor::pickVst3FileAndAdd()
+void BluePrinterWebViewEditor::pickVst3FileAndAdd (const juce::String& chain)
 {
-    auto start = PluginChain::getDefaultVst3Folder();
+    auto start = Vst3Library::getDefaultVst3Folder();
     if (! start.isDirectory())
         start = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory);
 
@@ -1116,7 +1196,7 @@ void BluePrinterWebViewEditor::pickVst3FileAndAdd()
     auto flags = juce::FileBrowserComponent::openMode
                | juce::FileBrowserComponent::canSelectFiles;
 
-    activeFileChooser->launchAsync (flags, [this](const juce::FileChooser& chooser)
+    activeFileChooser->launchAsync (flags, [this, chain](const juce::FileChooser& chooser)
     {
         auto result = chooser.getResult();
         activeFileChooser.reset();
@@ -1126,6 +1206,6 @@ void BluePrinterWebViewEditor::pickVst3FileAndAdd()
             return;
         }
 
-        addVst3FromPath (result);
+        addVst3FromPath (chain, result);
     });
 }
