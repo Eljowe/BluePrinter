@@ -1,7 +1,50 @@
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Knob } from "./controls";
 import { LevelMeter } from "./LevelMeter";
+import { IconMetronome, IconStop } from "./icons";
 import { formatTime } from "../utils";
 import { FRONTEND_EVENTS, emit } from "../bridge";
+
+function NumberInput({ value, min, max, step, className, onChange, suffix, title }) {
+  const [text, setText] = useState(String(value));
+  const committedRef = useRef(value);
+
+  useEffect(() => {
+    if (value !== committedRef.current) {
+      setText(String(value));
+      committedRef.current = value;
+    }
+  }, [value]);
+
+  const flush = useCallback((raw) => {
+    const parsed = parseInt(raw, 10);
+    if (!Number.isNaN(parsed)) {
+      const clamped = Math.max(min, Math.min(max, parsed));
+      committedRef.current = clamped;
+      onChange(clamped);
+      setText(String(clamped));
+    } else {
+      setText(String(committedRef.current));
+    }
+  }, [min, max, onChange]);
+
+  return (
+    <div className={className}>
+      <input
+        type="number"
+        min={min}
+        max={max}
+        step={step}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={(e) => flush(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+        title={title}
+      />
+      {suffix ? <span className="count-in-suffix">{suffix}</span> : null}
+    </div>
+  );
+}
 
 export function Transport({
   transport,
@@ -32,9 +75,10 @@ export function Transport({
   }
 
   const displayTime = countdown !== null ? String(countdown) : formatTime(recordingSeconds);
-  const displayLabel = countdown !== null
-    ? "Count-in"
-    : (isRecording ? "Recording" : (isPlaying ? "Playing" : "Ready"));
+
+  const status = countdown !== null
+    ? "count-in"
+    : (isRecording ? "recording" : (isPlaying ? "playing" : "ready"));
 
   const toggleRecording = () => {
     if (isRecording) emit(FRONTEND_EVENTS.stopRecording);
@@ -46,32 +90,39 @@ export function Transport({
   };
 
   return (
-    <section className="transport">
-      <button
-        type="button"
-        className={`record-button ${isRecording ? "is-recording" : ""}`}
-        onClick={toggleRecording}
-        title={isRecording ? "Stop recording" : "Start recording"}
-      >
-        <span className="record-dot" />
-        {isRecording ? "STOP" : "RECORD"}
-      </button>
+    <section className={`transport is-${status}`}>
+      <div className="transport-rec">
+        <button
+          type="button"
+          className={`rec-button ${isRecording ? "is-recording" : ""}`}
+          onClick={toggleRecording}
+          title={isRecording ? "Stop recording" : "Start recording"}
+          aria-pressed={isRecording}
+          aria-label={isRecording ? "Stop recording" : "Start recording"}
+        >
+          <span className="rec-glyph" aria-hidden="true" />
+        </button>
 
-      <div className={`transport-time ${countdown !== null ? "is-counting-in" : ""}`}>
-        <div className="transport-time-value">{displayTime}</div>
-        <div className="transport-time-label">{displayLabel}</div>
+        <div className={`transport-readout ${countdown !== null ? "is-counting-in" : ""}`}>
+          <div className="transport-time-value">{displayTime}</div>
+          <div className="transport-status">
+            <span className="transport-status-dot" aria-hidden="true" />
+            {status}
+          </div>
+        </div>
       </div>
 
       <div className="transport-meter">
         <LevelMeter level={transport?.inputLevel ?? 0} peak={transport?.inputPeak ?? 0} />
         {isPlaying ? (
-          <button type="button" className="stop-playback" onClick={stopPlayback}>
-            ■ Stop playback
+          <button type="button" className="btn btn-ghost btn-sm stop-playback" onClick={stopPlayback}>
+            <IconStop size={12} />
+            Stop playback
           </button>
         ) : null}
       </div>
 
-      <div className="transport-metronome">
+      <div className="transport-group">
         <button
           type="button"
           className={`metronome-toggle ${metronomeEnabled ? "is-on" : ""}`}
@@ -79,42 +130,36 @@ export function Transport({
           title={metronomeEnabled ? "Click is on during recording and count-in" : "Click is off"}
           aria-pressed={metronomeEnabled}
         >
-          <span className="metronome-icon" aria-hidden="true">◆</span>
-          Metronome
-          <span className="metronome-state">{metronomeEnabled ? "On" : "Off"}</span>
+          <IconMetronome size={15} />
+          <span className="metronome-state">{metronomeEnabled ? "Click on" : "Click off"}</span>
         </button>
 
-        <div className="metronome-knob">
-          <Knob
-            label="BPM"
-            min={40}
-            max={240}
-            value={bpm}
-            onChange={onBpmChange}
-            step="1"
-            decimals={0}
-          />
-        </div>
+        <Knob
+          label="BPM"
+          min={40}
+          max={240}
+          value={bpm}
+          onChange={onBpmChange}
+          step="1"
+          decimals={0}
+        />
 
         <label className="count-in-control">
           <span className="count-in-label">Count-in</span>
-          <input
-            type="number"
+          <NumberInput
+            className="count-in-field"
             min={0}
             max={8}
             step={1}
             value={countInBeats}
-            onChange={(e) => {
-              const next = parseInt(e.target.value, 10);
-              if (!Number.isNaN(next)) onCountInBeatsChange(Math.max(0, Math.min(8, next)));
-            }}
+            onChange={onCountInBeatsChange}
+            suffix="beats"
             title="Beats of click before recording starts (0 = off)"
           />
-          <span className="count-in-suffix">beats</span>
         </label>
       </div>
 
-      <div className="transport-knob">
+      <div className="transport-group transport-gain">
         <Knob
           label="Gain"
           min={0}

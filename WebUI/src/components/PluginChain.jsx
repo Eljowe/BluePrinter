@@ -1,5 +1,16 @@
 import { useEffect, useState } from "react";
 import { CHAIN_IDS, FRONTEND_EVENTS, emit } from "../bridge";
+import {
+  IconArrowDown,
+  IconArrowUp,
+  IconChevronDown,
+  IconChevronRight,
+  IconEdit,
+  IconGrip,
+  IconPlus,
+  IconScan,
+  IconX,
+} from "./icons";
 
 function basename(path) {
   if (!path) return "";
@@ -43,7 +54,9 @@ function ChainSlotRow({ chain, slot, index, openEditors, onBypassToggle, onRemov
         event.currentTarget.classList.remove("is-drop-target");
       }}
     >
-      <span className="fx-slot-handle" title="Drag to reorder" aria-hidden="true">⋮⋮</span>
+      <span className="fx-slot-handle" title="Drag to reorder" aria-hidden="true">
+        <IconGrip size={14} />
+      </span>
       <span className="fx-slot-index">{index + 1}</span>
       <div className="fx-slot-info">
         <span className="fx-slot-name" title={slot.path || ""}>
@@ -51,62 +64,58 @@ function ChainSlotRow({ chain, slot, index, openEditors, onBypassToggle, onRemov
         </span>
         <span className="fx-slot-path">{basename(slot.path)}</span>
       </div>
-      <button
-        type="button"
-        className="fx-button fx-button-small fx-button-icon"
-        onClick={() => onMove(index, index - 1)}
-        disabled={index === 0}
-        title="Move this plugin earlier in the chain"
-        aria-label="Move up"
-      >
-        ↑
-      </button>
-      <button
-        type="button"
-        className="fx-button fx-button-small fx-button-icon"
-        onClick={() => onMove(index, index + 1)}
-        disabled={false /* bounds are checked inside onMove with the real slot length */}
-        title="Move this plugin later in the chain"
-        aria-label="Move down"
-      >
-        ↓
-      </button>
-      <button
-        type="button"
-        className={`fx-toggle ${slot.bypassed ? "is-off" : "is-on"}`}
-        onClick={() => onBypassToggle(index, slot.bypassed)}
-        title={slot.bypassed ? "Bypassed — click to enable" : "Enabled — click to bypass"}
-        aria-pressed={!slot.bypassed}
-      >
-        {slot.bypassed ? "Bypassed" : "On"}
-      </button>
-      {editorOpen ? (
+      <div className="fx-slot-controls">
         <button
           type="button"
-          className="fx-button fx-button-small"
-          onClick={() => onCloseEditor(index)}
-          title="Close the plugin's native editor window"
+          className="icon-btn"
+          onClick={() => onMove(index, index - 1)}
+          disabled={index === 0}
+          title="Move this plugin earlier in the chain"
+          aria-label="Move up"
         >
-          Close
+          <IconArrowUp size={13} />
         </button>
-      ) : (
         <button
           type="button"
-          className="fx-button fx-button-small"
-          onClick={() => onOpenEditor(index)}
-          title="Open the plugin's native editor in a separate window"
+          className="icon-btn"
+          onClick={() => onMove(index, index + 1)}
+          disabled={false /* bounds are checked inside onMove with the real slot length */}
+          title="Move this plugin later in the chain"
+          aria-label="Move down"
         >
-          Edit
+          <IconArrowDown size={13} />
         </button>
-      )}
-      <button
-        type="button"
-        className="fx-button fx-button-small fx-button-danger"
-        onClick={() => onRemove(index)}
-        title="Remove this plugin from the chain"
-      >
-        Remove
-      </button>
+        <button
+          type="button"
+          className={`fx-power ${slot.bypassed ? "is-off" : "is-on"}`}
+          onClick={() => onBypassToggle(index, slot.bypassed)}
+          title={slot.bypassed ? "Bypassed — click to enable" : "Enabled — click to bypass"}
+          aria-pressed={!slot.bypassed}
+        >
+          {slot.bypassed ? "Off" : "On"}
+        </button>
+        <button
+          type="button"
+          className={`icon-btn ${editorOpen ? "is-active" : ""}`}
+          onClick={() => (editorOpen ? onCloseEditor(index) : onOpenEditor(index))}
+          title={editorOpen
+            ? "Close the plugin's native editor window"
+            : "Open the plugin's native editor in a separate window"}
+          aria-label={editorOpen ? "Close editor" : "Open editor"}
+          aria-pressed={editorOpen}
+        >
+          <IconEdit size={13} />
+        </button>
+        <button
+          type="button"
+          className="icon-btn icon-btn-danger"
+          onClick={() => onRemove(index)}
+          title="Remove this plugin from the chain"
+          aria-label="Remove plugin"
+        >
+          <IconX size={13} />
+        </button>
+      </div>
     </li>
   );
 }
@@ -140,17 +149,16 @@ function ChainPanel({
           <h3>{title}</h3>
           <p className="fx-chain-subtitle">{subtitle}</p>
         </div>
-        <div className="fx-chain-actions">
-          <button
-            type="button"
-            className="fx-button"
-            onClick={onPickFile}
-            title="Pick a .vst3 file to add"
-            disabled={scanning}
-          >
-            + Add plugin…
-          </button>
-        </div>
+        <button
+          type="button"
+          className="btn btn-sm"
+          onClick={onPickFile}
+          title="Pick a .vst3 file to add"
+          disabled={scanning}
+        >
+          <IconPlus size={13} />
+          Add
+        </button>
       </header>
 
       {slots.length === 0 ? (
@@ -180,8 +188,11 @@ function ChainPanel({
             type="button"
             className="fx-available-toggle"
             onClick={() => setShowAvailable((v) => !v)}
+            aria-expanded={showAvailable}
           >
-            {showAvailable ? "▾" : "▸"} Available plugins ({available.length})
+            {showAvailable ? <IconChevronDown size={13} /> : <IconChevronRight size={13} />}
+            Available plugins
+            <span className="fx-available-count">{available.length}</span>
           </button>
           {showAvailable ? (
             <ul className="fx-available-list">
@@ -285,8 +296,8 @@ export function PluginChain({ chainState, availablePlugins, defaultFolder, scanS
 
   return (
     <section className="fx-chain">
-      <header className="fx-chain-section-header">
-        <div className="fx-chain-title">
+      <header className="section-header">
+        <div className="section-title">
           <h2>Plugin chains</h2>
           <p
             className={`fx-chain-folder ${scanning ? "is-scanning" : ""}`}
@@ -295,14 +306,15 @@ export function PluginChain({ chainState, availablePlugins, defaultFolder, scanS
             {folderLabel}
           </p>
         </div>
-        <div className="fx-chain-actions">
+        <div className="section-actions">
           <button
             type="button"
-            className="fx-button"
+            className="btn btn-sm"
             onClick={handleScanFolder}
             title="Scan the default VST3 folder for installed plugins"
             disabled={scanning}
           >
+            <IconScan size={13} />
             {scanning ? "Scanning…" : "Scan VST3 folder"}
           </button>
         </div>
@@ -315,41 +327,43 @@ export function PluginChain({ chainState, availablePlugins, defaultFolder, scanS
         plugins still see what you're playing.
       </p>
 
-      <ChainPanel
-        chain={CHAIN_IDS.midi}
-        title="MIDI chain"
-        subtitle="Runs first — good for arpeggiators, chord tools, and instruments."
-        slots={midiSlots}
-        available={available}
-        openEditors={openEditors}
-        scanning={scanning}
-        onPickFile={midiAdd.onPickFile}
-        onAdd={midiAdd.onAdd}
-        onScanFolder={handleScanFolder}
-        onBypassToggle={makeBypassHandler(CHAIN_IDS.midi)}
-        onRemove={makeRemoveHandler(CHAIN_IDS.midi)}
-        onOpenEditor={makeOpenEditorHandler(CHAIN_IDS.midi)}
-        onCloseEditor={makeCloseEditorHandler(CHAIN_IDS.midi)}
-        onMove={makeMoveHandler(CHAIN_IDS.midi)}
-      />
+      <div className="fx-chain-panels">
+        <ChainPanel
+          chain={CHAIN_IDS.midi}
+          title="MIDI chain"
+          subtitle="Arpeggiators, chord tools, instruments"
+          slots={midiSlots}
+          available={available}
+          openEditors={openEditors}
+          scanning={scanning}
+          onPickFile={midiAdd.onPickFile}
+          onAdd={midiAdd.onAdd}
+          onScanFolder={handleScanFolder}
+          onBypassToggle={makeBypassHandler(CHAIN_IDS.midi)}
+          onRemove={makeRemoveHandler(CHAIN_IDS.midi)}
+          onOpenEditor={makeOpenEditorHandler(CHAIN_IDS.midi)}
+          onCloseEditor={makeCloseEditorHandler(CHAIN_IDS.midi)}
+          onMove={makeMoveHandler(CHAIN_IDS.midi)}
+        />
 
-      <ChainPanel
-        chain={CHAIN_IDS.audio}
-        title="Audio FX chain"
-        subtitle="Runs second on the combined signal — good for amp sims, EQ, and reverb."
-        slots={audioSlots}
-        available={available}
-        openEditors={openEditors}
-        scanning={scanning}
-        onPickFile={audioAdd.onPickFile}
-        onAdd={audioAdd.onAdd}
-        onScanFolder={handleScanFolder}
-        onBypassToggle={makeBypassHandler(CHAIN_IDS.audio)}
-        onRemove={makeRemoveHandler(CHAIN_IDS.audio)}
-        onOpenEditor={makeOpenEditorHandler(CHAIN_IDS.audio)}
-        onCloseEditor={makeCloseEditorHandler(CHAIN_IDS.audio)}
-        onMove={makeMoveHandler(CHAIN_IDS.audio)}
-      />
+        <ChainPanel
+          chain={CHAIN_IDS.audio}
+          title="Audio FX chain"
+          subtitle="Amp sims, EQ, reverb on the combined signal"
+          slots={audioSlots}
+          available={available}
+          openEditors={openEditors}
+          scanning={scanning}
+          onPickFile={audioAdd.onPickFile}
+          onAdd={audioAdd.onAdd}
+          onScanFolder={handleScanFolder}
+          onBypassToggle={makeBypassHandler(CHAIN_IDS.audio)}
+          onRemove={makeRemoveHandler(CHAIN_IDS.audio)}
+          onOpenEditor={makeOpenEditorHandler(CHAIN_IDS.audio)}
+          onCloseEditor={makeCloseEditorHandler(CHAIN_IDS.audio)}
+          onMove={makeMoveHandler(CHAIN_IDS.audio)}
+        />
+      </div>
     </section>
   );
 }

@@ -269,11 +269,12 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 
     // 4. Pre-roll (count-in): add the click to the output, advance the
     //    position, and flip into recording once the configured number of
-    //    beats has elapsed. The transition is deferred to the next block
-    //    so this block's audio is still pure input + click.
+    //    beats has elapsed. Uses metronomePosition as the continuous
+    //    beat clock so counts stay evenly spaced across the transition
+    //    into recording — no double-click mid-block.
     if (preRollActive.load (std::memory_order_acquire))
     {
-        const int64_t startPos = transportPosition.load (std::memory_order_acquire);
+        const int64_t startPos = metronomePosition.load (std::memory_order_acquire);
         renderMetronomeInBlock (buffer, startPos, numSamples);
 
         const int64_t newPos = startPos + numSamples;
@@ -292,22 +293,31 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         {
             preRollActive.store (false, std::memory_order_release);
             transportPosition.store (0, std::memory_order_release);
+            metronomePosition.store (newPos, std::memory_order_release);
             beginActualRecording();
         }
         else
         {
             transportPosition.store (newPos, std::memory_order_release);
+            metronomePosition.store (newPos, std::memory_order_release);
         }
     }
 
-    // 5. Click during recording. Added after the record write so the click
-    //    is in the output but never in the recording.
-    if (recordingRequested.load (std::memory_order_acquire)
-        && metronomeEnabled.load (std::memory_order_acquire))
+    // 5. Click during recording. The metronome beat clock runs
+    //    continuously from the recording start (or count-in end) so
+    //    beats land at evenly-spaced positions regardless of when the
+    //    recording was started. The clock keeps advancing even when
+    //    the metronome is muted, so toggling the metronome back on
+    //    doesn't shift the beat grid.
+    if (recordingRequested.load (std::memory_order_acquire))
     {
-        const int64_t startPos = transportPosition.load (std::memory_order_acquire);
-        renderMetronomeInBlock (buffer, startPos, numSamples);
-        transportPosition.store (startPos + numSamples, std::memory_order_release);
+        const int64_t startPos = metronomePosition.load (std::memory_order_acquire);
+        if (metronomeEnabled.load (std::memory_order_acquire))
+            renderMetronomeInBlock (buffer, startPos, numSamples);
+
+        const int64_t newPos = startPos + numSamples;
+        metronomePosition.store (newPos, std::memory_order_release);
+        transportPosition.store (newPos, std::memory_order_release);
     }
 }
 
@@ -355,6 +365,13 @@ void BluePrinterAudioProcessor::renderMetronomeInBlock (juce::AudioBuffer<float>
     const int numChannels = buffer.getNumChannels();
     const int clickLen    = static_cast<int> (clickBuffer.size());
 
+    // Accent the first beat of every bar — beats whose index is a
+    // multiple of countInBeats (default 4). Falls back to 4-beat bars
+    // when count-in is disabled so the accent still works during plain
+    // recording.
+    const int beatsPerBar = juce::jmax (1, countInBeats.load (std::memory_order_acquire));
+    const float accentGain = 1.8f;
+
     // Beat boundaries that fall inside [startPos, startPos + numSamples).
     const int64_t endPos = startPos + numSamples;
     const int firstBeat  = static_cast<int> (std::ceil (static_cast<double> (startPos) / samplesPerBeat));
@@ -367,10 +384,11 @@ void BluePrinterAudioProcessor::renderMetronomeInBlock (juce::AudioBuffer<float>
         if (blockOffset < 0 || blockOffset >= numSamples)
             continue;
 
+        const float gain = (beat % beatsPerBar == 0) ? accentGain : 1.0f;
         const int remaining = juce::jmin (clickLen, numSamples - blockOffset);
         for (int j = 0; j < remaining; ++j)
         {
-            const float sample = clickBuffer[static_cast<size_t> (j)];
+            const float sample = clickBuffer[static_cast<size_t> (j)] * gain;
             for (int ch = 0; ch < numChannels; ++ch)
                 buffer.addSample (ch, blockOffset + j, sample);
         }
@@ -488,6 +506,7 @@ void BluePrinterAudioProcessor::startRecording()
         return;
 
     const int beats = countInBeats.load (std::memory_order_acquire);
+    metronomePosition.store (0, std::memory_order_release);
     if (metronomeEnabled.load (std::memory_order_acquire) && beats > 0)
     {
         // Count-in: play N beats of click, then start recording. The

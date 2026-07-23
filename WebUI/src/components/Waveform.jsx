@@ -4,7 +4,7 @@ export function Waveform({ peaks = [], width = 360, height = 56 }) {
   if (!peaks || peaks.length === 0) {
     return (
       <svg viewBox={viewBox} preserveAspectRatio="none" className="waveform waveform-empty" aria-label="Waveform">
-        <line x1={0} y1={height / 2} x2={width} y2={height / 2} stroke="#333" strokeWidth={1} vectorEffect="non-scaling-stroke" />
+        <line className="waveform-baseline" x1={0} y1={height / 2} x2={width} y2={height / 2} strokeWidth={1} vectorEffect="non-scaling-stroke" />
       </svg>
     );
   }
@@ -22,8 +22,8 @@ export function Waveform({ peaks = [], width = 360, height = 56 }) {
 
   return (
     <svg viewBox={viewBox} preserveAspectRatio="none" className="waveform" aria-label="Waveform">
-      <polyline points={points} stroke="#4a9eff" strokeWidth={1} fill="none" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
-      <line x1={0} y1={middle} x2={width} y2={middle} stroke="#222" strokeWidth={0.5} vectorEffect="non-scaling-stroke" />
+      <line className="waveform-baseline" x1={0} y1={middle} x2={width} y2={middle} strokeWidth={0.5} vectorEffect="non-scaling-stroke" />
+      <polyline className="waveform-trace" points={points} strokeWidth={1} fill="none" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
     </svg>
   );
 }

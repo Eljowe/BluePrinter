@@ -13,9 +13,26 @@ function snapToStep(value, min, step) {
   return Number(snapped.toFixed(precision));
 }
 
+// Angle geometry for the value arc: the sweep runs from -140° to +140°
+// (0° = straight up), leaving a gap at the bottom of the dial.
+const ARC_START = -140;
+const ARC_SWEEP = 280;
+
+function polar(cx, cy, r, angleDeg) {
+  const a = ((angleDeg - 90) * Math.PI) / 180;
+  return [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+}
+
+function arcPath(cx, cy, r, startAngle, endAngle) {
+  const [sx, sy] = polar(cx, cy, r, startAngle);
+  const [ex, ey] = polar(cx, cy, r, endAngle);
+  const largeArc = Math.abs(endAngle - startAngle) > 180 ? 1 : 0;
+  return `M ${sx} ${sy} A ${r} ${r} 0 ${largeArc} 1 ${ex} ${ey}`;
+}
+
 export function Knob({ label, min, max, value, onChange, unit = "", step = "0.01", className = "", decimals = 1, disabled = false }) {
-  const normalized = (value - min) / (max - min);
-  const rotation = -140 + normalized * 280;
+  const normalized = clamp((value - min) / (max - min), 0, 1);
+  const angle = ARC_START + normalized * ARC_SWEEP;
   const dragState = useRef(null);
   const range = max - min;
 
@@ -93,6 +110,9 @@ export function Knob({ label, min, max, value, onChange, unit = "", step = "0.01
     }
   };
 
+  const [tipX, tipY] = polar(24, 24, 12.5, angle);
+  const [baseX, baseY] = polar(24, 24, 5.5, angle);
+
   return (
     <div className={`knob-wrap ${className} ${disabled ? "is-disabled" : ""}`.trim()}>
       <div
@@ -110,15 +130,27 @@ export function Knob({ label, min, max, value, onChange, unit = "", step = "0.01
         onWheel={handleWheel}
         onKeyDown={handleKeyDown}
       >
-        <div className="knob-face" style={{ transform: `rotate(${rotation}deg)` }}>
-          <div className="knob-pointer" />
-        </div>
+        <svg viewBox="0 0 48 48" className="knob-dial">
+          <path
+            className="knob-track"
+            d={arcPath(24, 24, 19, ARC_START, ARC_START + ARC_SWEEP)}
+          />
+          {normalized > 0.001 ? (
+            <path
+              className="knob-arc"
+              d={arcPath(24, 24, 19, ARC_START, angle)}
+            />
+          ) : null}
+          <circle className="knob-face" cx="24" cy="24" r="13.5" />
+          <line className="knob-pointer" x1={baseX} y1={baseY} x2={tipX} y2={tipY} />
+          <circle className="knob-tip" cx={tipX} cy={tipY} r="1.6" />
+        </svg>
       </div>
-      <div className="knob-label">{label}</div>
       <div className="knob-value">
         {value.toFixed(decimals)}
-        {unit ? ` ${unit}` : ""}
+        {unit ? <span className="knob-unit">{` ${unit}`}</span> : null}
       </div>
+      <div className="knob-label">{label}</div>
     </div>
   );
 }
