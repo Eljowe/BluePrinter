@@ -5,13 +5,16 @@ export function SnippetList({ snippets, playingSnippetId, playPositionSeconds })
 
   return (
     <section className="snippet-list">
-      <div className="snippet-list-header">
-        <h2>Snippets <span className="count">({snippets.length})</span></h2>
-      </div>
+      <header className="section-header">
+        <div className="section-title">
+          <h2>Takes</h2>
+          <span className="section-count">{snippets.length}</span>
+        </div>
+      </header>
 
       {snippets.length === 0 ? (
         <div className="snippet-empty">
-          No snippets yet. Hit <strong>RECORD</strong>, play something, then <strong>STOP</strong>.
+          No takes yet. Hit the record button, play something, then stop.
         </div>
       ) : (
         <div className="snippet-grid">

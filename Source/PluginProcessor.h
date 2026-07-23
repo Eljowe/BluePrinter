@@ -219,6 +219,7 @@ private:
     std::atomic<int>     countInBeats     { 4 };
     std::atomic<bool>    preRollActive    { false };
     std::atomic<int64_t> transportPosition { 0 };
+    std::atomic<int64_t> metronomePosition { 0 };
 
     // Pre-rendered click sample (50 ms of decaying harmonics). Filled in
     // prepareToPlay, read-only on the audio thread.

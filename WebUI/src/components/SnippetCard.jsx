@@ -2,6 +2,16 @@ import { useEffect, useRef, useState } from "react";
 import { Waveform } from "./Waveform";
 import { formatDate, formatTime } from "../utils";
 import { FRONTEND_EVENTS, emit } from "../bridge";
+import {
+  IconAnalyze,
+  IconChevronDown,
+  IconChevronUp,
+  IconExternal,
+  IconPlay,
+  IconSave,
+  IconStop,
+  IconTrash,
+} from "./icons";
 
 export function SnippetCard({ snippet, isPlaying, playPositionSeconds }) {
   const [name, setName] = useState(snippet.name ?? "");
@@ -104,8 +114,9 @@ export function SnippetCard({ snippet, isPlaying, playPositionSeconds }) {
           className={`play-button ${isPlaying ? "is-playing" : ""}`}
           onClick={handlePlay}
           title={isPlaying ? "Stop playback" : "Play snippet"}
+          aria-label={isPlaying ? "Stop playback" : "Play snippet"}
         >
-          {isPlaying ? "■" : "▶"}
+          {isPlaying ? <IconStop size={13} /> : <IconPlay size={14} />}
         </button>
         <div
           className="snippet-summary"
@@ -123,7 +134,7 @@ export function SnippetCard({ snippet, isPlaying, playPositionSeconds }) {
           <span className="snippet-name" title={displayName}>{displayName}</span>
           {hasKey ? (
             <span
-              className="snippet-key-badge"
+              className="chip chip-key"
               title={keyTitle}
               aria-label={keyTitle}
             >
@@ -132,27 +143,25 @@ export function SnippetCard({ snippet, isPlaying, playPositionSeconds }) {
           ) : null}
           {hasNotes ? (
             <span
-              className="snippet-notes-badge"
+              className="chip chip-notes"
               title={`Detected pitch classes: ${snippet.notes.join(", ")}`}
               aria-label={`Detected notes: ${snippet.notes.join(", ")}`}
             >
               {snippet.notes.join(" ")}
             </span>
           ) : null}
-          <span className="snippet-sep" aria-hidden="true">·</span>
           <span className="snippet-duration">{positionLabel}</span>
-          <span className="snippet-sep" aria-hidden="true">·</span>
           <span className="snippet-date">{formatDate(snippet.createdAt)}</span>
         </div>
         <button
           type="button"
-          className="snippet-expand-button"
+          className="icon-btn snippet-expand-button"
           onClick={toggleExpanded}
           aria-expanded={expanded}
           aria-label={expanded ? "Collapse snippet" : "Expand snippet"}
           title={expanded ? "Collapse" : "Expand"}
         >
-          {expanded ? "▲" : "▼"}
+          {expanded ? <IconChevronUp size={14} /> : <IconChevronDown size={14} />}
         </button>
       </header>
 
@@ -202,20 +211,21 @@ export function SnippetCard({ snippet, isPlaying, playPositionSeconds }) {
               #{snippet.id} · {Number(snippet.numChannels) || 0}ch · {Math.round(Number(snippet.sampleRate) || 0)} Hz
               {hasKey
                 ? <span className="snippet-key-inline" title={keyTitle}>
-                    · key: <strong>{snippet.key}</strong> ({Math.round(keyConfidence * 100)}%)
+                    {" "}· key <strong>{snippet.key}</strong> ({Math.round(keyConfidence * 100)}%)
                   </span>
-                : <span className="snippet-key-inline snippet-key-empty">· no key detected</span>}
+                : <span className="snippet-key-inline snippet-key-empty"> · no key detected</span>}
               {hasNotes
                 ? <span
                     className="snippet-notes-inline"
                     title={`Detected pitch classes: ${snippet.notes.join(", ")}`}
-                  >· notes: <strong>{snippet.notes.join(" ")}</strong></span>
+                  > · notes <strong>{snippet.notes.join(" ")}</strong></span>
                 : null}
               {snippet.savedPath ? <span className="snippet-saved"> · saved</span> : null}
             </div>
             <div className="snippet-actions">
               <button
                 type="button"
+                className="btn btn-sm"
                 onClick={handleDetectKey}
                 disabled={detecting}
                 title={
@@ -224,11 +234,37 @@ export function SnippetCard({ snippet, isPlaying, playPositionSeconds }) {
                     : "Analyse the snippet to detect the key and notes"
                 }
               >
-                {detecting ? "Analysing…" : hasAnalysis ? "↻ Re-analyse" : "Analyse"}
+                <IconAnalyze size={13} />
+                {detecting ? "Analysing…" : hasAnalysis ? "Re-analyse" : "Analyse"}
               </button>
-              <button type="button" onClick={handleSave} title="Save snippet to a WAV file">Save</button>
-              <button type="button" onClick={handleReveal} disabled={!snippet.savedPath} title="Reveal saved file in Explorer">Reveal</button>
-              <button type="button" className="danger" onClick={handleDelete} title="Delete snippet">Delete</button>
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={handleSave}
+                title="Save snippet to a WAV file"
+              >
+                <IconSave size={13} />
+                Save
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={handleReveal}
+                disabled={!snippet.savedPath}
+                title="Reveal saved file in Explorer"
+              >
+                <IconExternal size={13} />
+                Reveal
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm btn-danger"
+                onClick={handleDelete}
+                title="Delete snippet"
+              >
+                <IconTrash size={13} />
+                Delete
+              </button>
             </div>
           </footer>
         </div>

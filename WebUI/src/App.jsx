@@ -194,9 +194,12 @@ export default function App() {
   return (
     <main className="app">
       <header className="app-header">
-        <div>
-          <h1>BluePrinter</h1>
-          <p>Record a guitar take, name it, write down what to work on.</p>
+        <div className="app-brand">
+          <img src={iconUrl} alt="BluePrinter logo" className="app-logo" />
+          <div className="app-brand-text">
+            <h1>BluePrinter</h1>
+            <p>Record a take, name it, note what to work on.</p>
+          </div>
         </div>
       </header>
 
@@ -212,11 +215,6 @@ export default function App() {
         onCountInBeatsChange={handleCountInBeatsChange}
       />
 
-      <LibraryFolderRow
-        folder={transport.libraryFolder}
-        error={transport.lastSaveError}
-      />
-
       <PluginChain
         chainState={vst3.chain}
         availablePlugins={vst3.available}
@@ -224,11 +222,18 @@ export default function App() {
         scanState={scanState}
       />
 
-      <SnippetList
-        snippets={snippets}
-        playingSnippetId={transport.playingSnippetId}
-        playPositionSeconds={playPositionSeconds}
-      />
+      <div className="library-section">
+        <LibraryFolderRow
+          folder={transport.libraryFolder}
+          error={transport.lastSaveError}
+        />
+
+        <SnippetList
+          snippets={snippets}
+          playingSnippetId={transport.playingSnippetId}
+          playPositionSeconds={playPositionSeconds}
+        />
+      </div>
 
       <Notification
         notification={notification}
@@ -236,10 +241,7 @@ export default function App() {
       />
 
       <footer className="app-footer">
-        <img src={iconUrl} alt="" className="app-footer-icon" aria-hidden="true" />
-        <span>
-          Recordings stay in memory until you save them. Pick a library folder for one-click auto-save.
-        </span>
+        Recordings stay in memory until you save them — pick a library folder for one-click auto-save.
       </footer>
     </main>
   );
