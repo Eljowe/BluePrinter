@@ -101,6 +101,11 @@ public:
     juce::var makeSnippetsSnapshot() const;
     juce::var makeTransportSnapshot() const;
 
+    // Fire a transient notification to the frontend. Public so the
+    // event-listener lambdas outside the class can push error /
+    // success messages after operations like save / persist.
+    void sendNotification(const juce::String& message, const juce::String& level);
+
 private:
     void parameterChanged(const juce::String& parameterID, float newValue) override;
     void handleAsyncUpdate() override;
@@ -125,7 +130,6 @@ private:
     void saveSnippetWithDialog(int snippetId, const juce::File& startingFolder);
     void pickLibraryFolder(const juce::File& startingFolder);
     void pickLibraryFolderThenSave(int pendingSnippetId);
-    void sendNotification(const juce::String& message, const juce::String& level);
 
     BluePrinterAudioProcessor& audioProcessor;
     juce::WebBrowserComponent webView;

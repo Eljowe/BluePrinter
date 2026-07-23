@@ -195,7 +195,11 @@ bool SnippetLibrary::saveSnippetToFolder (const Snippet& snippet,
     }
 
     auto jsonFile = audioFile.getSiblingFile (audioFile.getFileNameWithoutExtension() + ".json");
-    writeMetadataFile (snippet, jsonFile);
+    if (! writeMetadataFile (snippet, jsonFile))
+    {
+        outError = "Could not write metadata sidecar: " + jsonFile.getFullPathName();
+        return false;
+    }
 
     outPath = audioFile.getFullPathName();
     return true;
@@ -266,7 +270,8 @@ bool SnippetLibrary::loadFromFolder (const juce::File& folder, juce::String& out
         auto jsonFile = audioFile.getSiblingFile (audioFile.getFileNameWithoutExtension() + ".json");
         if (jsonFile.existsAsFile())
         {
-            auto parsed = juce::JSON::parse (jsonFile.loadFileAsString());
+            auto jsonContent = jsonFile.loadFileAsString();
+            auto parsed = juce::JSON::parse (jsonContent);
             if (auto* obj = parsed.getDynamicObject())
             {
                 hasJson = true;
@@ -406,6 +411,7 @@ bool SnippetLibrary::writeMetadataFile (const Snippet& snippet, const juce::File
         meta->setProperty ("notes", notesVar);
     }
 
+    jsonFile.deleteFile();
     juce::FileOutputStream stream (jsonFile);
     if (! stream.openedOk())
         return false;

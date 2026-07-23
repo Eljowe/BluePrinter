@@ -40,7 +40,8 @@ target_compile_definitions(BluePrinter PRIVATE
     JUCE_USE_WIN_WEBVIEW2=1
     JUCE_USE_CURL=0
     JUCE_PLUGINHOST_VST3=1
-    JUCE_IGNORE_VST3_MISMATCHED_PARAMETER_ID_WARNING=1)
+    JUCE_IGNORE_VST3_MISMATCHED_PARAMETER_ID_WARNING=1
+    JUCE_ENABLE_DBG_OUTPUT=1)
 
 target_link_libraries(BluePrinter PRIVATE
     juce::juce_audio_basics
