@@ -616,10 +616,16 @@ bool BluePrinterAudioProcessor::updateSnippetMeta (int id, const juce::String& n
     {
         // Persist the change to the sidecar JSON so the edit survives a
         // reload of the library folder.
-        library.persistMetadata (id);
+        const bool persisted = library.persistMetadata (id);
+        if (! persisted)
+        {
+            juce::ScopedLock lock (libraryFolderLock);
+            lastSaveError = "Could not save metadata to disk. Make sure a library folder is set.";
+        }
         listeners.call ([](Listener& l) { l.libraryChanged(); });
+        return persisted;
     }
-    return ok;
+    return false;
 }
 
 void BluePrinterAudioProcessor::detectSnippetKeyAndNotes (int id)
@@ -663,7 +669,11 @@ void BluePrinterAudioProcessor::detectSnippetKeyAndNotes (int id)
             snippet->key            = result.key;
             snippet->keyConfidence  = result.confidence;
             snippet->detectedNotes  = result.detectedNotes;
-            library.persistMetadata (id);
+            if (! library.persistMetadata (id))
+            {
+                juce::ScopedLock lock (libraryFolderLock);
+                lastSaveError = "Key detection result could not be saved to disk. Make sure a library folder is set and the file is writable.";
+            }
             listeners.call ([](Listener& l) { l.libraryChanged(); });
         });
     }).detach();

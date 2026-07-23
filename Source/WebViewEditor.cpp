@@ -205,12 +205,18 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
         {
             processor.stopPlayback();
         })
-        .withEventListener(BluePrinterWebViewEditor::frontendUpdateSnippetEvent, [&processor](juce::var data)
+        .withEventListener(BluePrinterWebViewEditor::frontendUpdateSnippetEvent, [&processor, owner](juce::var data)
         {
             if (auto* obj = data.getDynamicObject())
             {
                 const int id = static_cast<int> (obj->getProperty("id"));
-                processor.updateSnippetMeta (id, obj->getProperty("name").toString(), obj->getProperty("comments").toString());
+                const auto name = obj->getProperty("name").toString();
+                const auto comments = obj->getProperty("comments").toString();
+                if (! processor.updateSnippetMeta (id, name, comments))
+                {
+                    if (owner != nullptr)
+                        owner->sendNotification ("Failed to update snippet metadata. Library folder may not be set.", "error");
+                }
             }
         })
         .withEventListener(BluePrinterWebViewEditor::frontendDeleteSnippetEvent, [&processor, owner](juce::var data)

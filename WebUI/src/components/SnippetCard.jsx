@@ -13,6 +13,11 @@ export function SnippetCard({ snippet, isPlaying, playPositionSeconds }) {
   // switching cards doesn't carry the spinner across.
   const [detecting, setDetecting] = useState(false);
 
+  // Track the last values we successfully committed so we never
+  // skip a commit because the backend echoed the same prop values
+  // back before the user finished editing.
+  const lastCommitted = useRef({ name: snippet.name ?? "", comments: snippet.comments ?? "" });
+
   // Only resync from props when this card switches to a different snippet.
   // We deliberately don't resync on every prop change so a user who is
   // actively editing name/comments doesn't get their in-progress text
@@ -25,6 +30,7 @@ export function SnippetCard({ snippet, isPlaying, playPositionSeconds }) {
       setComments(snippet.comments ?? "");
       setExpanded(false);
       setDetecting(false);
+      lastCommitted.current = { name: snippet.name ?? "", comments: snippet.comments ?? "" };
     }
   }, [snippet.id, snippet.name, snippet.comments]);
 
@@ -39,12 +45,13 @@ export function SnippetCard({ snippet, isPlaying, playPositionSeconds }) {
   }, [snippet.key, snippet.notes]);
 
   const commitMeta = () => {
-    if (name === snippet.name && comments === snippet.comments) return;
+    if (name === lastCommitted.current.name && comments === lastCommitted.current.comments) return;
     emit(FRONTEND_EVENTS.updateSnippet, {
       id: snippet.id,
       name,
       comments,
     });
+    lastCommitted.current = { name, comments };
   };
 
   const handlePlay = () => {

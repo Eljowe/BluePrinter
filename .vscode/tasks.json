@@ -61,6 +61,20 @@
       "dependsOn": "Build WebUI"
     },
     {
+      "label": "Run BluePrinter Release (standalone only)",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-Command",
+        "Get-Process -Name BluePrinter -ErrorAction SilentlyContinue | Stop-Process -Force; cmake --build build --config Release --target BluePrinter_Standalone; Start-Process -FilePath \".\\build\\BluePrinter_artefacts\\Release\\Standalone\\BluePrinter.exe\""
+      ],
+      "isBackground": false,
+      "problemMatcher": ["$msCompile"],
+      "group": "test",
+      "dependsOn": "Build WebUI"
+    },
+    {
       "label": "Build + Install + Run BluePrinter (Release, per-user)",
       "type": "shell",
       "command": "powershell",
