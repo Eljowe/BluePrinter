@@ -187,3 +187,18 @@ export function IconScan(props) {
     </Svg>
   );
 }
+
+export function IconMidi(props) {
+  return (
+    <Svg {...props}>
+      <circle cx="12" cy="12" r="2" fill="currentColor" stroke="none" />
+      <circle cx="6" cy="17" r="2" fill="currentColor" stroke="none" />
+      <circle cx="18" cy="17" r="2" fill="currentColor" stroke="none" />
+      <circle cx="6" cy="7" r="2" fill="currentColor" stroke="none" />
+      <circle cx="18" cy="7" r="2" fill="currentColor" stroke="none" />
+      <line x1="6" y1="7" x2="6" y2="17" />
+      <line x1="18" y1="7" x2="18" y2="17" />
+      <line x1="12" y1="7" x2="12" y2="10" />
+    </Svg>
+  );
+}

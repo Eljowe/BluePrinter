@@ -319,6 +319,23 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         metronomePosition.store (newPos, std::memory_order_release);
         transportPosition.store (newPos, std::memory_order_release);
     }
+
+    // 6. MIDI clock output. Clock pulses (0xF8) are generated at
+    //    24 ppqn from the continuous metronomePosition so they align
+    //    with the audible metronome and run through count-in into the
+    //    recording. Queued MIDI Start / Stop are flushed here so the
+    //    receiver gets them at a block boundary.
+    {
+        const int64_t clockPos = metronomePosition.load (std::memory_order_acquire);
+        renderMidiClockInBlock (midiMessages, clockPos, numSamples);
+
+        // Flush pending start / stop at sample 0 so downstream
+        // hardware sees the command before the next clock pulse.
+        if (midiStartPending.exchange (false, std::memory_order_acquire))
+            midiMessages.addEvent (juce::MidiMessage::midiStart(), 0);
+        if (midiStopPending.exchange (false, std::memory_order_acquire))
+            midiMessages.addEvent (juce::MidiMessage::midiStop(), 0);
+    }
 }
 
 void BluePrinterAudioProcessor::writeRecording (const juce::AudioBuffer<float>& source, int numSamples)
@@ -393,6 +410,61 @@ void BluePrinterAudioProcessor::renderMetronomeInBlock (juce::AudioBuffer<float>
                 buffer.addSample (ch, blockOffset + j, sample);
         }
     }
+}
+
+void BluePrinterAudioProcessor::renderMidiClockInBlock (juce::MidiBuffer& midiMessages,
+                                                        int64_t metronomePos,
+                                                        int numSamples)
+{
+    if (! midiClockEnabled.load (std::memory_order_acquire))
+        return;
+
+    const double bpmValue = bpm.load (std::memory_order_acquire);
+    if (bpmValue <= 0.0 || currentSampleRate <= 0.0)
+        return;
+
+    // 24 MIDI clock pulses per quarter note.
+    const double samplesPerClock = (60.0 * currentSampleRate) / (bpmValue * 24.0);
+    if (samplesPerClock <= 0.0)
+        return;
+
+    const int64_t endPos = metronomePos + numSamples;
+    const int64_t firstPulse = static_cast<int64_t> (std::ceil  (static_cast<double> (metronomePos) / samplesPerClock));
+    const int64_t lastPulse  = static_cast<int64_t> (std::floor (static_cast<double> (endPos)        / samplesPerClock));
+
+    for (int64_t pulse = firstPulse; pulse <= lastPulse; ++pulse)
+    {
+        const int64_t pulseSample = static_cast<int64_t> (pulse * samplesPerClock);
+        const int offset = static_cast<int> (pulseSample - metronomePos);
+        if (offset < 0 || offset >= numSamples)
+            continue;
+
+        midiMessages.addEvent (juce::MidiMessage::midiClock(), offset);
+
+        // Also punch out directly for standalone mode so external
+        // MIDI hardware receives the clock regardless of host routing.
+        {
+            const juce::ScopedLock sl (midiOutputLock);
+            if (midiOutput != nullptr)
+                midiOutput->sendMessageNow (juce::MidiMessage::midiClock());
+        }
+    }
+}
+
+static void sendDirectMidiStart (std::unique_ptr<juce::MidiOutput>& out,
+                                 juce::CriticalSection& lock)
+{
+    juce::ScopedLock sl (lock);
+    if (out != nullptr)
+        out->sendMessageNow (juce::MidiMessage::midiStart());
+}
+
+static void sendDirectMidiStop (std::unique_ptr<juce::MidiOutput>& out,
+                                juce::CriticalSection& lock)
+{
+    juce::ScopedLock sl (lock);
+    if (out != nullptr)
+        out->sendMessageNow (juce::MidiMessage::midiStop());
 }
 
 void BluePrinterAudioProcessor::renderPlayback (juce::AudioBuffer<float>& destination, int numSamples)
@@ -507,6 +579,7 @@ void BluePrinterAudioProcessor::startRecording()
 
     const int beats = countInBeats.load (std::memory_order_acquire);
     metronomePosition.store (0, std::memory_order_release);
+
     if (metronomeEnabled.load (std::memory_order_acquire) && beats > 0)
     {
         // Count-in: play N beats of click, then start recording. The
@@ -535,6 +608,15 @@ void BluePrinterAudioProcessor::beginActualRecording()
     }
     recordingRequested.store (true, std::memory_order_release);
     transportPosition.store (0, std::memory_order_release);
+
+    // Fire MIDI Start when actual recording begins — after the
+    // count-in so the drum machine starts on beat 1 of the first
+    // full bar, not during the preparatory clicks.
+    if (midiClockEnabled.load (std::memory_order_acquire))
+    {
+        midiStartPending.store (true, std::memory_order_release);
+        sendDirectMidiStart (midiOutput, midiOutputLock);
+    }
 }
 
 void BluePrinterAudioProcessor::stopRecording()
@@ -544,6 +626,13 @@ void BluePrinterAudioProcessor::stopRecording()
     {
         preRollActive.store (false, std::memory_order_release);
         transportPosition.store (0, std::memory_order_release);
+
+        if (midiClockEnabled.load (std::memory_order_acquire))
+        {
+            midiStopPending.store (true, std::memory_order_release);
+            sendDirectMidiStop (midiOutput, midiOutputLock);
+        }
+
         if (recordingState.load() != RecordingState::Idle)
         {
             recordingState.store (RecordingState::Idle, std::memory_order_release);
@@ -567,6 +656,12 @@ void BluePrinterAudioProcessor::stopRecording()
     recordingState.store (RecordingState::Idle, std::memory_order_release);
     transportPosition.store (0, std::memory_order_release);
     recordingFinalizePending.store (true, std::memory_order_release);
+
+    if (midiClockEnabled.load (std::memory_order_acquire))
+    {
+        midiStopPending.store (true, std::memory_order_release);
+        sendDirectMidiStop (midiOutput, midiOutputLock);
+    }
 
     // The message thread is finalising as fast as possible so the snippet
     // appears without waiting for the next transport-timer tick.
@@ -770,6 +865,126 @@ void BluePrinterAudioProcessor::setCountInBeats (int beats)
         return;
     countInBeats.store (clamped, std::memory_order_release);
     listeners.call ([](Listener& l) { l.transportChanged(); });
+}
+
+// -------------------------------------------------------------------------
+// MIDI clock output — syncs external drum machines / sequencers
+// -------------------------------------------------------------------------
+
+void BluePrinterAudioProcessor::setMidiClockEnabled (bool enabled)
+{
+    const bool prev = midiClockEnabled.exchange (enabled, std::memory_order_release);
+    if (enabled == prev)
+        return;
+
+    if (enabled)
+        openMidiOutputDevice();
+    else
+        closeMidiOutputDevice();
+
+    listeners.call ([](Listener& l) { l.transportChanged(); });
+}
+
+juce::String BluePrinterAudioProcessor::getMidiOutputDeviceName() const
+{
+    juce::ScopedLock sl (midiOutputLock);
+    return midiOutputDeviceName;
+}
+
+void BluePrinterAudioProcessor::setMidiOutputDeviceName (const juce::String& name)
+{
+    {
+        juce::ScopedLock sl (midiOutputLock);
+        if (midiOutputDeviceName == name)
+            return;
+        midiOutputDeviceName = name;
+    }
+
+    closeMidiOutputDevice();
+    if (midiClockEnabled.load (std::memory_order_acquire))
+        openMidiOutputDevice();
+}
+
+void BluePrinterAudioProcessor::openMidiOutputDevice()
+{
+    const juce::ScopedLock sl (midiOutputLock);
+
+    const auto devices = juce::MidiOutput::getAvailableDevices();
+    DBG ("[BluePrinter] MIDI: " << devices.size() << " output device(s) available");
+    for (int i = 0; i < devices.size(); ++i)
+        DBG ("  [" << i << "] " << devices[i].name);
+
+    if (devices.isEmpty())
+    {
+        DBG ("[BluePrinter] MIDI: no output devices found — USB drum machine "
+             "may need to be connected before launching the app");
+        return;
+    }
+
+    int index = 0;
+    if (midiOutputDeviceName.isNotEmpty())
+    {
+        for (int i = 0; i < devices.size(); ++i)
+        {
+            if (devices[i].name == midiOutputDeviceName)
+            {
+                index = i;
+                break;
+            }
+        }
+    }
+
+    DBG ("[BluePrinter] MIDI: trying to open device #" << index
+         << " \"" << devices[index].name << "\"");
+
+    auto ptr = juce::MidiOutput::openDevice (devices[index].identifier);
+    if (ptr == nullptr)
+    {
+        DBG ("[BluePrinter] MIDI: openDevice failed for \""
+             << devices[index].name << "\", trying default");
+
+        // Try the default device as a fallback
+        auto def = juce::MidiOutput::getDefaultDevice();
+        if (def.name.isNotEmpty())
+        {
+            DBG ("[BluePrinter] MIDI: default device \"" << def.name << "\"");
+            ptr = juce::MidiOutput::openDevice (def.identifier);
+        }
+    }
+
+    if (ptr != nullptr)
+    {
+        DBG ("[BluePrinter] MIDI: opened \"" << devices[index].name << "\"");
+        midiOutput = std::move (ptr);
+        midiOutputDeviceName = devices[index].name;
+
+        // Stop any running clocks on connected gear so that the
+        // next Start / clock train is clean.
+        midiOutput->sendMessageNow (juce::MidiMessage::midiStop());
+    }
+    else
+    {
+        DBG ("[BluePrinter] MIDI: could not open any output device");
+    }
+}
+
+void BluePrinterAudioProcessor::closeMidiOutputDevice()
+{
+    const juce::ScopedLock sl (midiOutputLock);
+    if (midiOutput != nullptr)
+    {
+        DBG ("[BluePrinter] MIDI: closing device \"" << midiOutputDeviceName << "\"");
+        midiOutput->sendMessageNow (juce::MidiMessage::midiStop());
+        midiOutput.reset();
+    }
+}
+
+juce::StringArray BluePrinterAudioProcessor::getAvailableMidiOutputDevices() const
+{
+    juce::StringArray names;
+    for (const auto& d : juce::MidiOutput::getAvailableDevices())
+        names.add (d.name);
+    return names;
 }
 
 juce::String BluePrinterAudioProcessor::getLastSaveError() const
@@ -1004,6 +1219,8 @@ void BluePrinterAudioProcessor::getStateInformation (juce::MemoryBlock& destData
     state.setProperty ("metronomeEnabled", metronomeEnabled.load(), nullptr);
     state.setProperty ("bpm",              bpm.load(),              nullptr);
     state.setProperty ("countInBeats",     countInBeats.load(),     nullptr);
+    state.setProperty ("midiClockEnabled", midiClockEnabled.load(), nullptr);
+    state.setProperty ("midiDeviceName",   midiOutputDeviceName,    nullptr);
     // VST3 chains: per-slot path + bypass + base64 plugin state for
     // both the MIDI and the audio chain, plus the folder-wide
     // blocklist and cached scan result. Stored as a JSON string so
@@ -1027,6 +1244,8 @@ void BluePrinterAudioProcessor::setStateInformation (const void* data, int sizeI
             metronomeEnabled.store (static_cast<bool>  (state.getProperty ("metronomeEnabled", true)));
             bpm.store              (static_cast<float> (state.getProperty ("bpm",              120.0f)));
             countInBeats.store     (static_cast<int>   (state.getProperty ("countInBeats",     4)));
+            midiClockEnabled.store (static_cast<bool>  (state.getProperty ("midiClockEnabled", false)));
+            midiOutputDeviceName  = state.getProperty ("midiDeviceName", juce::String()).toString();
 
             // Read either the new "pluginChains" key or the pre-split
             // "pluginChain" key. The old key is the single-chain
@@ -1043,9 +1262,23 @@ void BluePrinterAudioProcessor::setStateInformation (const void* data, int sizeI
                 {
                     // Stash for the UI to display when it opens.
                     lastChainRestoreError = error;
-                }
             }
         }
+
+        // If MIDI clock was enabled in a previous session, re-open the
+        // output device so external gear picks up right away. This is
+        // deferred to the message thread because MidiOutput::openDevice
+        // must run there.
+        if (midiClockEnabled.load (std::memory_order_acquire))
+        {
+            juce::MessageManager::callAsync ([this]
+            {
+                const juce::ScopedLock sl (midiOutputLock);
+                if (midiOutput == nullptr)
+                    openMidiOutputDevice();
+            });
+        }
+    }
     }
 }
 

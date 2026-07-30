@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Knob } from "./controls";
 import { LevelMeter } from "./LevelMeter";
-import { IconMetronome, IconStop } from "./icons";
+import { IconMetronome, IconMidi, IconStop } from "./icons";
 import { formatTime } from "../utils";
 import { FRONTEND_EVENTS, emit } from "../bridge";
 
@@ -53,9 +53,14 @@ export function Transport({
   metronomeEnabled,
   bpm,
   countInBeats,
+  midiClockEnabled,
+  midiOutputDevice,
+  midiOutputDeviceList,
   onMetronomeChange,
   onBpmChange,
   onCountInBeatsChange,
+  onMidiClockChange,
+  onMidiDeviceChange,
 }) {
   const isPreRoll = Boolean(transport?.preRollActive);
   const isRecording = Boolean(transport?.recording) || isPreRoll;
@@ -133,6 +138,36 @@ export function Transport({
           <IconMetronome size={15} />
           <span className="metronome-state">{metronomeEnabled ? "Click on" : "Click off"}</span>
         </button>
+
+        <button
+          type="button"
+          className={`metronome-toggle ${midiClockEnabled ? "is-on" : ""}`}
+          onClick={() => onMidiClockChange(!midiClockEnabled)}
+          title={midiClockEnabled ? "MIDI clock is being sent to external gear" : "MIDI clock output is off"}
+          aria-pressed={midiClockEnabled}
+        >
+          <IconMidi size={14} />
+          <span className="metronome-state">{midiClockEnabled ? "MIDI on" : "MIDI off"}</span>
+        </button>
+
+        {midiClockEnabled && midiOutputDeviceList.length > 0 ? (
+          <div className="midi-device-control">
+            <select
+              className="midi-device-select"
+              value={midiOutputDevice}
+              onChange={(e) => onMidiDeviceChange(e.target.value)}
+              title="Select the MIDI output device"
+            >
+              {midiOutputDeviceList.map((name) => (
+                <option key={name} value={name}>{name}</option>
+              ))}
+            </select>
+          </div>
+        ) : midiClockEnabled ? (
+          <span className="midi-no-devices" title="No MIDI output devices found. Connect your drum machine via USB and restart the app.">
+            No MIDI device found
+          </span>
+        ) : null}
 
         <Knob
           label="BPM"

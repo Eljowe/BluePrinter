@@ -45,6 +45,8 @@ public:
     static constexpr const char* frontendSetMetronomeEvent     = "frontendSetMetronome";
     static constexpr const char* frontendSetBpmEvent           = "frontendSetBpm";
     static constexpr const char* frontendSetCountInBeatsEvent  = "frontendSetCountInBeats";
+    static constexpr const char* frontendSetMidiClockEvent     = "frontendSetMidiClock";
+    static constexpr const char* frontendSetMidiDeviceEvent    = "frontendSetMidiDevice";
     static constexpr const char* frontendAddVst3Event          = "frontendAddVst3";
     static constexpr const char* frontendRemoveVst3Event       = "frontendRemoveVst3";
     static constexpr const char* frontendMoveVst3Event         = "frontendMoveVst3";
