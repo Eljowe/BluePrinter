@@ -18,6 +18,7 @@ public:
 
     // Event names shared with the React frontend.
     static constexpr const char* paramGain = "Gain";
+    static constexpr const char* paramPlaybackVolume = "PlaybackVolume";
 
     static constexpr const char* frontendSetParameterEvent     = "frontendSetParameter";
     static constexpr const char* frontendStartRecordingEvent   = "frontendStartRecording";
