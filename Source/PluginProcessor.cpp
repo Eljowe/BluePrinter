@@ -509,6 +509,16 @@ void BluePrinterAudioProcessor::renderPlayback (juce::AudioBuffer<float>& destin
         destination.copyFrom (ch, 0, audio, ch, readPos, toCopy);
     }
 
+    // Apply playback volume so the user can balance playback against
+    // their live input. The input gain (applied earlier in
+    // processBlock) is separate — this only scales the rendered
+    // snippet audio.
+    {
+        const auto playbackVol = apvts.getRawParameterValue ("PlaybackVolume")->load();
+        for (int ch = 0; ch < channels; ++ch)
+            destination.applyGain (ch, 0, toCopy, playbackVol);
+    }
+
     // Fill the rest of the buffer with silence if playback ends mid-block.
     if (toCopy < numSamples)
     {
@@ -1291,6 +1301,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout BluePrinterAudioProcessor::c
         "Gain",
         juce::NormalisableRange<float> (0.0f, 1.0f, 0.01f),
         0.7f));
+
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
+        "PlaybackVolume",
+        "Playback Volume",
+        juce::NormalisableRange<float> (0.0f, 1.0f, 0.01f),
+        0.8f));
 
     return layout;
 }

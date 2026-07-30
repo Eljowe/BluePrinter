@@ -493,6 +493,7 @@ BluePrinterWebViewEditor::BluePrinterWebViewEditor(BluePrinterAudioProcessor& p)
     }
 
     audioProcessor.apvts.addParameterListener(paramGain, this);
+    audioProcessor.apvts.addParameterListener(paramPlaybackVolume, this);
     audioProcessor.addListener (this);
 
     startTimerHz (audioProcessor.transportTimerHz);
@@ -516,6 +517,7 @@ BluePrinterWebViewEditor::~BluePrinterWebViewEditor()
     stopTimer();
     activeScan.reset();
     audioProcessor.apvts.removeParameterListener(paramGain, this);
+    audioProcessor.apvts.removeParameterListener(paramPlaybackVolume, this);
     audioProcessor.removeListener (this);
     closeAllVst3Editors();
 }
@@ -557,7 +559,7 @@ void BluePrinterWebViewEditor::parameterChanged(const juce::String& parameterID,
 {
     juce::ignoreUnused(newValue);
 
-    if (parameterID != paramGain)
+    if (parameterID != paramGain && parameterID != paramPlaybackVolume)
         return;
 
     parameterUpdatePending.store(true, std::memory_order_release);
@@ -628,6 +630,7 @@ juce::var BluePrinterWebViewEditor::makeParameterSnapshot() const
 {
     auto* obj = new juce::DynamicObject();
     obj->setProperty("gain", audioProcessor.apvts.getRawParameterValue(paramGain)->load());
+    obj->setProperty("playbackVolume", audioProcessor.apvts.getRawParameterValue(paramPlaybackVolume)->load());
     return juce::var(obj);
 }
 

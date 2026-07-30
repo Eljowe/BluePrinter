@@ -50,6 +50,8 @@ export function Transport({
   transport,
   gain,
   onGainChange,
+  playbackVolume,
+  onPlaybackVolumeChange,
   metronomeEnabled,
   bpm,
   countInBeats,
@@ -139,35 +141,37 @@ export function Transport({
           <span className="metronome-state">{metronomeEnabled ? "Click on" : "Click off"}</span>
         </button>
 
-        <button
-          type="button"
-          className={`metronome-toggle ${midiClockEnabled ? "is-on" : ""}`}
-          onClick={() => onMidiClockChange(!midiClockEnabled)}
-          title={midiClockEnabled ? "MIDI clock is being sent to external gear" : "MIDI clock output is off"}
-          aria-pressed={midiClockEnabled}
-        >
-          <IconMidi size={14} />
-          <span className="metronome-state">{midiClockEnabled ? "MIDI on" : "MIDI off"}</span>
-        </button>
+        <div className="midi-pair">
+          <button
+            type="button"
+            className={`metronome-toggle ${midiClockEnabled ? "is-on" : ""}`}
+            onClick={() => onMidiClockChange(!midiClockEnabled)}
+            title={midiClockEnabled ? "MIDI clock is being sent to external gear" : "MIDI clock output is off"}
+            aria-pressed={midiClockEnabled}
+          >
+            <IconMidi size={14} />
+            <span className="metronome-state">{midiClockEnabled ? "MIDI on" : "MIDI off"}</span>
+          </button>
 
-        {midiClockEnabled && midiOutputDeviceList.length > 0 ? (
-          <div className="midi-device-control">
-            <select
-              className="midi-device-select"
-              value={midiOutputDevice}
-              onChange={(e) => onMidiDeviceChange(e.target.value)}
-              title="Select the MIDI output device"
-            >
-              {midiOutputDeviceList.map((name) => (
-                <option key={name} value={name}>{name}</option>
-              ))}
-            </select>
-          </div>
-        ) : midiClockEnabled ? (
-          <span className="midi-no-devices" title="No MIDI output devices found. Connect your drum machine via USB and restart the app.">
-            No MIDI device found
-          </span>
-        ) : null}
+          {midiClockEnabled && midiOutputDeviceList.length > 0 ? (
+            <div className="midi-device-control">
+              <select
+                className="midi-device-select"
+                value={midiOutputDevice}
+                onChange={(e) => onMidiDeviceChange(e.target.value)}
+                title="Select the MIDI output device"
+              >
+                {midiOutputDeviceList.map((name) => (
+                  <option key={name} value={name}>{name}</option>
+                ))}
+              </select>
+            </div>
+          ) : midiClockEnabled ? (
+            <span className="midi-no-devices" title="No MIDI output devices found. Connect your drum machine via USB and restart the app.">
+              No MIDI device found
+            </span>
+          ) : null}
+        </div>
 
         <Knob
           label="BPM"
@@ -201,6 +205,15 @@ export function Transport({
           max={1}
           value={gain}
           onChange={onGainChange}
+          step="0.01"
+          decimals={2}
+        />
+        <Knob
+          label="Play Vol"
+          min={0}
+          max={1}
+          value={playbackVolume}
+          onChange={onPlaybackVolumeChange}
           step="0.01"
           decimals={2}
         />

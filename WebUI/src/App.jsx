@@ -9,12 +9,16 @@ import iconUrl from "./icon.svg";
 
 const PARAM_IDS = {
   gain: "Gain",
+  playbackVolume: "PlaybackVolume",
 };
 
 function readInitialParameters() {
   const first = getInitialData().parameters?.[0];
-  if (!first) return { gain: 0.7 };
-  return { gain: Number(first.gain ?? 0.7) };
+  if (!first) return { gain: 0.7, playbackVolume: 0.8 };
+  return {
+    gain: Number(first.gain ?? 0.7),
+    playbackVolume: Number(first.playbackVolume ?? 0.8),
+  };
 }
 
 function readInitialSnippets() {
@@ -58,6 +62,7 @@ function readInitialTransport() {
 export default function App() {
   const initial = useMemo(readInitialParameters, []);
   const [gain, setGain] = useState(initial.gain);
+  const [playbackVolume, setPlaybackVolume] = useState(initial.playbackVolume);
   const [snippets, setSnippets] = useState(readInitialSnippets);
   const [transport, setTransport] = useState(readInitialTransport);
   const [notification, setNotification] = useState(null);
@@ -72,6 +77,7 @@ export default function App() {
     const unsubParam = subscribe(BACKEND_EVENTS.parameters, (payload) => {
       if (typeof payload !== "object" || payload == null) return;
       if (payload.gain !== undefined) setGain(Number(payload.gain));
+      if (payload.playbackVolume !== undefined) setPlaybackVolume(Number(payload.playbackVolume));
     });
     return unsubParam;
   }, []);
@@ -178,6 +184,11 @@ export default function App() {
     emit(FRONTEND_EVENTS.setParameter, { id: PARAM_IDS.gain, value: next });
   };
 
+  const handlePlaybackVolumeChange = (next) => {
+    setPlaybackVolume(next);
+    emit(FRONTEND_EVENTS.setParameter, { id: PARAM_IDS.playbackVolume, value: next });
+  };
+
   const handleMetronomeChange = (enabled) => {
     setTransport((prev) => ({ ...prev, metronomeEnabled: enabled }));
     emit(FRONTEND_EVENTS.setMetronome, { enabled });
@@ -224,6 +235,8 @@ export default function App() {
         transport={transport}
         gain={gain}
         onGainChange={handleGainChange}
+        playbackVolume={playbackVolume}
+        onPlaybackVolumeChange={handlePlaybackVolumeChange}
         metronomeEnabled={transport.metronomeEnabled}
         bpm={transport.bpm}
         countInBeats={transport.countInBeats}
