@@ -291,6 +291,16 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
             if (auto* obj = data.getDynamicObject())
                 processor.setCountInBeats (static_cast<int> (obj->getProperty ("beats")));
         })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetMidiClockEvent, [&processor](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+                processor.setMidiClockEnabled (static_cast<bool> (obj->getProperty ("enabled")));
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetMidiDeviceEvent, [&processor](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+                processor.setMidiOutputDeviceName (obj->getProperty ("device").toString());
+        })
         .withEventListener(BluePrinterWebViewEditor::frontendAddVst3Event, [owner](juce::var data)
         {
             if (owner == nullptr)
@@ -646,6 +656,15 @@ juce::var BluePrinterWebViewEditor::makeTransportSnapshot() const
     obj->setProperty ("metronomeEnabled", audioProcessor.getMetronomeEnabled());
     obj->setProperty ("bpm",              audioProcessor.getBpm());
     obj->setProperty ("countInBeats",     audioProcessor.getCountInBeats());
+    obj->setProperty ("midiClockEnabled", audioProcessor.isMidiClockEnabled());
+    obj->setProperty ("midiOutputDevice", audioProcessor.getMidiOutputDeviceName());
+    {
+        auto names = audioProcessor.getAvailableMidiOutputDevices();
+        juce::Array<juce::var> arr;
+        for (auto& n : names)
+            arr.add (juce::var (n));
+        obj->setProperty ("midiOutputDeviceList", juce::var (arr));
+    }
     obj->setProperty ("preRollActive",    audioProcessor.isPreRollActive());
     obj->setProperty ("transportPosition", static_cast<double> (audioProcessor.getTransportPosition()));
     return juce::var (obj);

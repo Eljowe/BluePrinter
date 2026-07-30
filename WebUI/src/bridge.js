@@ -34,6 +34,8 @@ export const FRONTEND_EVENTS = {
   setMetronome: "frontendSetMetronome",
   setBpm: "frontendSetBpm",
   setCountInBeats: "frontendSetCountInBeats",
+  setMidiClock: "frontendSetMidiClock",
+  setMidiDevice: "frontendSetMidiDevice",
   addVst3: "frontendAddVst3",
   removeVst3: "frontendRemoveVst3",
   moveVst3: "frontendMoveVst3",

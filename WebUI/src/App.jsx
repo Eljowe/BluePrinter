@@ -32,6 +32,7 @@ function readInitialTransport() {
     inputLevel: 0, inputPeak: 0,
     libraryFolder: "", lastSaveError: "",
     metronomeEnabled: true, bpm: 120, countInBeats: 4,
+    midiClockEnabled: false, midiOutputDevice: "", midiOutputDeviceList: [],
     preRollActive: false, transportPosition: 0,
   };
   return {
@@ -46,6 +47,9 @@ function readInitialTransport() {
     metronomeEnabled: raw.metronomeEnabled !== false,
     bpm: Number(raw.bpm ?? 120),
     countInBeats: Number(raw.countInBeats ?? 4),
+    midiClockEnabled: Boolean(raw.midiClockEnabled),
+    midiOutputDevice: typeof raw.midiOutputDevice === "string" ? raw.midiOutputDevice : "",
+    midiOutputDeviceList: Array.isArray(raw.midiOutputDeviceList) ? raw.midiOutputDeviceList : [],
     preRollActive: Boolean(raw.preRollActive),
     transportPosition: Number(raw.transportPosition ?? 0),
   };
@@ -118,6 +122,9 @@ export default function App() {
         metronomeEnabled: payload.metronomeEnabled !== undefined ? Boolean(payload.metronomeEnabled) : prev.metronomeEnabled,
         bpm:              payload.bpm !== undefined              ? Number(payload.bpm)              : prev.bpm,
         countInBeats:     payload.countInBeats !== undefined     ? Number(payload.countInBeats)     : prev.countInBeats,
+        midiClockEnabled: payload.midiClockEnabled !== undefined ? Boolean(payload.midiClockEnabled) : prev.midiClockEnabled,
+        midiOutputDevice: typeof payload.midiOutputDevice === "string" ? payload.midiOutputDevice : prev.midiOutputDevice,
+        midiOutputDeviceList: Array.isArray(payload.midiOutputDeviceList) ? payload.midiOutputDeviceList : prev.midiOutputDeviceList,
         preRollActive:    Boolean(payload.preRollActive),
         transportPosition: Number(payload.transportPosition ?? 0),
       }));
@@ -186,6 +193,16 @@ export default function App() {
     emit(FRONTEND_EVENTS.setCountInBeats, { beats: next });
   };
 
+  const handleMidiClockChange = (enabled) => {
+    setTransport((prev) => ({ ...prev, midiClockEnabled: enabled }));
+    emit(FRONTEND_EVENTS.setMidiClock, { enabled });
+  };
+
+  const handleMidiDeviceChange = (device) => {
+    setTransport((prev) => ({ ...prev, midiOutputDevice: device }));
+    emit(FRONTEND_EVENTS.setMidiDevice, { device });
+  };
+
   const playingSnippet = transport.playingSnippetId >= 0 ? snippets.find((s) => s.id === transport.playingSnippetId) : null;
   const playPositionSeconds = playingSnippet && playingSnippet.sampleRate > 0
     ? transport.playingPosition / playingSnippet.sampleRate
@@ -210,9 +227,14 @@ export default function App() {
         metronomeEnabled={transport.metronomeEnabled}
         bpm={transport.bpm}
         countInBeats={transport.countInBeats}
+        midiClockEnabled={transport.midiClockEnabled}
+        midiOutputDevice={transport.midiOutputDevice}
+        midiOutputDeviceList={transport.midiOutputDeviceList}
         onMetronomeChange={handleMetronomeChange}
         onBpmChange={handleBpmChange}
         onCountInBeatsChange={handleCountInBeatsChange}
+        onMidiClockChange={handleMidiClockChange}
+        onMidiDeviceChange={handleMidiDeviceChange}
       />
 
       <PluginChain

@@ -135,6 +135,14 @@ public:
     void setBpm (float newBpm);
     void setCountInBeats (int beats);
 
+    // MIDI clock output for syncing external hardware (analog drum
+    // machines, sequencers). Enabled via the transport UI.
+    bool    isMidiClockEnabled()    const { return midiClockEnabled.load (std::memory_order_acquire); }
+    void    setMidiClockEnabled (bool enabled);
+    juce::String getMidiOutputDeviceName() const;
+    void    setMidiOutputDeviceName (const juce::String& name);
+    juce::StringArray getAvailableMidiOutputDevices() const;
+
     juce::String getLastSaveError() const;
 
     // Set by setStateInformation when the saved VST3 chain couldn't be
@@ -225,6 +233,21 @@ private:
     // prepareToPlay, read-only on the audio thread.
     std::vector<float> clickBuffer;
     double currentSampleRate = 44100.0;
+
+    // MIDI clock output. Clock pulses (0xF8, 24 ppqn) are generated in
+    // processBlock alongside the audible metronome. MIDI Start / Stop
+    // are queued from the message thread and flushed at the start of
+    // the next audio block.
+    std::atomic<bool>    midiClockEnabled      { false };
+    std::atomic<bool>    midiStartPending      { false };
+    std::atomic<bool>    midiStopPending       { false };
+    juce::CriticalSection midiOutputLock;
+    juce::String         midiOutputDeviceName;
+    std::unique_ptr<juce::MidiOutput> midiOutput;
+
+    void renderMidiClockInBlock (juce::MidiBuffer& midiMessages, int64_t metronomePos, int numSamples);
+    void openMidiOutputDevice();
+    void closeMidiOutputDevice();
 
     // Cached audio-thread copies. Updated under the library lock briefly,
     // then held as shared_ptrs so playback can't dangle.

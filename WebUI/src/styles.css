@@ -290,9 +290,9 @@ button {
 
 .transport {
   display: grid;
-  grid-template-columns: auto minmax(150px, 1fr) auto auto;
+  grid-template-columns: auto minmax(100px, 1fr) auto auto;
   align-items: center;
-  gap: 24px;
+  gap: 20px;
   padding: 16px 22px;
   background: var(--panel);
   border: 1px solid var(--border);
@@ -432,8 +432,9 @@ button {
 /* grouped controls on the right, separated by hairlines */
 .transport-group {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 18px;
+  gap: 9px 14px;
   padding-left: 24px;
   border-left: 1px solid var(--border-soft);
 }
@@ -495,8 +496,8 @@ button {
 }
 
 .count-in-field input {
-  width: 46px;
-  height: 28px;
+  width: 40px;
+  height: 26px;
   background: var(--inset);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -527,6 +528,39 @@ button {
 .count-in-suffix {
   color: var(--text-3);
   font-size: 0.7rem;
+}
+
+/* MIDI device selector (visible when MIDI clock is on) */
+.midi-device-control {
+  display: flex;
+  align-items: center;
+}
+
+.midi-device-select {
+  max-width: 130px;
+  height: 28px;
+  padding: 0 6px;
+  background: var(--inset);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 0.7rem;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 0.12s ease;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.midi-device-select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.midi-no-devices {
+  font-size: 0.68rem;
+  color: #ff8378;
+  white-space: nowrap;
 }
 
 /* ============================================================
