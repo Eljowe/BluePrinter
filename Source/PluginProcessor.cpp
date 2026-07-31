@@ -27,13 +27,20 @@ BluePrinterAudioProcessor::BluePrinterAudioProcessor()
     , midiChain  (vst3Library)
     , audioChain (vst3Library)
 {
-    // Restore the standalone user state (library folder + VST3 chains)
-    // before any UI is built. setLibraryFolder auto-loads snippets from
-    // the folder; the chain restore replays the saved chains. Both
-    // fire their own change events; that's fine because the chains'
-    // onChanged is wired below in restoreUserState()'s tail, after the
-    // restore itself completes.
-    restoreUserState();
+    // Restore the library folder at startup. VST3 chain restoration is
+    // intentionally deferred until the editor requests it; constructing a
+    // third-party plugin in the processor constructor can crash the
+    // standalone before the UI is available to report the failing plugin.
+    if (auto* props = getUserState())
+    {
+        const auto folderPath = props->getValue ("libraryFolder");
+        if (folderPath.isNotEmpty())
+        {
+            const juce::File folder (folderPath);
+            if (folder.isDirectory())
+                setLibraryFolder (folder);
+        }
+    }
 
     // Wire the chain persistence AFTER the restore so we don't write
     // the just-loaded state back over the file on startup. Both chains
@@ -127,6 +134,7 @@ void BluePrinterAudioProcessor::prepareToPlay (double sampleRate, int samplesPer
     midiChainBuffer.setSize (channels, samplesPerBlock, false, false, true);
 
     currentSampleRate = sampleRate;
+    loopCrossfadeSamples = juce::jlimit (1, 256, static_cast<int> (sampleRate * 0.003));
 
     // Hand the new rate/block size to both chains so every loaded
     // plugin is prepared with the right values. The MIDI chain is
@@ -215,6 +223,135 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 
     const int numSamples = buffer.getNumSamples();
     const int numChannels = buffer.getNumChannels();
+
+    const int64_t transportStart = transportPosition.load (std::memory_order_acquire);
+    if (midiSequencerRecordArmed.load (std::memory_order_acquire))
+    {
+        if (audioLoopRecording.load (std::memory_order_acquire))
+        {
+            const auto writePos = audioLoopLength.load (std::memory_order_relaxed);
+            const auto toCopy = juce::jmin (numSamples, maxRecordSamples - static_cast<int> (writePos));
+            if (toCopy > 0)
+            {
+                for (int ch = 0; ch < juce::jmin (numChannels, recordBuffer->getNumChannels()); ++ch)
+                    recordBuffer->copyFrom (ch, static_cast<int> (writePos), buffer, ch, 0, toCopy);
+                audioLoopLength.store (writePos + toCopy, std::memory_order_release);
+            }
+        }
+        for (const auto metadata : midiMessages)
+        {
+            const auto message = metadata.getMessage();
+            if (message.isMidiClock() || message.isMidiStart() || message.isMidiContinue() || message.isMidiStop())
+                continue;
+
+            const auto index = midiSequencerEventCount.load (std::memory_order_relaxed);
+            if (index >= maxMidiSequenceEvents)
+                break;
+            const auto position = transportStart - midiSequencerRecordStart + metadata.samplePosition;
+            if (position >= 0)
+            {
+                midiSequence[static_cast<size_t> (index)] = { position, message };
+                midiSequencerLength.store (juce::jmax (midiSequencerLength.load(), position + 1), std::memory_order_release);
+                midiSequencerEventCount.store (index + 1, std::memory_order_release);
+            }
+        }
+    }
+
+    if (midiSequencerClearRequested.exchange (false, std::memory_order_acq_rel))
+    {
+        midiSequencerEventCount.store (0, std::memory_order_release);
+        midiSequencerLength.store (0, std::memory_order_release);
+        midiSequencerPosition.store (0, std::memory_order_release);
+    }
+
+    if (! midiSequencerPlaying.load (std::memory_order_acquire))
+    {
+        for (int channel = 1; channel <= 16; ++channel)
+            for (int note = 0; note < 128; ++note)
+            {
+                auto& active = midiSequencerActiveNotes[static_cast<size_t> ((channel - 1) * 128 + note)];
+                if (active)
+                {
+                    midiMessages.addEvent (juce::MidiMessage::noteOff (channel, note), 0);
+                    active = false;
+                }
+            }
+    }
+
+    if (midiSequencerPlaying.load (std::memory_order_acquire))
+    {
+        const auto sequenceLength = midiSequencerLength.load (std::memory_order_acquire);
+        const auto sequencePosition = midiSequencerPosition.load (std::memory_order_acquire);
+        if (sequenceLength > 0)
+        {
+            const auto eventCount = midiSequencerEventCount.load (std::memory_order_acquire);
+            for (int i = 0; i < eventCount; ++i)
+            {
+                const auto& event = midiSequence[static_cast<size_t> (i)];
+                const auto eventPosition = event.position % sequenceLength;
+                if (eventPosition >= sequencePosition && eventPosition < sequencePosition + numSamples)
+                {
+                    midiMessages.addEvent (event.message, static_cast<int> (eventPosition - sequencePosition));
+                    if (event.message.isNoteOn())
+                        midiSequencerActiveNotes[static_cast<size_t> ((event.message.getChannel() - 1) * 128 + event.message.getNoteNumber())] = true;
+                    else if (event.message.isNoteOff())
+                        midiSequencerActiveNotes[static_cast<size_t> ((event.message.getChannel() - 1) * 128 + event.message.getNoteNumber())] = false;
+                }
+            }
+
+            const auto nextPosition = sequencePosition + numSamples;
+            if (midiSequencerLooping.load (std::memory_order_acquire))
+                midiSequencerPosition.store (nextPosition % sequenceLength, std::memory_order_release);
+            else
+            {
+                midiSequencerPosition.store (nextPosition, std::memory_order_release);
+                if (nextPosition >= sequenceLength)
+                    midiSequencerPlaying.store (false, std::memory_order_release);
+            }
+        }
+    }
+
+    if (audioLoopPlaying.load (std::memory_order_acquire))
+    {
+        const auto length = audioLoopLength.load (std::memory_order_acquire);
+        auto position = audioLoopPosition.load (std::memory_order_acquire);
+        if (length > 0 && recordBuffer != nullptr)
+        {
+            const auto toCopy = juce::jmin (numSamples, static_cast<int> (length - position));
+            const auto channels = juce::jmin (numChannels, recordBuffer->getNumChannels());
+            const auto crossfade = juce::jmin (loopCrossfadeSamples, static_cast<int> (length / 2));
+            for (int ch = 0; ch < channels; ++ch)
+            {
+                buffer.addFrom (ch, 0, *recordBuffer, ch, static_cast<int> (position), toCopy);
+                if (crossfade > 0 && position + toCopy >= length)
+                {
+                    const auto fadeStart = juce::jmax<int64_t> (0, length - crossfade);
+                    const auto overlapStart = juce::jmax<int64_t> (0, position - fadeStart);
+                    const auto overlapLength = juce::jmin (crossfade - static_cast<int> (overlapStart), toCopy);
+                    for (int i = 0; i < overlapLength; ++i)
+                    {
+                        const auto sampleIndex = static_cast<int> (position + i);
+                        const auto fade = static_cast<float> (sampleIndex - fadeStart) / static_cast<float> (crossfade);
+                        const auto endSample = recordBuffer->getSample (ch, sampleIndex);
+                        const auto startSample = recordBuffer->getSample (ch, i);
+                        buffer.addSample (ch, i, (startSample - endSample) * fade);
+                    }
+                }
+            }
+            position += toCopy;
+            if (position >= length)
+                position = midiSequencerLooping.load() ? 0 : length;
+            audioLoopPosition.store (position, std::memory_order_release);
+            if (! midiSequencerLooping.load() && position >= length)
+                audioLoopPlaying.store (false, std::memory_order_release);
+        }
+    }
+
+    if (midiSequencerPlaying.load (std::memory_order_acquire)
+        || midiSequencerRecordArmed.load (std::memory_order_acquire))
+    {
+        transportPosition.store (transportStart + numSamples, std::memory_order_release);
+    }
 
     // Apply gain. This is the post-DSP signal we want to record and the
     // pass-through signal when nothing else is happening.
@@ -604,6 +741,219 @@ void BluePrinterAudioProcessor::startRecording()
         beginActualRecording();
     }
 
+    listeners.call ([](Listener& l) { l.transportChanged(); });
+}
+
+void BluePrinterAudioProcessor::setMidiSequencerRecording (bool enabled)
+{
+    if (enabled)
+    {
+        midiSequencerClearRequested.store (true, std::memory_order_release);
+        midiSequencerLength.store (0);
+        midiSequencerEventCount.store (0);
+        midiSequencerPosition.store (0);
+        midiSequencerRecordStart = transportPosition.load (std::memory_order_acquire);
+        audioLoopLength.store (0, std::memory_order_release);
+        audioLoopPosition.store (0, std::memory_order_release);
+        audioLoopRecording.store (true, std::memory_order_release);
+        audioLoopPlaying.store (false, std::memory_order_release);
+    }
+    else
+    {
+        audioLoopRecording.store (false, std::memory_order_release);
+        trimLooperToMusicalGrid();
+    }
+    midiSequencerRecording.store (enabled);
+    midiSequencerRecordArmed.store (enabled, std::memory_order_release);
+    midiSequencerPreRoll.store (false, std::memory_order_release);
+    listeners.call ([](Listener& l) { l.transportChanged(); });
+}
+
+void BluePrinterAudioProcessor::trimLooperToMusicalGrid()
+{
+    const auto captured = audioLoopLength.load (std::memory_order_acquire);
+    if (captured <= 0 || currentSampleRate <= 0.0)
+        return;
+
+    const auto beat = 60.0 * currentSampleRate / juce::jmax (1.0f, bpm.load());
+    const auto bar = beat * 4.0;
+    auto target = static_cast<int64_t> (std::llround (static_cast<double> (captured) / bar) * bar);
+    if (target <= 0)
+        target = static_cast<int64_t> (std::llround (static_cast<double> (captured) / beat) * beat);
+    target = juce::jlimit<int64_t> (1, captured, target);
+    audioLoopLength.store (target, std::memory_order_release);
+    midiSequencerLength.store (target, std::memory_order_release);
+}
+
+bool BluePrinterAudioProcessor::saveMidiSequenceToFile (const juce::File& file,
+                                                        const juce::String& name,
+                                                        juce::String& error) const
+{
+    const auto count = midiSequencerEventCount.load (std::memory_order_acquire);
+    if (count <= 0)
+    {
+        error = "There is no MIDI sequence to save.";
+        return false;
+    }
+
+    juce::MidiMessageSequence sequence;
+    for (int i = 0; i < count; ++i)
+    {
+        const auto& event = midiSequence[static_cast<size_t> (i)];
+        sequence.addEvent (event.message, static_cast<double> (event.position));
+    }
+    sequence.updateMatchedPairs();
+
+    if (! file.getParentDirectory().createDirectory())
+    {
+        error = "Could not create the destination folder.";
+        return false;
+    }
+
+    juce::FileOutputStream stream (file);
+    if (! stream.openedOk())
+    {
+        error = "Could not open the MIDI file for writing.";
+        return false;
+    }
+
+    juce::MidiFile midiFile;
+    midiFile.setTicksPerQuarterNote (960);
+    midiFile.addTrack (sequence);
+    if (! midiFile.writeTo (stream))
+    {
+        error = "Could not write the MIDI sequence.";
+        return false;
+    }
+
+    juce::ignoreUnused (name);
+    return true;
+}
+
+int64_t BluePrinterAudioProcessor::quantizeMidiPosition (int64_t position, double sampleRate, float bpmValue, int division)
+{
+    if (division <= 0 || sampleRate <= 0.0 || bpmValue <= 0.0)
+        return position;
+    const double beat = 60.0 * sampleRate / bpmValue;
+    const double grid = beat * 4.0 / static_cast<double> (division);
+    return static_cast<int64_t> (std::llround (static_cast<double> (position) / grid) * grid);
+}
+
+juce::var BluePrinterAudioProcessor::getMidiSequenceEventSnapshot() const
+{
+    juce::Array<juce::var> events;
+    const auto count = midiSequencerEventCount.load (std::memory_order_acquire);
+    for (int i = 0; i < count; ++i)
+    {
+        const auto& event = midiSequence[static_cast<size_t> (i)];
+        if (! event.message.isNoteOn())
+            continue;
+        auto* item = new juce::DynamicObject();
+        item->setProperty ("position", static_cast<double> (event.position));
+        item->setProperty ("note", event.message.getNoteNumber());
+        item->setProperty ("velocity", event.message.getFloatVelocity());
+        events.add (juce::var (item));
+    }
+    return juce::var (events);
+}
+
+void BluePrinterAudioProcessor::flushActiveMidiNotes (juce::MidiBuffer& midiMessages)
+{
+    for (int channel = 1; channel <= 16; ++channel)
+        for (int note = 0; note < 128; ++note)
+        {
+            auto& active = midiSequencerActiveNotes[static_cast<size_t> ((channel - 1) * 128 + note)];
+            if (active)
+            {
+                midiMessages.addEvent (juce::MidiMessage::noteOff (channel, note), 0);
+                active = false;
+            }
+        }
+}
+
+void BluePrinterAudioProcessor::setMidiQuantizationDivision (int division)
+{
+    midiQuantizationDivision.store ((division == 4 || division == 8 || division == 16 || division == 32) ? division : 0);
+}
+
+juce::var BluePrinterAudioProcessor::getMidiSequenceJson() const
+{
+    auto* root = new juce::DynamicObject();
+    root->setProperty ("version", 1);
+    root->setProperty ("length", static_cast<double> (midiSequencerLength.load()));
+    root->setProperty ("quantizationDivision", midiQuantizationDivision.load());
+    juce::Array<juce::var> events;
+    const auto count = midiSequencerEventCount.load();
+    for (int i = 0; i < count; ++i)
+    {
+        const auto& event = midiSequence[static_cast<size_t> (i)];
+        auto* item = new juce::DynamicObject();
+        item->setProperty ("position", static_cast<double> (event.position));
+        juce::Array<juce::var> bytes;
+        for (int byte = 0; byte < event.message.getRawDataSize(); ++byte)
+            bytes.add (event.message.getRawData()[byte] & 0xff);
+        item->setProperty ("data", bytes);
+        events.add (juce::var (item));
+    }
+    root->setProperty ("events", events);
+    return juce::var (root);
+}
+
+bool BluePrinterAudioProcessor::loadMidiSequenceJson (const juce::var& data, juce::String& error)
+{
+    auto* root = data.getDynamicObject();
+    auto* events = root != nullptr ? root->getProperty ("events").getArray() : nullptr;
+    if (events == nullptr) { error = "Invalid MIDI sequence data."; return false; }
+    const auto count = juce::jmin (events->size(), maxMidiSequenceEvents);
+    for (int i = 0; i < count; ++i)
+    {
+        auto* item = (*events)[i].getDynamicObject();
+        auto* bytes = item != nullptr ? item->getProperty ("data").getArray() : nullptr;
+        if (bytes == nullptr || bytes->isEmpty()) continue;
+        std::array<juce::uint8, 4> raw {};
+        const auto length = juce::jmin (bytes->size(), static_cast<int> (raw.size()));
+        for (int byte = 0; byte < length; ++byte)
+            raw[static_cast<size_t> (byte)] = static_cast<juce::uint8> (static_cast<int> ((*bytes)[byte]) & 0xff);
+        midiSequence[static_cast<size_t> (i)] = { static_cast<int64_t> (item->getProperty ("position")), juce::MidiMessage (raw.data(), length) };
+    }
+    midiSequencerEventCount.store (count);
+    midiSequencerLength.store (static_cast<int64_t> (root->getProperty ("length")));
+    setMidiQuantizationDivision (static_cast<int> (root->getProperty ("quantizationDivision")));
+    return true;
+}
+
+void BluePrinterAudioProcessor::setMidiSequencerPlaying (bool enabled)
+{
+    midiSequencerPosition.store (0);
+    midiSequencerPlaying.store (enabled);
+    audioLoopPlaying.store (enabled && audioLoopLength.load() > 0, std::memory_order_release);
+    if (enabled)
+        audioLoopPosition.store (0, std::memory_order_release);
+    if (enabled && midiClockEnabled.load (std::memory_order_acquire))
+        midiStartPending.store (true, std::memory_order_release);
+    if (! enabled && midiClockEnabled.load (std::memory_order_acquire))
+        midiStopPending.store (true, std::memory_order_release);
+    listeners.call ([](Listener& l) { l.transportChanged(); });
+}
+
+void BluePrinterAudioProcessor::setMidiSequencerLooping (bool enabled)
+{
+    midiSequencerLooping.store (enabled);
+    listeners.call ([](Listener& l) { l.transportChanged(); });
+}
+
+void BluePrinterAudioProcessor::clearMidiSequence()
+{
+    midiSequencerRecording.store (false);
+    midiSequencerPlaying.store (false);
+    audioLoopRecording.store (false);
+    audioLoopPlaying.store (false);
+    audioLoopLength.store (0);
+    audioLoopPosition.store (0);
+    midiSequencerClearRequested.store (true, std::memory_order_release);
+    midiSequencerLength.store (0);
+    midiSequencerEventCount.store (0);
+    midiSequencerPosition.store (0);
     listeners.call ([](Listener& l) { l.transportChanged(); });
 }
 
@@ -1236,6 +1586,8 @@ void BluePrinterAudioProcessor::getStateInformation (juce::MemoryBlock& destData
     // blocklist and cached scan result. Stored as a JSON string so
     // ValueTree can carry an arbitrary blob.
     state.setProperty ("pluginChains", juce::JSON::toString (makeChainState(), true), nullptr);
+    state.setProperty ("midiSequence", juce::JSON::toString (getMidiSequenceJson(), false), nullptr);
+    state.setProperty ("midiQuantizationDivision", midiQuantizationDivision.load(), nullptr);
     std::unique_ptr<juce::XmlElement> xml (state.createXml());
     copyXmlToBinary (*xml, destData);
 }
@@ -1256,6 +1608,13 @@ void BluePrinterAudioProcessor::setStateInformation (const void* data, int sizeI
             countInBeats.store     (static_cast<int>   (state.getProperty ("countInBeats",     4)));
             midiClockEnabled.store (static_cast<bool>  (state.getProperty ("midiClockEnabled", false)));
             midiOutputDeviceName  = state.getProperty ("midiDeviceName", juce::String()).toString();
+            const auto sequenceJson = state.getProperty ("midiSequence").toString();
+            if (sequenceJson.isNotEmpty())
+            {
+                juce::String sequenceError;
+                loadMidiSequenceJson (juce::JSON::parse (sequenceJson), sequenceError);
+            }
+            setMidiQuantizationDivision (static_cast<int> (state.getProperty ("midiQuantizationDivision", 0)));
 
             // Read either the new "pluginChains" key or the pre-split
             // "pluginChain" key. The old key is the single-chain
@@ -1414,6 +1773,34 @@ void BluePrinterAudioProcessor::restoreUserState()
                 lastChainRestoreError = error;
         }
     }
+}
+
+void BluePrinterAudioProcessor::restoreSavedPluginChains()
+{
+    if (pluginChainsRestored)
+        return;
+
+    pluginChainsRestored = true;
+    auto* props = getUserState();
+    if (props == nullptr)
+        return;
+
+    const auto chainJson = props->getValue ("pluginChains").isNotEmpty()
+        ? props->getValue ("pluginChains")
+        : props->getValue ("pluginChain");
+    if (chainJson.isEmpty())
+        return;
+
+    const auto chainVar = juce::JSON::parse (chainJson);
+    if (! chainVar.isObject())
+        return;
+
+    persistingPluginChain = true;
+    juce::String error;
+    applyChainState (chainVar, error);
+    persistingPluginChain = false;
+    if (error.isNotEmpty())
+        lastChainRestoreError = error;
 }
 
 void BluePrinterAudioProcessor::persistLibraryFolder()

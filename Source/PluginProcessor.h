@@ -134,6 +134,25 @@ public:
     void setMetronomeEnabled (bool enabled);
     void setBpm (float newBpm);
     void setCountInBeats (int beats);
+    bool isMidiSequencerRecording() const { return midiSequencerRecording.load(); }
+    bool isMidiSequencerPlaying() const { return midiSequencerPlaying.load(); }
+    bool isMidiSequencerLooping() const { return midiSequencerLooping.load(); }
+    bool hasAudioLoop() const { return audioLoopLength.load() > 0; }
+    int64_t getAudioLoopPosition() const { return audioLoopPosition.load(); }
+    int64_t getAudioLoopLength() const { return audioLoopLength.load(); }
+    int getMidiSequencerEventCount() const { return midiSequencerEventCount.load(); }
+    int64_t getMidiSequencerPosition() const { return midiSequencerPosition.load(); }
+    int64_t getMidiSequencerLength() const { return midiSequencerLength.load(); }
+    juce::var getMidiSequenceEventSnapshot() const;
+    bool saveMidiSequenceToFile (const juce::File& file, const juce::String& name, juce::String& error) const;
+    juce::var getMidiSequenceJson() const;
+    bool loadMidiSequenceJson (const juce::var& data, juce::String& error);
+    int getMidiQuantizationDivision() const { return midiQuantizationDivision.load(); }
+    void setMidiQuantizationDivision (int division);
+    void setMidiSequencerRecording (bool enabled);
+    void setMidiSequencerPlaying (bool enabled);
+    void setMidiSequencerLooping (bool enabled);
+    void clearMidiSequence();
 
     // MIDI clock output for syncing external hardware (analog drum
     // machines, sequencers). Enabled via the transport UI.
@@ -150,6 +169,7 @@ public:
     // so the user knows what was skipped. Cleared explicitly.
     juce::String getLastChainRestoreError() const;
     void clearLastChainRestoreError();
+    void restoreSavedPluginChains();
 
     // Meter values updated by the audio thread (peak + RMS over the last block).
     float getCurrentInputLevel() const { return inputLevel.load (std::memory_order_acquire); }
@@ -186,6 +206,10 @@ private:
     void renderPlayback (juce::AudioBuffer<float>& destination, int numSamples);
     void computeLevels  (const juce::AudioBuffer<float>& source, int numSamples);
     void renderMetronomeInBlock (juce::AudioBuffer<float>& buffer, int64_t startPos, int numSamples);
+    void recordMidiEvents (const juce::MidiBuffer& midiMessages, int64_t blockStart);
+    void renderMidiSequence (juce::MidiBuffer& midiMessages, int64_t position, int numSamples);
+
+    struct SequencedMidiEvent { int64_t position = 0; juce::MidiMessage message; };
 
     juce::ListenerList<Listener> listeners;
 
@@ -228,6 +252,30 @@ private:
     std::atomic<bool>    preRollActive    { false };
     std::atomic<int64_t> transportPosition { 0 };
     std::atomic<int64_t> metronomePosition { 0 };
+    static constexpr int maxMidiSequenceEvents = 8192;
+    std::array<SequencedMidiEvent, maxMidiSequenceEvents> midiSequence;
+    std::atomic<bool> midiSequencerRecording { false };
+    std::atomic<bool> midiSequencerPlaying { false };
+    std::atomic<bool> midiSequencerLooping { true };
+    std::atomic<int> midiSequencerEventCount { 0 };
+    std::atomic<int64_t> midiSequencerPosition { 0 };
+    std::atomic<int64_t> midiSequencerLength { 0 };
+    int64_t midiSequencerRecordStart = 0;
+    std::atomic<bool> midiSequencerPreRoll { false };
+    std::atomic<bool> midiSequencerRecordArmed { false };
+    std::atomic<bool> midiSequencerClearRequested { false };
+    std::array<bool, 16 * 128> midiSequencerActiveNotes {};
+    std::atomic<bool> midiSequencerWasPlaying { false };
+    std::atomic<int> midiQuantizationDivision { 0 };
+    std::atomic<int64_t> audioLoopLength { 0 };
+    std::atomic<int64_t> audioLoopPosition { 0 };
+    std::atomic<bool> audioLoopRecording { false };
+    std::atomic<bool> audioLoopPlaying { false };
+    int loopCrossfadeSamples = 0;
+
+    static int64_t quantizeMidiPosition (int64_t position, double sampleRate, float bpm, int division);
+    void flushActiveMidiNotes (juce::MidiBuffer& midiMessages);
+    void trimLooperToMusicalGrid();
 
     // Pre-rendered click sample (50 ms of decaying harmonics). Filled in
     // prepareToPlay, read-only on the audio thread.
@@ -288,6 +336,7 @@ private:
     // writing the just-loaded state back over the file.
     void persistPluginChain();
     bool persistingPluginChain = false;
+    bool pluginChainsRestored = false;
 
     // Build the combined plugin-chain bundle (both chains + library
     // metadata) for persistence. See PluginProcessor.cpp for the

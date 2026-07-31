@@ -589,6 +589,119 @@ button {
 }
 
 /* ============================================================
+   MIDI sequencer
+   ============================================================ */
+
+.midi-sequencer {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 22px;
+  background: linear-gradient(135deg, var(--panel), var(--inset));
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.sequencer-header,
+.sequencer-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.sequencer-header h2 {
+  margin: 5px 0 4px;
+  color: var(--text);
+  font-size: 1.05rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.sequencer-header p {
+  margin: 0;
+  color: var(--text-3);
+  font-size: 0.78rem;
+}
+
+.eyebrow {
+  color: var(--accent);
+  font-size: 0.63rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.sequencer-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-3);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.sequencer-state-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+
+.midi-sequencer.is-recording .sequencer-state { color: var(--rec); }
+.midi-sequencer.is-recording .sequencer-state-dot { background: var(--rec); animation: status-blink 1.2s ease-in-out infinite; }
+.midi-sequencer.is-playing .sequencer-state { color: var(--accent); }
+.midi-sequencer.is-playing .sequencer-state-dot { background: var(--accent); }
+
+.sequencer-timeline {
+  position: relative;
+  height: 92px;
+  overflow: hidden;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--inset);
+}
+
+.sequencer-grid-lines {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  justify-content: space-around;
+}
+
+.sequencer-grid-lines i { width: 1px; background: var(--border-soft); }
+.sequencer-event-density { position: absolute; right: 4%; bottom: 25px; left: 4%; height: 30px; background: var(--accent-dim); border: 1px solid var(--accent-border); border-radius: 4px; }
+.sequencer-event-density span { display: block; width: 100%; height: 100%; background: repeating-linear-gradient(90deg, var(--accent) 0 3px, transparent 3px 10px); opacity: 0.8; }
+.sequencer-playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--warn); box-shadow: 0 0 12px var(--warn); transition: left 0.08s linear; }
+.sequencer-timeline-caption { position: absolute; right: 11px; bottom: 7px; left: 11px; display: flex; justify-content: space-between; color: var(--text-3); font-family: var(--mono); font-size: 0.63rem; letter-spacing: 0.06em; text-transform: uppercase; }
+
+
+.sequencer-primary-controls { display: flex; flex-wrap: wrap; gap: 8px; }
+.sequencer-record-button { display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font: inherit; font-size: 0.74rem; font-weight: 650; cursor: pointer; }
+.sequencer-record-button:hover { border-color: var(--rec); color: var(--rec); }
+.sequencer-record-button.is-active { border-color: var(--rec); background: var(--rec); color: #fff; }
+.sequencer-record-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--rec); }
+.sequencer-record-button.is-active .sequencer-record-dot { background: #fff; }
+.sequencer-loop-switch { display: inline-flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 0.75rem; cursor: pointer; }
+.sequencer-loop-switch input { position: absolute; opacity: 0; pointer-events: none; }
+.sequencer-switch { position: relative; width: 30px; height: 17px; border-radius: 99px; background: var(--border-strong); transition: background 0.15s ease; }
+.sequencer-switch::after { position: absolute; top: 3px; left: 3px; width: 11px; height: 11px; border-radius: 50%; background: var(--text-3); content: ""; transition: transform 0.15s ease, background 0.15s ease; }
+.sequencer-loop-switch input:checked + .sequencer-switch { background: var(--accent); }
+.sequencer-loop-switch input:checked + .sequencer-switch::after { transform: translateX(13px); background: #fff; }
+.sequencer-quantize-control { display: inline-flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 0.75rem; }
+.sequencer-quantize-control select { height: 28px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--inset); color: var(--text); font: inherit; font-size: 0.72rem; }
+
+.midi-lane { position: relative; height: 88px; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--inset); }
+.midi-lane-grid { position: absolute; inset: 0; display: flex; justify-content: space-around; }
+.midi-lane-grid i { width: 1px; background: var(--border-soft); }
+.midi-lane-note { position: absolute; width: 4px; height: 9px; border-radius: 2px; background: var(--accent); box-shadow: 0 0 5px var(--accent); transform: translateX(-2px); }
+.midi-lane-playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--warn); box-shadow: 0 0 10px var(--warn); transition: left 0.08s linear; }
+.midi-lane-labels { position: absolute; right: 10px; bottom: 7px; left: 10px; display: flex; justify-content: space-between; color: var(--text-3); font-family: var(--mono); font-size: 0.62rem; letter-spacing: 0.06em; text-transform: uppercase; }
+
+/* ============================================================
    Level meter
    ============================================================ */
 
@@ -1394,6 +1507,12 @@ button {
     border-left: none;
     padding-left: 0;
   }
+
+  .sequencer-header,
+  .sequencer-controls {
+    align-items: flex-start;
+    flex-direction: column;
+  }
 }
 
 @media (max-width: 900px) {
@@ -1406,6 +1525,11 @@ button {
   .rec-button.is-recording,
   .transport.is-recording .transport-status-dot,
   .transport-readout.is-counting-in .transport-time-value {
+    animation: none;
+  }
+
+  .sequencer-playhead,
+  .midi-sequencer.is-recording .sequencer-state-dot {
     animation: none;
   }
 

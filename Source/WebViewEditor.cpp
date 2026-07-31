@@ -246,6 +246,11 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
                 juce::ignoreUnused (id);
             }
         })
+        .withEventListener(BluePrinterWebViewEditor::frontendSaveMidiSequenceEvent, [owner](juce::var)
+        {
+            if (owner != nullptr)
+                owner->handleSaveMidiSequence();
+        })
         .withEventListener(BluePrinterWebViewEditor::frontendRevealSnippetEvent, [owner](juce::var data)
         {
             if (owner != nullptr)
@@ -300,7 +305,19 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
         {
             if (auto* obj = data.getDynamicObject())
                 processor.setMidiOutputDeviceName (obj->getProperty ("device").toString());
-        })
+         })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetMidiSequencerRecordingEvent, [&processor](juce::var data)
+        { if (auto* obj = data.getDynamicObject()) processor.setMidiSequencerRecording (static_cast<bool> (obj->getProperty ("enabled"))); })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetMidiSequencerPlayingEvent, [&processor](juce::var data)
+        { if (auto* obj = data.getDynamicObject()) processor.setMidiSequencerPlaying (static_cast<bool> (obj->getProperty ("enabled"))); })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetMidiSequencerLoopingEvent, [&processor](juce::var data)
+        { if (auto* obj = data.getDynamicObject()) processor.setMidiSequencerLooping (static_cast<bool> (obj->getProperty ("enabled"))); })
+        .withEventListener(BluePrinterWebViewEditor::frontendClearMidiSequenceEvent, [&processor](juce::var)
+        { processor.clearMidiSequence(); })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetMidiQuantizationEvent, [&processor](juce::var data)
+        { if (auto* obj = data.getDynamicObject()) processor.setMidiQuantizationDivision (static_cast<int> (obj->getProperty ("division"))); })
+        .withEventListener(BluePrinterWebViewEditor::frontendLoadMidiSequenceEvent, [owner](juce::var)
+        { if (owner != nullptr) owner->handleLoadMidiSequence(); })
         .withEventListener(BluePrinterWebViewEditor::frontendAddVst3Event, [owner](juce::var data)
         {
             if (owner == nullptr)
@@ -438,6 +455,7 @@ BluePrinterWebViewEditor::BluePrinterWebViewEditor(BluePrinterAudioProcessor& p)
     , audioProcessor(p)
     , webView(makeWebViewOptions(p, getWebUiDistRoot(), this, makeParameterSnapshot()))
 {
+    audioProcessor.restoreSavedPluginChains();
     addAndMakeVisible(webView);
 
     // When a chain slot is removed (e.g. user removed the plugin), close
@@ -670,6 +688,16 @@ juce::var BluePrinterWebViewEditor::makeTransportSnapshot() const
     }
     obj->setProperty ("preRollActive",    audioProcessor.isPreRollActive());
     obj->setProperty ("transportPosition", static_cast<double> (audioProcessor.getTransportPosition()));
+    obj->setProperty ("midiSequencerRecording", audioProcessor.isMidiSequencerRecording());
+    obj->setProperty ("midiSequencerPlaying", audioProcessor.isMidiSequencerPlaying());
+    obj->setProperty ("midiSequencerLooping", audioProcessor.isMidiSequencerLooping());
+    obj->setProperty ("midiSequencerEventCount", audioProcessor.getMidiSequencerEventCount());
+    obj->setProperty ("midiSequencerPosition", static_cast<double> (audioProcessor.getMidiSequencerPosition()));
+    obj->setProperty ("midiSequencerLength", static_cast<double> (audioProcessor.getMidiSequencerLength()));
+    obj->setProperty ("midiQuantizationDivision", audioProcessor.getMidiQuantizationDivision());
+    obj->setProperty ("audioLoopLength", static_cast<double> (audioProcessor.getAudioLoopLength()));
+    obj->setProperty ("audioLoopPosition", static_cast<double> (audioProcessor.getAudioLoopPosition()));
+    obj->setProperty ("midiEvents", audioProcessor.getMidiSequenceEventSnapshot());
     return juce::var (obj);
 }
 
@@ -688,6 +716,65 @@ void BluePrinterWebViewEditor::handleSaveSnippet(const juce::var& data)
         else
             pickLibraryFolderThenSave (id);
     }
+}
+
+void BluePrinterWebViewEditor::handleLoadMidiSequence()
+{
+    activeFileChooser = std::make_unique<juce::FileChooser> (
+        "Load MIDI sequence JSON",
+        juce::File (audioProcessor.getLibraryFolder()),
+        "*.json",
+        true);
+
+    activeFileChooser->launchAsync (juce::FileBrowserComponent::openMode
+                                  | juce::FileBrowserComponent::canSelectFiles,
+                                    [this](const juce::FileChooser& chooser)
+    {
+        const auto file = chooser.getResult();
+        activeFileChooser.reset();
+        if (! file.existsAsFile())
+            return;
+
+        juce::String error;
+        const auto json = juce::JSON::parse (file);
+        if (! audioProcessor.loadMidiSequenceJson (json, error))
+            sendNotification (error, "error");
+        else
+        {
+            audioProcessor.setMidiSequencerPlaying (false);
+            sendNotification ("MIDI sequence loaded.", "info");
+        }
+    });
+}
+
+void BluePrinterWebViewEditor::handleSaveMidiSequence()
+{
+    auto folder = juce::File (audioProcessor.getLibraryFolder());
+    if (! folder.isDirectory())
+        folder = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory);
+
+    activeFileChooser = std::make_unique<juce::FileChooser> (
+        "Save MIDI sequence",
+        folder.getChildFile ("MIDI Sequence.mid"),
+        "*.mid",
+        true);
+
+    activeFileChooser->launchAsync (juce::FileBrowserComponent::saveMode
+                                  | juce::FileBrowserComponent::canSelectFiles
+                                  | juce::FileBrowserComponent::warnAboutOverwriting,
+                                    [this](const juce::FileChooser& chooser)
+    {
+        const auto file = chooser.getResult();
+        activeFileChooser.reset();
+        if (file == juce::File())
+            return;
+
+        juce::String error;
+        if (! audioProcessor.saveMidiSequenceToFile (file, file.getFileNameWithoutExtension(), error))
+            sendNotification (error, "error");
+        else
+            sendNotification ("MIDI sequence saved.", "info");
+    });
 }
 
 void BluePrinterWebViewEditor::handleRevealSnippet(const juce::var& data)
