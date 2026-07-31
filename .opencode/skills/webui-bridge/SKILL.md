@@ -36,6 +36,13 @@ All frontend events are in `FRONTEND_EVENTS`, backend events in `BACKEND_EVENTS`
 - `updateSnippet`, `deleteSnippet`, `detectSnippetKey`, `saveSnippet`, `revealSnippet`
 - `chooseLibraryFolder`, `openLibraryFolder`, `refreshLibrary`, `getSnippets`
 - `setMetronome`, `setBpm`, `setCountInBeats`, `setMidiClock`, `setMidiDevice`
+- `setMidiSequencerRecording`, `setMidiSequencerPlaying`, `setMidiSequencerLooping`, `clearMidiSequence`
+- Sequencer transport snapshots include `midiSequencerEventCount`, `midiSequencerPosition`, and `midiSequencerLength`; the UI should derive the playhead from these values.
+- The combined audio/MIDI looper also exposes `audioLoopPosition` and `audioLoopLength`. Use these for the visual timeline and playhead because audio is the shared loop duration.
+- MIDI sequencer bridge events include `frontendSaveMidiSequence`, `frontendLoadMidiSequence`, and `frontendSetMidiQuantization`. File chooser/load work stays on the message thread; quantization payloads use `{ division: 0|4|8|16|32 }`.
+- Transport snapshots expose `midiQuantizationDivision` so the frontend selector remains synchronized with processor state.
+- Transport snapshots also expose `midiEvents`; each event contains `position`, `note`, and `velocity`. `MidiLane.jsx` renders these as normalized pitch/time ticks and uses `audioLoopPosition` / `audioLoopLength` for the backend-driven playhead.
+- `MidiLane` is memoized and must not use decorative keyframe animation for transport movement. The playhead position comes directly from backend snapshots.
 - `addVst3`, `removeVst3`, `moveVst3`, `setVst3Bypass`, `openVst3Editor`, `closeVst3Editor`
 - `scanVst3Folder`, `getVst3Chain`, `blockVst3Plugin`, `unblockVst3Plugin`
 

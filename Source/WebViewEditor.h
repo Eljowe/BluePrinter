@@ -29,6 +29,9 @@ public:
     static constexpr const char* frontendDeleteSnippetEvent    = "frontendDeleteSnippet";
     static constexpr const char* frontendDetectSnippetKeyEvent = "frontendDetectSnippetKey";
     static constexpr const char* frontendSaveSnippetEvent      = "frontendSaveSnippet";
+    static constexpr const char* frontendSaveMidiSequenceEvent = "frontendSaveMidiSequence";
+    static constexpr const char* frontendLoadMidiSequenceEvent = "frontendLoadMidiSequence";
+    static constexpr const char* frontendSetMidiQuantizationEvent = "frontendSetMidiQuantization";
     static constexpr const char* frontendRevealSnippetEvent    = "frontendRevealSnippet";
     static constexpr const char* frontendChooseFolderEvent     = "frontendChooseLibraryFolder";
     static constexpr const char* frontendOpenFolderEvent       = "frontendOpenLibraryFolder";
@@ -48,6 +51,10 @@ public:
     static constexpr const char* frontendSetCountInBeatsEvent  = "frontendSetCountInBeats";
     static constexpr const char* frontendSetMidiClockEvent     = "frontendSetMidiClock";
     static constexpr const char* frontendSetMidiDeviceEvent    = "frontendSetMidiDevice";
+    static constexpr const char* frontendSetMidiSequencerRecordingEvent = "frontendSetMidiSequencerRecording";
+    static constexpr const char* frontendSetMidiSequencerPlayingEvent = "frontendSetMidiSequencerPlaying";
+    static constexpr const char* frontendSetMidiSequencerLoopingEvent = "frontendSetMidiSequencerLooping";
+    static constexpr const char* frontendClearMidiSequenceEvent = "frontendClearMidiSequence";
     static constexpr const char* frontendAddVst3Event          = "frontendAddVst3";
     static constexpr const char* frontendRemoveVst3Event       = "frontendRemoveVst3";
     static constexpr const char* frontendMoveVst3Event         = "frontendMoveVst3";
@@ -71,6 +78,8 @@ public:
     // File-chooser / dialog handlers — public so the event-listener lambdas
     // registered inside makeWebViewOptions can call them.
     void handleSaveSnippet(const juce::var& data);
+    void handleSaveMidiSequence();
+    void handleLoadMidiSequence();
     void handleRevealSnippet(const juce::var& data);
     void handleChooseLibraryFolder();
     void handleOpenLibraryFolder();
