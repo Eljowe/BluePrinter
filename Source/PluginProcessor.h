@@ -134,29 +134,36 @@ public:
     void setMetronomeEnabled (bool enabled);
     void setBpm (float newBpm);
     void setCountInBeats (int beats);
-    bool isMidiSequencerRecording() const { return midiSequencerRecording.load(); }
-    bool isMidiSequencerPlaying() const { return midiSequencerPlaying.load(); }
-    bool isMidiSequencerLooping() const { return midiSequencerLooping.load(); }
-    bool hasAudioLoop() const { return audioLoopLength.load() > 0; }
+
+    // Audio looper. Captures the post-chain audio (so synth and FX
+    // sounds are baked into the loop) into the shared recordBuffer,
+    // then plays it back as an audio-only loop. Optional click +
+    // count-in run off the same metronome clock.
+    bool    isLooperRecording() const { return audioLoopRecording.load(); }
+    bool    isLooperPreRolling() const { return looperPreRollActive.load(); }
+    bool    isLooperPlaying() const { return audioLoopPlaying.load(); }
+    bool    isLooperLooping() const { return looperLooping.load(); }
+    bool    isLooperClickEnabled() const { return looperMetronomeEnabled.load(); }
+    int     getLooperCountInBeats() const { return looperCountInBeats.load(); }
+    // Bars trimmed off the start/end of the captured loop (message-thread
+    // crop settings, applied to audioLoopStart/audioLoopLength).
+    int     getLooperCropStartBars() const { return looperCropStartBars; }
+    int     getLooperCropEndBars() const { return looperCropEndBars; }
+    bool    hasAudioLoop() const { return audioLoopLength.load() > 0; }
     int64_t getAudioLoopPosition() const { return audioLoopPosition.load(); }
     int64_t getAudioLoopLength() const { return audioLoopLength.load(); }
-    int getMidiSequencerEventCount() const { return midiSequencerEventCount.load(); }
-    int64_t getMidiSequencerPosition() const { return midiSequencerPosition.load(); }
-    int64_t getMidiSequencerLength() const { return midiSequencerLength.load(); }
-    juce::var getMidiSequenceEventSnapshot() const;
-    // Converts the captured audio loop (recordBuffer up to the trimmed
-    // audioLoopLength) into a library snippet, exactly like the recording
-    // block does. Message thread only. Returns the new snippet id, or -1
-    // if there is no captured loop.
+    int64_t getAudioLoopStart() const { return audioLoopStart.load(); }
+    void    setLooperRecording (bool enabled);
+    void    setLooperPlaying (bool enabled);
+    void    setLooperLooping (bool enabled);
+    void    setLooperClickEnabled (bool enabled);
+    void    setLooperCountInBeats (int beats);
+    void    setLoopCrop (int startBars, int endBars);
+    void    clearLoop();
+    // Converts the captured (cropped) loop into a library snippet, exactly
+    // like the recording block does. Message thread only. Returns the new
+    // snippet id, or -1 if there is no captured loop.
     int addLoopSnippet();
-    juce::var getMidiSequenceJson() const;
-    bool loadMidiSequenceJson (const juce::var& data, juce::String& error);
-    int getMidiQuantizationDivision() const { return midiQuantizationDivision.load(); }
-    void setMidiQuantizationDivision (int division);
-    void setMidiSequencerRecording (bool enabled);
-    void setMidiSequencerPlaying (bool enabled);
-    void setMidiSequencerLooping (bool enabled);
-    void clearMidiSequence();
 
     // MIDI clock output for syncing external hardware (analog drum
     // machines, sequencers). Enabled via the transport UI.
@@ -210,10 +217,6 @@ private:
     void renderPlayback (juce::AudioBuffer<float>& destination, int numSamples);
     void computeLevels  (const juce::AudioBuffer<float>& source, int numSamples);
     void renderMetronomeInBlock (juce::AudioBuffer<float>& buffer, int64_t startPos, int numSamples);
-    void recordMidiEvents (const juce::MidiBuffer& midiMessages, int64_t blockStart);
-    void renderMidiSequence (juce::MidiBuffer& midiMessages, int64_t position, int numSamples);
-
-    struct SequencedMidiEvent { int64_t position = 0; juce::MidiMessage message; };
 
     juce::ListenerList<Listener> listeners;
 
@@ -256,29 +259,25 @@ private:
     std::atomic<bool>    preRollActive    { false };
     std::atomic<int64_t> transportPosition { 0 };
     std::atomic<int64_t> metronomePosition { 0 };
-    static constexpr int maxMidiSequenceEvents = 8192;
-    std::array<SequencedMidiEvent, maxMidiSequenceEvents> midiSequence;
-    std::atomic<bool> midiSequencerRecording { false };
-    std::atomic<bool> midiSequencerPlaying { false };
-    std::atomic<bool> midiSequencerLooping { true };
-    std::atomic<int> midiSequencerEventCount { 0 };
-    std::atomic<int64_t> midiSequencerPosition { 0 };
-    std::atomic<int64_t> midiSequencerLength { 0 };
-    int64_t midiSequencerRecordStart = 0;
-    std::atomic<bool> midiSequencerPreRoll { false };
-    std::atomic<bool> midiSequencerRecordArmed { false };
-    std::atomic<bool> midiSequencerClearRequested { false };
-    std::array<bool, 16 * 128> midiSequencerActiveNotes {};
-    std::atomic<bool> midiSequencerWasPlaying { false };
-    std::atomic<int> midiQuantizationDivision { 0 };
-    std::atomic<int64_t> audioLoopLength { 0 };
+
+    // Audio looper state. Capture writes the post-chain audio into
+    // recordBuffer up to audioLoopLength; crop skips audioLoopStart
+    // samples at playback/save time. All audio-thread reads go through
+    // the atomics; the crop bar counts are message-thread only.
+    std::atomic<bool>    looperMetronomeEnabled { true };
+    std::atomic<int>     looperCountInBeats     { 4 };
+    std::atomic<bool>    looperPreRollActive    { false };
+    std::atomic<bool>    looperCaptureArmed     { false };
+    std::atomic<bool>    looperLooping          { true };
+    std::atomic<int64_t> audioLoopStart   { 0 };
+    std::atomic<int64_t> audioLoopLength  { 0 };
     std::atomic<int64_t> audioLoopPosition { 0 };
     std::atomic<bool> audioLoopRecording { false };
-    std::atomic<bool> audioLoopPlaying { false };
+    std::atomic<bool> audioLoopPlaying   { false };
+    int looperCropStartBars = 0;
+    int looperCropEndBars   = 0;
     int loopCrossfadeSamples = 0;
 
-    static int64_t quantizeMidiPosition (int64_t position, double sampleRate, float bpm, int division);
-    void flushActiveMidiNotes (juce::MidiBuffer& midiMessages);
     void trimLooperToMusicalGrid();
 
     // Pre-rendered click sample (50 ms of decaying harmonics). Filled in

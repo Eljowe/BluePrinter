@@ -18,24 +18,32 @@ BluePrinter uses JUCE for audio processing, VST3 hosting, and WebView2 UI integr
 ## Audio Path (`processBlock`)
 
 ```
-1. MIDI sequencer: capture incoming events (if armed, filtering clock/Start/Stop),
-   flush active-note note-offs when not playing, render recorded MIDI events
-2. Audio loop playback: addFrom recordBuffer at the loop position (with a
-   precomputed crossfade at the wrap point)
-3. Apply gain parameter (apvts.getRawParameterValue("Gain")->load())
-4. Run the MIDI chain on its own scratch copy of the post-gain buffer, sum its
+1. Apply gain parameter (apvts.getRawParameterValue("Gain")->load())
+2. Run the MIDI chain on its own scratch copy of the post-gain buffer, sum its
    output back in; run the audio chain on the summed buffer (shared MIDI buffer)
-5. Record the processed (post-gain, pre-click) signal into the record buffer
-   under recordLock, if recording is requested
-6. Compute input levels (RMS + peak) from the clean signal
-7. Playback: substitute the recorded buffer in place of live input
+3. Looper capture tap: if the looper is armed, copy the POST-CHAIN buffer into
+   the loop region of recordBuffer (bakes in synth sounds + FX; the click is
+   mixed later so it never lands in the loop)
+4. Record the take-recorder tap (post-gain, pre-click) under recordLock
+5. Compute input levels (RMS + peak) from the clean signal
+6. Audio loop playback: addFrom the cropped window
+   [audioLoopStart, audioLoopStart + audioLoopLength) of recordBuffer, with a
+   precomputed crossfade at the wrap point — post-chain, mixed over the live
+   input, so the already-processed loop audio isn't double-processed
+7. Snippet playback: substitute the recorded buffer in place of live input
    (does NOT re-run the chains)
-8. Pre-roll count-in: render the metronome click, flip into actual recording
-   once the configured beats elapse
-9. Metronome click during recording + advance the continuous beat clock
-10. MIDI clock output (24 ppqn from metronomePosition) + flush pending
+8. Looper count-in pre-roll: render the click, advance the beat clock, flip
+   into capture when the configured beats elapse
+9. Take-recorder pre-roll: same flow, flips into actual recording
+10. Click during take recording + advance the continuous beat clock
+11. Click during looper capture + advance the same beat clock
+12. MIDI clock output (24 ppqn from metronomePosition) + flush pending
     MIDI Start / Stop
 ```
+
+The take recorder and the audio looper share `recordBuffer`; `startRecording`
+and `setLooperRecording` preempt each other so they never capture
+simultaneously. Both loops are otherwise independent of the metronome/clock.
 
 ## Threading Model
 
