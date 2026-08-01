@@ -462,6 +462,7 @@ button {
   flex-direction: column;
   align-items: flex-start;
   gap: 4px;
+  position: relative;
 }
 
 /* metronome toggle */
@@ -555,8 +556,14 @@ button {
   font-size: 0.7rem;
 }
 
-/* MIDI device selector (visible when MIDI clock is on) */
+/* MIDI device selector (visible when MIDI clock is on). Floats
+   below the toggle instead of participating in the flex row, so
+   revealing it never moves the BPM knob or the toggle itself. */
 .midi-device-control {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 10;
   display: flex;
   align-items: center;
 }
@@ -583,6 +590,10 @@ button {
 }
 
 .midi-no-devices {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 10;
   font-size: 0.68rem;
   color: var(--rec);
   white-space: nowrap;

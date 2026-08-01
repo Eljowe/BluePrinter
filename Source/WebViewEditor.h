@@ -29,8 +29,7 @@ public:
     static constexpr const char* frontendDeleteSnippetEvent    = "frontendDeleteSnippet";
     static constexpr const char* frontendDetectSnippetKeyEvent = "frontendDetectSnippetKey";
     static constexpr const char* frontendSaveSnippetEvent      = "frontendSaveSnippet";
-    static constexpr const char* frontendSaveMidiSequenceEvent = "frontendSaveMidiSequence";
-    static constexpr const char* frontendLoadMidiSequenceEvent = "frontendLoadMidiSequence";
+    static constexpr const char* frontendSaveLoopEvent         = "frontendSaveLoop";
     static constexpr const char* frontendSetMidiQuantizationEvent = "frontendSetMidiQuantization";
     static constexpr const char* frontendRevealSnippetEvent    = "frontendRevealSnippet";
     static constexpr const char* frontendChooseFolderEvent     = "frontendChooseLibraryFolder";
@@ -78,8 +77,7 @@ public:
     // File-chooser / dialog handlers — public so the event-listener lambdas
     // registered inside makeWebViewOptions can call them.
     void handleSaveSnippet(const juce::var& data);
-    void handleSaveMidiSequence();
-    void handleLoadMidiSequence();
+    void handleSaveLoop();
     void handleRevealSnippet(const juce::var& data);
     void handleChooseLibraryFolder();
     void handleOpenLibraryFolder();

@@ -1,5 +1,5 @@
 import { FRONTEND_EVENTS, emit } from "../bridge";
-import { IconPlay, IconStop, IconTrash } from "./icons";
+import { IconPlay, IconSave, IconStop, IconTrash } from "./icons";
 
 export function MidiSequencer({ transport }) {
   const events = Number(transport?.midiSequencerEventCount ?? 0);
@@ -49,11 +49,8 @@ export function MidiSequencer({ transport }) {
           <button type="button" className="btn btn-ghost btn-sm" disabled={!hasSequence} onClick={() => emit(FRONTEND_EVENTS.clearMidiSequence)}>
             <IconTrash size={13} /> Clear
           </button>
-          <button type="button" className="btn btn-ghost btn-sm" disabled={!hasSequence} onClick={() => emit(FRONTEND_EVENTS.saveMidiSequence)}>
-            Save MIDI
-          </button>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => emit(FRONTEND_EVENTS.loadMidiSequence)}>
-            Load MIDI
+          <button type="button" className="btn btn-ghost btn-sm" disabled={!hasSequence} onClick={() => emit(FRONTEND_EVENTS.saveLoop)}>
+            <IconSave size={13} /> Save loop
           </button>
         </div>
         <label className="sequencer-loop-switch">

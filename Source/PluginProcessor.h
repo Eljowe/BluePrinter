@@ -144,7 +144,11 @@ public:
     int64_t getMidiSequencerPosition() const { return midiSequencerPosition.load(); }
     int64_t getMidiSequencerLength() const { return midiSequencerLength.load(); }
     juce::var getMidiSequenceEventSnapshot() const;
-    bool saveMidiSequenceToFile (const juce::File& file, const juce::String& name, juce::String& error) const;
+    // Converts the captured audio loop (recordBuffer up to the trimmed
+    // audioLoopLength) into a library snippet, exactly like the recording
+    // block does. Message thread only. Returns the new snippet id, or -1
+    // if there is no captured loop.
+    int addLoopSnippet();
     juce::var getMidiSequenceJson() const;
     bool loadMidiSequenceJson (const juce::var& data, juce::String& error);
     int getMidiQuantizationDivision() const { return midiQuantizationDivision.load(); }
