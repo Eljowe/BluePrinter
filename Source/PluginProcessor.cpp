@@ -224,142 +224,13 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     const int numSamples = buffer.getNumSamples();
     const int numChannels = buffer.getNumChannels();
 
-    const int64_t transportStart = transportPosition.load (std::memory_order_acquire);
-    if (midiSequencerRecordArmed.load (std::memory_order_acquire))
-    {
-        if (audioLoopRecording.load (std::memory_order_acquire))
-        {
-            const auto writePos = audioLoopLength.load (std::memory_order_relaxed);
-            const auto toCopy = juce::jmin (numSamples, maxRecordSamples - static_cast<int> (writePos));
-            if (toCopy > 0)
-            {
-                for (int ch = 0; ch < juce::jmin (numChannels, recordBuffer->getNumChannels()); ++ch)
-                    recordBuffer->copyFrom (ch, static_cast<int> (writePos), buffer, ch, 0, toCopy);
-                audioLoopLength.store (writePos + toCopy, std::memory_order_release);
-            }
-        }
-        for (const auto metadata : midiMessages)
-        {
-            const auto message = metadata.getMessage();
-            if (message.isMidiClock() || message.isMidiStart() || message.isMidiContinue() || message.isMidiStop())
-                continue;
-
-            const auto index = midiSequencerEventCount.load (std::memory_order_relaxed);
-            if (index >= maxMidiSequenceEvents)
-                break;
-            const auto position = transportStart - midiSequencerRecordStart + metadata.samplePosition;
-            if (position >= 0)
-            {
-                midiSequence[static_cast<size_t> (index)] = { position, message };
-                midiSequencerLength.store (juce::jmax (midiSequencerLength.load(), position + 1), std::memory_order_release);
-                midiSequencerEventCount.store (index + 1, std::memory_order_release);
-            }
-        }
-    }
-
-    if (midiSequencerClearRequested.exchange (false, std::memory_order_acq_rel))
-    {
-        midiSequencerEventCount.store (0, std::memory_order_release);
-        midiSequencerLength.store (0, std::memory_order_release);
-        midiSequencerPosition.store (0, std::memory_order_release);
-    }
-
-    if (! midiSequencerPlaying.load (std::memory_order_acquire))
-    {
-        for (int channel = 1; channel <= 16; ++channel)
-            for (int note = 0; note < 128; ++note)
-            {
-                auto& active = midiSequencerActiveNotes[static_cast<size_t> ((channel - 1) * 128 + note)];
-                if (active)
-                {
-                    midiMessages.addEvent (juce::MidiMessage::noteOff (channel, note), 0);
-                    active = false;
-                }
-            }
-    }
-
-    if (midiSequencerPlaying.load (std::memory_order_acquire))
-    {
-        const auto sequenceLength = midiSequencerLength.load (std::memory_order_acquire);
-        const auto sequencePosition = midiSequencerPosition.load (std::memory_order_acquire);
-        if (sequenceLength > 0)
-        {
-            const auto eventCount = midiSequencerEventCount.load (std::memory_order_acquire);
-            for (int i = 0; i < eventCount; ++i)
-            {
-                const auto& event = midiSequence[static_cast<size_t> (i)];
-                const auto eventPosition = event.position % sequenceLength;
-                if (eventPosition >= sequencePosition && eventPosition < sequencePosition + numSamples)
-                {
-                    midiMessages.addEvent (event.message, static_cast<int> (eventPosition - sequencePosition));
-                    if (event.message.isNoteOn())
-                        midiSequencerActiveNotes[static_cast<size_t> ((event.message.getChannel() - 1) * 128 + event.message.getNoteNumber())] = true;
-                    else if (event.message.isNoteOff())
-                        midiSequencerActiveNotes[static_cast<size_t> ((event.message.getChannel() - 1) * 128 + event.message.getNoteNumber())] = false;
-                }
-            }
-
-            const auto nextPosition = sequencePosition + numSamples;
-            if (midiSequencerLooping.load (std::memory_order_acquire))
-                midiSequencerPosition.store (nextPosition % sequenceLength, std::memory_order_release);
-            else
-            {
-                midiSequencerPosition.store (nextPosition, std::memory_order_release);
-                if (nextPosition >= sequenceLength)
-                    midiSequencerPlaying.store (false, std::memory_order_release);
-            }
-        }
-    }
-
-    if (audioLoopPlaying.load (std::memory_order_acquire))
-    {
-        const auto length = audioLoopLength.load (std::memory_order_acquire);
-        auto position = audioLoopPosition.load (std::memory_order_acquire);
-        if (length > 0 && recordBuffer != nullptr)
-        {
-            const auto toCopy = juce::jmin (numSamples, static_cast<int> (length - position));
-            const auto channels = juce::jmin (numChannels, recordBuffer->getNumChannels());
-            const auto crossfade = juce::jmin (loopCrossfadeSamples, static_cast<int> (length / 2));
-            for (int ch = 0; ch < channels; ++ch)
-            {
-                buffer.addFrom (ch, 0, *recordBuffer, ch, static_cast<int> (position), toCopy);
-                if (crossfade > 0 && position + toCopy >= length)
-                {
-                    const auto fadeStart = juce::jmax<int64_t> (0, length - crossfade);
-                    const auto overlapStart = juce::jmax<int64_t> (0, position - fadeStart);
-                    const auto overlapLength = juce::jmin (crossfade - static_cast<int> (overlapStart), toCopy);
-                    for (int i = 0; i < overlapLength; ++i)
-                    {
-                        const auto sampleIndex = static_cast<int> (position + i);
-                        const auto fade = static_cast<float> (sampleIndex - fadeStart) / static_cast<float> (crossfade);
-                        const auto endSample = recordBuffer->getSample (ch, sampleIndex);
-                        const auto startSample = recordBuffer->getSample (ch, i);
-                        buffer.addSample (ch, i, (startSample - endSample) * fade);
-                    }
-                }
-            }
-            position += toCopy;
-            if (position >= length)
-                position = midiSequencerLooping.load() ? 0 : length;
-            audioLoopPosition.store (position, std::memory_order_release);
-            if (! midiSequencerLooping.load() && position >= length)
-                audioLoopPlaying.store (false, std::memory_order_release);
-        }
-    }
-
-    if (midiSequencerPlaying.load (std::memory_order_acquire)
-        || midiSequencerRecordArmed.load (std::memory_order_acquire))
-    {
-        transportPosition.store (transportStart + numSamples, std::memory_order_release);
-    }
-
     // Apply gain. This is the post-DSP signal we want to record and the
     // pass-through signal when nothing else is happening.
     const auto gain = apvts.getRawParameterValue ("Gain")->load();
     for (int channel = 0; channel < numChannels; ++channel)
         buffer.applyGain (channel, 0, numSamples, gain);
 
-    // 0. Run the VST3 chains in parallel. The MIDI chain runs on its
+    // 1. Run the VST3 chains in parallel. The MIDI chain runs on its
     //    own copy of the post-gain input so a synth/instrument in the
     //    MIDI chain can't clobber the analog signal; its audio output
     //    is then summed back into the main buffer so it mixes in
@@ -387,7 +258,24 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     }
     audioChain.processBlock (buffer, midiMessages);
 
-    // 1. Record the clean (post-gain, pre-click) input. Access to the
+    // 2. Looper capture: tap the post-chain signal so the loop bakes in
+    //    whatever the chains produce (synth sounds, FX). Deliberately
+    //    before the click is mixed in so the click never ends up in the
+    //    loop. Uses the same pre-allocated recordBuffer as the take
+    //    recorder.
+    if (looperCaptureArmed.load (std::memory_order_acquire))
+    {
+        const auto writePos = audioLoopLength.load (std::memory_order_relaxed);
+        const auto toCopy = juce::jmin (numSamples, maxRecordSamples - static_cast<int> (writePos));
+        if (toCopy > 0)
+        {
+            for (int ch = 0; ch < juce::jmin (numChannels, recordBuffer->getNumChannels()); ++ch)
+                recordBuffer->copyFrom (ch, static_cast<int> (writePos), buffer, ch, 0, toCopy);
+            audioLoopLength.store (writePos + toCopy, std::memory_order_release);
+        }
+    }
+
+    // 3. Record the clean (post-gain, pre-click) input. Access to the
     //    record buffer is serialised with the message thread via recordLock.
     {
         const juce::ScopedLock sl (recordLock);
@@ -395,20 +283,99 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             writeRecording (buffer, numSamples);
     }
 
-    // 2. Compute input levels from the still-clean signal so the click
+    // 4. Compute input levels from the still-clean signal so the click
     //    doesn't pump the meter.
     computeLevels (buffer, numSamples);
 
-    // 3. Playback overwrites the output buffer. Done after recording so
+    // 5. Audio loop playback. Runs after the chains so the already-
+    //    processed loop audio isn't re-processed (it was captured
+    //    post-chain). Mixed over the live input rather than replacing
+    //    it, so you can play over the loop. Reads the cropped window
+    //    [audioLoopStart, audioLoopStart + audioLoopLength).
+    if (audioLoopPlaying.load (std::memory_order_acquire))
+    {
+        const auto start = audioLoopStart.load (std::memory_order_acquire);
+        const auto length = audioLoopLength.load (std::memory_order_acquire);
+        auto position = audioLoopPosition.load (std::memory_order_acquire);
+        if (length > 0 && recordBuffer != nullptr)
+        {
+            const auto toCopy = juce::jmin (numSamples, static_cast<int> (length - position));
+            const auto channels = juce::jmin (numChannels, recordBuffer->getNumChannels());
+            const auto crossfade = juce::jmin (loopCrossfadeSamples, static_cast<int> (length / 2));
+            for (int ch = 0; ch < channels; ++ch)
+            {
+                buffer.addFrom (ch, 0, *recordBuffer, ch, static_cast<int> (start + position), toCopy);
+                if (crossfade > 0 && position + toCopy >= length)
+                {
+                    const auto fadeStart = juce::jmax<int64_t> (0, length - crossfade);
+                    const auto overlapStart = juce::jmax<int64_t> (0, position - fadeStart);
+                    const auto overlapLength = juce::jmin (crossfade - static_cast<int> (overlapStart), toCopy);
+                    for (int i = 0; i < overlapLength; ++i)
+                    {
+                        const auto loopIndex = position + i;
+                        const auto fade = static_cast<float> (loopIndex - fadeStart) / static_cast<float> (crossfade);
+                        const auto endSample = recordBuffer->getSample (ch, static_cast<int> (start + loopIndex));
+                        const auto startSample = recordBuffer->getSample (ch, static_cast<int> (start + i));
+                        buffer.addSample (ch, i, (startSample - endSample) * fade);
+                    }
+                }
+            }
+            position += toCopy;
+            if (position >= length)
+                position = looperLooping.load (std::memory_order_acquire) ? 0 : length;
+            audioLoopPosition.store (position, std::memory_order_release);
+            if (! looperLooping.load (std::memory_order_acquire) && position >= length)
+                audioLoopPlaying.store (false, std::memory_order_release);
+        }
+    }
+
+    // 6. Playback overwrites the output buffer. Done after recording so
     //    monitoring of the input stops while a snippet is playing.
     if (playbackActive.load (std::memory_order_acquire))
         renderPlayback (buffer, numSamples);
 
-    // 4. Pre-roll (count-in): add the click to the output, advance the
-    //    position, and flip into recording once the configured number of
-    //    beats has elapsed. Uses metronomePosition as the continuous
-    //    beat clock so counts stay evenly spaced across the transition
-    //    into recording — no double-click mid-block.
+    // 7. Looper count-in: play the click, advance the beat clock, and flip
+    //    into capture once the configured beats have elapsed. Mirrors the
+    //    take-recorder pre-roll below but drives the looper's own capture
+    //    state. Rendered post-chain so the click is at the same level and
+    //    colour as the take recorder's.
+    if (looperPreRollActive.load (std::memory_order_acquire))
+    {
+        const int64_t startPos = metronomePosition.load (std::memory_order_acquire);
+        if (looperMetronomeEnabled.load (std::memory_order_acquire))
+            renderMetronomeInBlock (buffer, startPos, numSamples);
+
+        const int64_t newPos = startPos + numSamples;
+        const double bpmValue = bpm.load (std::memory_order_acquire);
+        const int beatsTarget = looperCountInBeats.load (std::memory_order_acquire);
+
+        bool done = true;
+        if (bpmValue > 0.0 && currentSampleRate > 0.0)
+        {
+            const double samplesPerBeat = 60.0 / bpmValue * currentSampleRate;
+            done = static_cast<int> (newPos / samplesPerBeat) >= beatsTarget;
+        }
+
+        if (done)
+        {
+            looperPreRollActive.store (false, std::memory_order_release);
+            looperCaptureArmed.store (true, std::memory_order_release);
+            audioLoopRecording.store (true, std::memory_order_release);
+            audioLoopLength.store (0, std::memory_order_release);
+            // Capture is starting: fire MIDI Start so external gear syncs
+            // on the first bar, like the take recorder does.
+            if (midiClockEnabled.load (std::memory_order_acquire))
+                midiStartPending.store (true, std::memory_order_release);
+        }
+        metronomePosition.store (newPos, std::memory_order_release);
+        transportPosition.store (newPos, std::memory_order_release);
+    }
+
+    // 8. Pre-roll (count-in) for the take recorder: add the click to the
+    //    output, advance the position, and flip into recording once the
+    //    configured number of beats has elapsed. Uses metronomePosition as
+    //    the continuous beat clock so counts stay evenly spaced across the
+    //    transition into recording — no double-click mid-block.
     if (preRollActive.load (std::memory_order_acquire))
     {
         const int64_t startPos = metronomePosition.load (std::memory_order_acquire);
@@ -440,7 +407,7 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         }
     }
 
-    // 5. Click during recording. The metronome beat clock runs
+    // 9. Click during recording. The metronome beat clock runs
     //    continuously from the recording start (or count-in end) so
     //    beats land at evenly-spaced positions regardless of when the
     //    recording was started. The clock keeps advancing even when
@@ -457,7 +424,21 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         transportPosition.store (newPos, std::memory_order_release);
     }
 
-    // 6. MIDI clock output. Clock pulses (0xF8) are generated at
+    // 10. Click during looper capture. Same beat clock, so the looper's
+    //    count-in flows straight into capture with evenly spaced beats.
+    //    Mixed after the capture tap so the click never lands in the loop.
+    if (looperCaptureArmed.load (std::memory_order_acquire))
+    {
+        const int64_t startPos = metronomePosition.load (std::memory_order_acquire);
+        if (looperMetronomeEnabled.load (std::memory_order_acquire))
+            renderMetronomeInBlock (buffer, startPos, numSamples);
+
+        const int64_t newPos = startPos + numSamples;
+        metronomePosition.store (newPos, std::memory_order_release);
+        transportPosition.store (newPos, std::memory_order_release);
+    }
+
+    // 11. MIDI clock output. Clock pulses (0xF8) are generated at
     //    24 ppqn from the continuous metronomePosition so they align
     //    with the audible metronome and run through count-in into the
     //    recording. Queued MIDI Start / Stop are flushed here so the
@@ -724,6 +705,12 @@ void BluePrinterAudioProcessor::startRecording()
     if (recordBuffer == nullptr || maxRecordSamples <= 0)
         return;
 
+    // The looper and the take recorder share recordBuffer; don't let
+    // them capture simultaneously.
+    if (looperCaptureArmed.load (std::memory_order_acquire)
+        || looperPreRollActive.load (std::memory_order_acquire))
+        setLooperRecording (false);
+
     const int beats = countInBeats.load (std::memory_order_acquire);
     metronomePosition.store (0, std::memory_order_release);
 
@@ -744,28 +731,55 @@ void BluePrinterAudioProcessor::startRecording()
     listeners.call ([](Listener& l) { l.transportChanged(); });
 }
 
-void BluePrinterAudioProcessor::setMidiSequencerRecording (bool enabled)
+void BluePrinterAudioProcessor::setLooperRecording (bool enabled)
 {
     if (enabled)
     {
-        midiSequencerClearRequested.store (true, std::memory_order_release);
-        midiSequencerLength.store (0);
-        midiSequencerEventCount.store (0);
-        midiSequencerPosition.store (0);
-        midiSequencerRecordStart = transportPosition.load (std::memory_order_acquire);
+        // The looper and the take recorder share recordBuffer; don't let
+        // them capture simultaneously.
+        if (recordingRequested.load (std::memory_order_acquire)
+            || preRollActive.load (std::memory_order_acquire))
+            stopRecording();
+
+        if (recordBuffer == nullptr || maxRecordSamples <= 0)
+            return;
+
+        looperPreRollActive.store (false, std::memory_order_release);
+        looperCaptureArmed.store (false, std::memory_order_release);
+        audioLoopRecording.store (false, std::memory_order_release);
+        audioLoopPlaying.store (false, std::memory_order_release);
+        audioLoopStart.store (0, std::memory_order_release);
         audioLoopLength.store (0, std::memory_order_release);
         audioLoopPosition.store (0, std::memory_order_release);
-        audioLoopRecording.store (true, std::memory_order_release);
-        audioLoopPlaying.store (false, std::memory_order_release);
+        looperCropStartBars = 0;
+        looperCropEndBars = 0;
+
+        if (looperMetronomeEnabled.load (std::memory_order_acquire)
+            && looperCountInBeats.load (std::memory_order_acquire) > 0)
+        {
+            // Count-in: play N beats of click, then start capture. The
+            // transition happens in processBlock.
+            metronomePosition.store (0, std::memory_order_release);
+            transportPosition.store (0, std::memory_order_release);
+            looperPreRollActive.store (true, std::memory_order_release);
+        }
+        else
+        {
+            looperCaptureArmed.store (true, std::memory_order_release);
+            audioLoopRecording.store (true, std::memory_order_release);
+            if (midiClockEnabled.load (std::memory_order_acquire))
+                midiStartPending.store (true, std::memory_order_release);
+        }
     }
     else
     {
+        looperPreRollActive.store (false, std::memory_order_release);
+        looperCaptureArmed.store (false, std::memory_order_release);
         audioLoopRecording.store (false, std::memory_order_release);
+        if (midiClockEnabled.load (std::memory_order_acquire))
+            midiStopPending.store (true, std::memory_order_release);
         trimLooperToMusicalGrid();
     }
-    midiSequencerRecording.store (enabled);
-    midiSequencerRecordArmed.store (enabled, std::memory_order_release);
-    midiSequencerPreRoll.store (false, std::memory_order_release);
     listeners.call ([](Listener& l) { l.transportChanged(); });
 }
 
@@ -781,12 +795,15 @@ void BluePrinterAudioProcessor::trimLooperToMusicalGrid()
     if (target <= 0)
         target = static_cast<int64_t> (std::llround (static_cast<double> (captured) / beat) * beat);
     target = juce::jlimit<int64_t> (1, captured, target);
+    audioLoopStart.store (0, std::memory_order_release);
     audioLoopLength.store (target, std::memory_order_release);
-    midiSequencerLength.store (target, std::memory_order_release);
+    looperCropStartBars = 0;
+    looperCropEndBars = 0;
 }
 
 int BluePrinterAudioProcessor::addLoopSnippet()
 {
+    const auto start = audioLoopStart.load (std::memory_order_acquire);
     const auto captured = audioLoopLength.load (std::memory_order_acquire);
     if (recordBuffer == nullptr || captured <= 0)
         return -1;
@@ -794,17 +811,17 @@ int BluePrinterAudioProcessor::addLoopSnippet()
     std::shared_ptr<Snippet> snippet;
 
     {
-        // The audio thread only writes the loop while recording is armed,
+        // The audio thread only writes the loop while capture is armed,
         // so a message-thread read here is safe once capture has stopped.
         const juce::ScopedLock sl (recordLock);
-        if (midiSequencerRecordArmed.load (std::memory_order_acquire)
-            || audioLoopRecording.load (std::memory_order_acquire))
+        if (looperCaptureArmed.load (std::memory_order_acquire)
+            || looperPreRollActive.load (std::memory_order_acquire))
             return -1;
 
         const int channels = recordBuffer->getNumChannels();
         auto snippetBuffer = std::make_shared<juce::AudioBuffer<float>> (channels, static_cast<int> (captured));
         for (int ch = 0; ch < channels; ++ch)
-            snippetBuffer->copyFrom (ch, 0, *recordBuffer, ch, 0, static_cast<int> (captured));
+            snippetBuffer->copyFrom (ch, 0, *recordBuffer, ch, static_cast<int> (start), static_cast<int> (captured));
 
         auto defaultName = "Loop " + juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H:%M:%S");
         snippet = library.addSnippet (snippetBuffer, getSampleRate(), defaultName);
@@ -817,105 +834,11 @@ int BluePrinterAudioProcessor::addLoopSnippet()
     return snippet->id;
 }
 
-int64_t BluePrinterAudioProcessor::quantizeMidiPosition (int64_t position, double sampleRate, float bpmValue, int division)
+void BluePrinterAudioProcessor::setLooperPlaying (bool enabled)
 {
-    if (division <= 0 || sampleRate <= 0.0 || bpmValue <= 0.0)
-        return position;
-    const double beat = 60.0 * sampleRate / bpmValue;
-    const double grid = beat * 4.0 / static_cast<double> (division);
-    return static_cast<int64_t> (std::llround (static_cast<double> (position) / grid) * grid);
-}
-
-juce::var BluePrinterAudioProcessor::getMidiSequenceEventSnapshot() const
-{
-    juce::Array<juce::var> events;
-    const auto count = midiSequencerEventCount.load (std::memory_order_acquire);
-    for (int i = 0; i < count; ++i)
-    {
-        const auto& event = midiSequence[static_cast<size_t> (i)];
-        if (! event.message.isNoteOn())
-            continue;
-        auto* item = new juce::DynamicObject();
-        item->setProperty ("position", static_cast<double> (event.position));
-        item->setProperty ("note", event.message.getNoteNumber());
-        item->setProperty ("velocity", event.message.getFloatVelocity());
-        events.add (juce::var (item));
-    }
-    return juce::var (events);
-}
-
-void BluePrinterAudioProcessor::flushActiveMidiNotes (juce::MidiBuffer& midiMessages)
-{
-    for (int channel = 1; channel <= 16; ++channel)
-        for (int note = 0; note < 128; ++note)
-        {
-            auto& active = midiSequencerActiveNotes[static_cast<size_t> ((channel - 1) * 128 + note)];
-            if (active)
-            {
-                midiMessages.addEvent (juce::MidiMessage::noteOff (channel, note), 0);
-                active = false;
-            }
-        }
-}
-
-void BluePrinterAudioProcessor::setMidiQuantizationDivision (int division)
-{
-    midiQuantizationDivision.store ((division == 4 || division == 8 || division == 16 || division == 32) ? division : 0);
-}
-
-juce::var BluePrinterAudioProcessor::getMidiSequenceJson() const
-{
-    auto* root = new juce::DynamicObject();
-    root->setProperty ("version", 1);
-    root->setProperty ("length", static_cast<double> (midiSequencerLength.load()));
-    root->setProperty ("quantizationDivision", midiQuantizationDivision.load());
-    juce::Array<juce::var> events;
-    const auto count = midiSequencerEventCount.load();
-    for (int i = 0; i < count; ++i)
-    {
-        const auto& event = midiSequence[static_cast<size_t> (i)];
-        auto* item = new juce::DynamicObject();
-        item->setProperty ("position", static_cast<double> (event.position));
-        juce::Array<juce::var> bytes;
-        for (int byte = 0; byte < event.message.getRawDataSize(); ++byte)
-            bytes.add (event.message.getRawData()[byte] & 0xff);
-        item->setProperty ("data", bytes);
-        events.add (juce::var (item));
-    }
-    root->setProperty ("events", events);
-    return juce::var (root);
-}
-
-bool BluePrinterAudioProcessor::loadMidiSequenceJson (const juce::var& data, juce::String& error)
-{
-    auto* root = data.getDynamicObject();
-    auto* events = root != nullptr ? root->getProperty ("events").getArray() : nullptr;
-    if (events == nullptr) { error = "Invalid MIDI sequence data."; return false; }
-    const auto count = juce::jmin (events->size(), maxMidiSequenceEvents);
-    for (int i = 0; i < count; ++i)
-    {
-        auto* item = (*events)[i].getDynamicObject();
-        auto* bytes = item != nullptr ? item->getProperty ("data").getArray() : nullptr;
-        if (bytes == nullptr || bytes->isEmpty()) continue;
-        std::array<juce::uint8, 4> raw {};
-        const auto length = juce::jmin (bytes->size(), static_cast<int> (raw.size()));
-        for (int byte = 0; byte < length; ++byte)
-            raw[static_cast<size_t> (byte)] = static_cast<juce::uint8> (static_cast<int> ((*bytes)[byte]) & 0xff);
-        midiSequence[static_cast<size_t> (i)] = { static_cast<int64_t> (item->getProperty ("position")), juce::MidiMessage (raw.data(), length) };
-    }
-    midiSequencerEventCount.store (count);
-    midiSequencerLength.store (static_cast<int64_t> (root->getProperty ("length")));
-    setMidiQuantizationDivision (static_cast<int> (root->getProperty ("quantizationDivision")));
-    return true;
-}
-
-void BluePrinterAudioProcessor::setMidiSequencerPlaying (bool enabled)
-{
-    midiSequencerPosition.store (0);
-    midiSequencerPlaying.store (enabled);
-    audioLoopPlaying.store (enabled && audioLoopLength.load() > 0, std::memory_order_release);
-    if (enabled)
-        audioLoopPosition.store (0, std::memory_order_release);
+    audioLoopPosition.store (0, std::memory_order_release);
+    audioLoopPlaying.store (enabled && audioLoopLength.load (std::memory_order_acquire) > 0,
+                            std::memory_order_release);
     if (enabled && midiClockEnabled.load (std::memory_order_acquire))
         midiStartPending.store (true, std::memory_order_release);
     if (! enabled && midiClockEnabled.load (std::memory_order_acquire))
@@ -923,24 +846,66 @@ void BluePrinterAudioProcessor::setMidiSequencerPlaying (bool enabled)
     listeners.call ([](Listener& l) { l.transportChanged(); });
 }
 
-void BluePrinterAudioProcessor::setMidiSequencerLooping (bool enabled)
+void BluePrinterAudioProcessor::setLooperLooping (bool enabled)
 {
-    midiSequencerLooping.store (enabled);
+    looperLooping.store (enabled);
     listeners.call ([](Listener& l) { l.transportChanged(); });
 }
 
-void BluePrinterAudioProcessor::clearMidiSequence()
+void BluePrinterAudioProcessor::setLooperClickEnabled (bool enabled)
 {
-    midiSequencerRecording.store (false);
-    midiSequencerPlaying.store (false);
-    audioLoopRecording.store (false);
-    audioLoopPlaying.store (false);
-    audioLoopLength.store (0);
-    audioLoopPosition.store (0);
-    midiSequencerClearRequested.store (true, std::memory_order_release);
-    midiSequencerLength.store (0);
-    midiSequencerEventCount.store (0);
-    midiSequencerPosition.store (0);
+    looperMetronomeEnabled.store (enabled);
+    listeners.call ([](Listener& l) { l.transportChanged(); });
+}
+
+void BluePrinterAudioProcessor::setLooperCountInBeats (int beats)
+{
+    looperCountInBeats.store (juce::jlimit (0, 8, beats));
+    listeners.call ([](Listener& l) { l.transportChanged(); });
+}
+
+void BluePrinterAudioProcessor::setLoopCrop (int startBars, int endBars)
+{
+    const auto length = audioLoopLength.load (std::memory_order_acquire);
+    if (length <= 0 || currentSampleRate <= 0.0)
+        return;
+
+    const auto beat = 60.0 * currentSampleRate / juce::jmax (1.0f, bpm.load());
+    const auto bar = beat * 4.0;
+    const auto loopBars = juce::jmax (1, static_cast<int> (std::llround (static_cast<double> (length) / bar)));
+
+    startBars = juce::jlimit (0, loopBars - 1, startBars);
+    endBars = juce::jlimit (0, loopBars - 1 - startBars, endBars);
+    looperCropStartBars = startBars;
+    looperCropEndBars = endBars;
+
+    const auto trimStart = static_cast<int64_t> (startBars * bar);
+    const auto trimEnd = static_cast<int64_t> (endBars * bar);
+    audioLoopStart.store (trimStart, std::memory_order_release);
+    audioLoopLength.store (length - trimStart - trimEnd, std::memory_order_release);
+
+    // Keep the playhead inside the cropped window.
+    const auto remaining = audioLoopLength.load (std::memory_order_acquire);
+    audioLoopPosition.store (juce::jmin (audioLoopPosition.load (std::memory_order_acquire),
+                                         juce::jmax<int64_t> (0, remaining - 1)),
+                             std::memory_order_release);
+    if (remaining <= 0)
+        audioLoopPlaying.store (false, std::memory_order_release);
+
+    listeners.call ([](Listener& l) { l.transportChanged(); });
+}
+
+void BluePrinterAudioProcessor::clearLoop()
+{
+    looperPreRollActive.store (false, std::memory_order_release);
+    looperCaptureArmed.store (false, std::memory_order_release);
+    audioLoopRecording.store (false, std::memory_order_release);
+    audioLoopPlaying.store (false, std::memory_order_release);
+    audioLoopStart.store (0, std::memory_order_release);
+    audioLoopLength.store (0, std::memory_order_release);
+    audioLoopPosition.store (0, std::memory_order_release);
+    looperCropStartBars = 0;
+    looperCropEndBars = 0;
     listeners.call ([](Listener& l) { l.transportChanged(); });
 }
 
@@ -1573,8 +1538,6 @@ void BluePrinterAudioProcessor::getStateInformation (juce::MemoryBlock& destData
     // blocklist and cached scan result. Stored as a JSON string so
     // ValueTree can carry an arbitrary blob.
     state.setProperty ("pluginChains", juce::JSON::toString (makeChainState(), true), nullptr);
-    state.setProperty ("midiSequence", juce::JSON::toString (getMidiSequenceJson(), false), nullptr);
-    state.setProperty ("midiQuantizationDivision", midiQuantizationDivision.load(), nullptr);
     std::unique_ptr<juce::XmlElement> xml (state.createXml());
     copyXmlToBinary (*xml, destData);
 }
@@ -1595,13 +1558,6 @@ void BluePrinterAudioProcessor::setStateInformation (const void* data, int sizeI
             countInBeats.store     (static_cast<int>   (state.getProperty ("countInBeats",     4)));
             midiClockEnabled.store (static_cast<bool>  (state.getProperty ("midiClockEnabled", false)));
             midiOutputDeviceName  = state.getProperty ("midiDeviceName", juce::String()).toString();
-            const auto sequenceJson = state.getProperty ("midiSequence").toString();
-            if (sequenceJson.isNotEmpty())
-            {
-                juce::String sequenceError;
-                loadMidiSequenceJson (juce::JSON::parse (sequenceJson), sequenceError);
-            }
-            setMidiQuantizationDivision (static_cast<int> (state.getProperty ("midiQuantizationDivision", 0)));
 
             // Read either the new "pluginChains" key or the pre-split
             // "pluginChain" key. The old key is the single-chain

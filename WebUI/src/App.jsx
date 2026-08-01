@@ -4,8 +4,7 @@ import { LibraryFolderRow } from "./components/LibraryFolderRow";
 import { SnippetList } from "./components/SnippetList";
 import { Notification } from "./components/Notification";
 import { PluginChain } from "./components/PluginChain";
-import { MidiSequencer } from "./components/MidiSequencer";
-import { MidiLane } from "./components/MidiLane";
+import { Looper } from "./components/Looper";
 import { BACKEND_EVENTS, FRONTEND_EVENTS, emit, getInitialData, subscribe } from "./bridge";
 import iconUrl from "./icon.svg";
 
@@ -40,7 +39,7 @@ function readInitialTransport() {
     metronomeEnabled: true, bpm: 120, countInBeats: 4,
     midiClockEnabled: false, midiOutputDevice: "", midiOutputDeviceList: [],
      preRollActive: false, transportPosition: 0,
-     midiSequencerRecording: false, midiSequencerPlaying: false, midiSequencerLooping: true, midiSequencerEventCount: 0, midiSequencerPosition: 0, midiSequencerLength: 0, midiQuantizationDivision: 0, audioLoopPosition: 0, audioLoopLength: 0, midiEvents: [],
+     looperRecording: false, looperPreRoll: false, looperPlaying: false, looperLooping: true, looperClickEnabled: true, looperCountInBeats: 4, looperCropStartBars: 0, looperCropEndBars: 0, audioLoopStart: 0, audioLoopPosition: 0, audioLoopLength: 0,
   };
   return {
     ...raw,
@@ -59,7 +58,7 @@ function readInitialTransport() {
     midiOutputDeviceList: Array.isArray(raw.midiOutputDeviceList) ? raw.midiOutputDeviceList : [],
     preRollActive: Boolean(raw.preRollActive),
      transportPosition: Number(raw.transportPosition ?? 0),
-     midiSequencerRecording: Boolean(raw.midiSequencerRecording), midiSequencerPlaying: Boolean(raw.midiSequencerPlaying), midiSequencerLooping: raw.midiSequencerLooping !== false, midiSequencerEventCount: Number(raw.midiSequencerEventCount ?? 0), midiSequencerPosition: Number(raw.midiSequencerPosition ?? 0), midiSequencerLength: Number(raw.midiSequencerLength ?? 0), midiQuantizationDivision: Number(raw.midiQuantizationDivision ?? 0), audioLoopPosition: Number(raw.audioLoopPosition ?? 0), audioLoopLength: Number(raw.audioLoopLength ?? 0), midiEvents: Array.isArray(raw.midiEvents) ? raw.midiEvents : [],
+     looperRecording: Boolean(raw.looperRecording), looperPreRoll: Boolean(raw.looperPreRoll), looperPlaying: Boolean(raw.looperPlaying), looperLooping: raw.looperLooping !== false, looperClickEnabled: raw.looperClickEnabled !== false, looperCountInBeats: Number(raw.looperCountInBeats ?? 4), looperCropStartBars: Number(raw.looperCropStartBars ?? 0), looperCropEndBars: Number(raw.looperCropEndBars ?? 0), audioLoopStart: Number(raw.audioLoopStart ?? 0), audioLoopPosition: Number(raw.audioLoopPosition ?? 0), audioLoopLength: Number(raw.audioLoopLength ?? 0),
   };
 }
 
@@ -137,16 +136,17 @@ export default function App() {
         midiOutputDeviceList: Array.isArray(payload.midiOutputDeviceList) ? payload.midiOutputDeviceList : prev.midiOutputDeviceList,
         preRollActive:    Boolean(payload.preRollActive),
          transportPosition: Number(payload.transportPosition ?? 0),
-         midiSequencerRecording: payload.midiSequencerRecording !== undefined ? Boolean(payload.midiSequencerRecording) : prev.midiSequencerRecording,
-         midiSequencerPlaying: payload.midiSequencerPlaying !== undefined ? Boolean(payload.midiSequencerPlaying) : prev.midiSequencerPlaying,
-         midiSequencerLooping: payload.midiSequencerLooping !== undefined ? Boolean(payload.midiSequencerLooping) : prev.midiSequencerLooping,
-         midiSequencerEventCount: payload.midiSequencerEventCount !== undefined ? Number(payload.midiSequencerEventCount) : prev.midiSequencerEventCount,
-         midiSequencerPosition: Number(payload.midiSequencerPosition ?? prev.midiSequencerPosition ?? 0),
-         midiSequencerLength: Number(payload.midiSequencerLength ?? prev.midiSequencerLength ?? 0),
+         looperRecording: payload.looperRecording !== undefined ? Boolean(payload.looperRecording) : prev.looperRecording,
+         looperPreRoll: payload.looperPreRoll !== undefined ? Boolean(payload.looperPreRoll) : prev.looperPreRoll,
+         looperPlaying: payload.looperPlaying !== undefined ? Boolean(payload.looperPlaying) : prev.looperPlaying,
+         looperLooping: payload.looperLooping !== undefined ? Boolean(payload.looperLooping) : prev.looperLooping,
+         looperClickEnabled: payload.looperClickEnabled !== undefined ? Boolean(payload.looperClickEnabled) : prev.looperClickEnabled,
+         looperCountInBeats: payload.looperCountInBeats !== undefined ? Number(payload.looperCountInBeats) : prev.looperCountInBeats,
+         looperCropStartBars: payload.looperCropStartBars !== undefined ? Number(payload.looperCropStartBars) : prev.looperCropStartBars,
+         looperCropEndBars: payload.looperCropEndBars !== undefined ? Number(payload.looperCropEndBars) : prev.looperCropEndBars,
+         audioLoopStart: Number(payload.audioLoopStart ?? prev.audioLoopStart ?? 0),
          audioLoopPosition: Number(payload.audioLoopPosition ?? prev.audioLoopPosition ?? 0),
          audioLoopLength: Number(payload.audioLoopLength ?? prev.audioLoopLength ?? 0),
-         midiQuantizationDivision: Number(payload.midiQuantizationDivision ?? prev.midiQuantizationDivision ?? 0),
-         midiEvents: Array.isArray(payload.midiEvents) ? payload.midiEvents : (prev.midiEvents ?? []),
       }));
     });
     return unsubTransport;
@@ -264,8 +264,8 @@ export default function App() {
          onMidiDeviceChange={handleMidiDeviceChange}
       />
 
-      <MidiSequencer transport={transport} />
-      <MidiLane events={transport.midiEvents} position={transport.audioLoopPosition} length={transport.audioLoopLength} />
+      <Looper transport={transport} />
+
 
       <PluginChain
         chainState={vst3.chain}

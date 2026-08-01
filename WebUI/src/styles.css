@@ -600,10 +600,10 @@ button {
 }
 
 /* ============================================================
-   MIDI sequencer
+   Looper
    ============================================================ */
 
-.midi-sequencer {
+.looper {
   display: flex;
   flex-direction: column;
   gap: 18px;
@@ -613,15 +613,15 @@ button {
   border-radius: var(--radius);
 }
 
-.sequencer-header,
-.sequencer-controls {
+.looper-header,
+.looper-controls {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 18px;
 }
 
-.sequencer-header h2 {
+.looper-header h2 {
   margin: 5px 0 4px;
   color: var(--text);
   font-size: 1.05rem;
@@ -629,7 +629,7 @@ button {
   letter-spacing: -0.02em;
 }
 
-.sequencer-header p {
+.looper-header p {
   margin: 0;
   color: var(--text-3);
   font-size: 0.78rem;
@@ -643,7 +643,7 @@ button {
   text-transform: uppercase;
 }
 
-.sequencer-state {
+.looper-state {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -655,19 +655,19 @@ button {
   white-space: nowrap;
 }
 
-.sequencer-state-dot {
+.looper-state-dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
   background: var(--text-3);
 }
 
-.midi-sequencer.is-recording .sequencer-state { color: var(--rec); }
-.midi-sequencer.is-recording .sequencer-state-dot { background: var(--rec); animation: status-blink 1.2s ease-in-out infinite; }
-.midi-sequencer.is-playing .sequencer-state { color: var(--accent); }
-.midi-sequencer.is-playing .sequencer-state-dot { background: var(--accent); }
+.looper.is-recording .looper-state { color: var(--rec); }
+.looper.is-recording .looper-state-dot { background: var(--rec); animation: status-blink 1.2s ease-in-out infinite; }
+.looper.is-playing .looper-state { color: var(--accent); }
+.looper.is-playing .looper-state-dot { background: var(--accent); }
 
-.sequencer-timeline {
+.looper-timeline {
   position: relative;
   height: 92px;
   overflow: hidden;
@@ -676,41 +676,49 @@ button {
   background: var(--inset);
 }
 
-.sequencer-grid-lines {
+.looper-grid-lines {
   position: absolute;
   inset: 0;
   display: flex;
   justify-content: space-around;
 }
 
-.sequencer-grid-lines i { width: 1px; background: var(--border-soft); }
-.sequencer-event-density { position: absolute; right: 4%; bottom: 25px; left: 4%; height: 30px; background: var(--accent-dim); border: 1px solid var(--accent-border); border-radius: 4px; }
-.sequencer-event-density span { display: block; width: 100%; height: 100%; background: repeating-linear-gradient(90deg, var(--accent) 0 3px, transparent 3px 10px); opacity: 0.8; }
-.sequencer-playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--warn); box-shadow: 0 0 12px var(--warn); transition: left 0.08s linear; }
-.sequencer-timeline-caption { position: absolute; right: 11px; bottom: 7px; left: 11px; display: flex; justify-content: space-between; color: var(--text-3); font-family: var(--mono); font-size: 0.63rem; letter-spacing: 0.06em; text-transform: uppercase; }
+.looper-grid-lines i { width: 1px; background: var(--border-soft); }
+.looper-crop-left, .looper-crop-right { position: absolute; top: 0; bottom: 0; background: var(--border-soft); opacity: 0.45; }
+.looper-crop-left { left: 0; }
+.looper-crop-right { right: 0; }
+.looper-playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--warn); box-shadow: 0 0 12px var(--warn); transition: left 0.08s linear; }
+.looper-timeline-caption { position: absolute; right: 11px; bottom: 7px; left: 11px; display: flex; justify-content: space-between; color: var(--text-3); font-family: var(--mono); font-size: 0.63rem; letter-spacing: 0.06em; text-transform: uppercase; }
 
+.looper-primary-controls { display: flex; flex-wrap: wrap; gap: 8px; }
+.looper-record-button { display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font: inherit; font-size: 0.74rem; font-weight: 650; cursor: pointer; }
+.looper-record-button:hover { border-color: var(--rec); color: var(--rec); }
+.looper-record-button.is-active { border-color: var(--rec); background: var(--rec); color: #fff; }
+.looper-record-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--rec); }
+.looper-record-button.is-active .looper-record-dot { background: #fff; }
 
-.sequencer-primary-controls { display: flex; flex-wrap: wrap; gap: 8px; }
-.sequencer-record-button { display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font: inherit; font-size: 0.74rem; font-weight: 650; cursor: pointer; }
-.sequencer-record-button:hover { border-color: var(--rec); color: var(--rec); }
-.sequencer-record-button.is-active { border-color: var(--rec); background: var(--rec); color: #fff; }
-.sequencer-record-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--rec); }
-.sequencer-record-button.is-active .sequencer-record-dot { background: #fff; }
-.sequencer-loop-switch { display: inline-flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 0.75rem; cursor: pointer; }
-.sequencer-loop-switch input { position: absolute; opacity: 0; pointer-events: none; }
-.sequencer-switch { position: relative; width: 30px; height: 17px; border-radius: 99px; background: var(--border-strong); transition: background 0.15s ease; }
-.sequencer-switch::after { position: absolute; top: 3px; left: 3px; width: 11px; height: 11px; border-radius: 50%; background: var(--text-3); content: ""; transition: transform 0.15s ease, background 0.15s ease; }
-.sequencer-loop-switch input:checked + .sequencer-switch { background: var(--accent); }
-.sequencer-loop-switch input:checked + .sequencer-switch::after { transform: translateX(13px); background: #fff; }
-.sequencer-quantize-control { display: inline-flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 0.75rem; }
-.sequencer-quantize-control select { height: 28px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--inset); color: var(--text); font: inherit; font-size: 0.72rem; }
+.looper-settings { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 14px; }
 
-.midi-lane { position: relative; height: 88px; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--inset); }
-.midi-lane-grid { position: absolute; inset: 0; display: flex; justify-content: space-around; }
-.midi-lane-grid i { width: 1px; background: var(--border-soft); }
-.midi-lane-note { position: absolute; width: 4px; height: 9px; border-radius: 2px; background: var(--accent); box-shadow: 0 0 5px var(--accent); transform: translateX(-2px); }
-.midi-lane-playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--warn); box-shadow: 0 0 10px var(--warn); transition: left 0.08s linear; }
-.midi-lane-labels { position: absolute; right: 10px; bottom: 7px; left: 10px; display: flex; justify-content: space-between; color: var(--text-3); font-family: var(--mono); font-size: 0.62rem; letter-spacing: 0.06em; text-transform: uppercase; }
+.looper-loop-switch { display: inline-flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 0.75rem; cursor: pointer; }
+.looper-loop-switch input { position: absolute; opacity: 0; pointer-events: none; }
+.looper-switch { position: relative; width: 30px; height: 17px; border-radius: 99px; background: var(--border-strong); transition: background 0.15s ease; }
+.looper-switch::after { position: absolute; top: 3px; left: 3px; width: 11px; height: 11px; border-radius: 50%; background: var(--text-3); content: ""; transition: transform 0.15s ease, background 0.15s ease; }
+.looper-loop-switch input:checked + .looper-switch { background: var(--accent); }
+.looper-loop-switch input:checked + .looper-switch::after { transform: translateX(13px); background: #fff; }
+
+.looper-click-toggle { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px; border-radius: var(--radius-pill); border: 1px solid var(--border); background: transparent; color: var(--text-3); font-size: 0.74rem; font-weight: 600; cursor: pointer; white-space: nowrap; transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease; }
+.looper-click-toggle input { position: absolute; opacity: 0; pointer-events: none; }
+.looper-click-toggle:hover { color: var(--text); border-color: var(--border-strong); }
+.looper-click-toggle.is-on { background: var(--accent-dim); border-color: var(--accent-border); color: var(--accent); }
+.looper-click-toggle span { text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.68rem; }
+
+.looper-stepper { display: inline-flex; flex-direction: column; gap: 4px; }
+.looper-stepper-label { font-size: 0.64rem; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.12em; font-weight: 600; }
+.looper-stepper-control { display: flex; align-items: center; gap: 2px; }
+.looper-stepper-btn { width: 24px; height: 26px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--inset); color: var(--text-2); font-size: 0.9rem; line-height: 1; cursor: pointer; }
+.looper-stepper-btn:hover:not(:disabled) { border-color: var(--accent-border); color: var(--accent); }
+.looper-stepper-btn:disabled { opacity: 0.35; cursor: default; }
+.looper-stepper-value { min-width: 26px; text-align: center; font-family: var(--mono); font-size: 0.8rem; color: var(--text); font-variant-numeric: tabular-nums; }
 
 /* ============================================================
    Level meter
@@ -1519,8 +1527,8 @@ button {
     padding-left: 0;
   }
 
-  .sequencer-header,
-  .sequencer-controls {
+  .looper-header,
+  .looper-controls {
     align-items: flex-start;
     flex-direction: column;
   }
@@ -1539,8 +1547,8 @@ button {
     animation: none;
   }
 
-  .sequencer-playhead,
-  .midi-sequencer.is-recording .sequencer-state-dot {
+  .looper-playhead,
+  .looper.is-recording .looper-state-dot {
     animation: none;
   }
 

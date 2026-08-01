@@ -306,16 +306,20 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
             if (auto* obj = data.getDynamicObject())
                 processor.setMidiOutputDeviceName (obj->getProperty ("device").toString());
          })
-        .withEventListener(BluePrinterWebViewEditor::frontendSetMidiSequencerRecordingEvent, [&processor](juce::var data)
-        { if (auto* obj = data.getDynamicObject()) processor.setMidiSequencerRecording (static_cast<bool> (obj->getProperty ("enabled"))); })
-        .withEventListener(BluePrinterWebViewEditor::frontendSetMidiSequencerPlayingEvent, [&processor](juce::var data)
-        { if (auto* obj = data.getDynamicObject()) processor.setMidiSequencerPlaying (static_cast<bool> (obj->getProperty ("enabled"))); })
-        .withEventListener(BluePrinterWebViewEditor::frontendSetMidiSequencerLoopingEvent, [&processor](juce::var data)
-        { if (auto* obj = data.getDynamicObject()) processor.setMidiSequencerLooping (static_cast<bool> (obj->getProperty ("enabled"))); })
-        .withEventListener(BluePrinterWebViewEditor::frontendClearMidiSequenceEvent, [&processor](juce::var)
-        { processor.clearMidiSequence(); })
-        .withEventListener(BluePrinterWebViewEditor::frontendSetMidiQuantizationEvent, [&processor](juce::var data)
-        { if (auto* obj = data.getDynamicObject()) processor.setMidiQuantizationDivision (static_cast<int> (obj->getProperty ("division"))); })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetLooperRecordingEvent, [&processor](juce::var data)
+        { if (auto* obj = data.getDynamicObject()) processor.setLooperRecording (static_cast<bool> (obj->getProperty ("enabled"))); })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetLooperPlayingEvent, [&processor](juce::var data)
+        { if (auto* obj = data.getDynamicObject()) processor.setLooperPlaying (static_cast<bool> (obj->getProperty ("enabled"))); })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetLooperLoopingEvent, [&processor](juce::var data)
+        { if (auto* obj = data.getDynamicObject()) processor.setLooperLooping (static_cast<bool> (obj->getProperty ("enabled"))); })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetLooperClickEvent, [&processor](juce::var data)
+        { if (auto* obj = data.getDynamicObject()) processor.setLooperClickEnabled (static_cast<bool> (obj->getProperty ("enabled"))); })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetLooperCountInEvent, [&processor](juce::var data)
+        { if (auto* obj = data.getDynamicObject()) processor.setLooperCountInBeats (static_cast<int> (obj->getProperty ("beats"))); })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetLoopCropEvent, [&processor](juce::var data)
+        { if (auto* obj = data.getDynamicObject()) processor.setLoopCrop (static_cast<int> (obj->getProperty ("startBars")), static_cast<int> (obj->getProperty ("endBars"))); })
+        .withEventListener(BluePrinterWebViewEditor::frontendClearLoopEvent, [&processor](juce::var)
+        { processor.clearLoop(); })
         .withEventListener(BluePrinterWebViewEditor::frontendAddVst3Event, [owner](juce::var data)
         {
             if (owner == nullptr)
@@ -686,16 +690,17 @@ juce::var BluePrinterWebViewEditor::makeTransportSnapshot() const
     }
     obj->setProperty ("preRollActive",    audioProcessor.isPreRollActive());
     obj->setProperty ("transportPosition", static_cast<double> (audioProcessor.getTransportPosition()));
-    obj->setProperty ("midiSequencerRecording", audioProcessor.isMidiSequencerRecording());
-    obj->setProperty ("midiSequencerPlaying", audioProcessor.isMidiSequencerPlaying());
-    obj->setProperty ("midiSequencerLooping", audioProcessor.isMidiSequencerLooping());
-    obj->setProperty ("midiSequencerEventCount", audioProcessor.getMidiSequencerEventCount());
-    obj->setProperty ("midiSequencerPosition", static_cast<double> (audioProcessor.getMidiSequencerPosition()));
-    obj->setProperty ("midiSequencerLength", static_cast<double> (audioProcessor.getMidiSequencerLength()));
-    obj->setProperty ("midiQuantizationDivision", audioProcessor.getMidiQuantizationDivision());
+    obj->setProperty ("looperRecording", audioProcessor.isLooperRecording());
+    obj->setProperty ("looperPreRoll", audioProcessor.isLooperPreRolling());
+    obj->setProperty ("looperPlaying", audioProcessor.isLooperPlaying());
+    obj->setProperty ("looperLooping", audioProcessor.isLooperLooping());
+    obj->setProperty ("looperClickEnabled", audioProcessor.isLooperClickEnabled());
+    obj->setProperty ("looperCountInBeats", audioProcessor.getLooperCountInBeats());
+    obj->setProperty ("looperCropStartBars", audioProcessor.getLooperCropStartBars());
+    obj->setProperty ("looperCropEndBars", audioProcessor.getLooperCropEndBars());
+    obj->setProperty ("audioLoopStart", static_cast<double> (audioProcessor.getAudioLoopStart()));
     obj->setProperty ("audioLoopLength", static_cast<double> (audioProcessor.getAudioLoopLength()));
     obj->setProperty ("audioLoopPosition", static_cast<double> (audioProcessor.getAudioLoopPosition()));
-    obj->setProperty ("midiEvents", audioProcessor.getMidiSequenceEventSnapshot());
     return juce::var (obj);
 }
 

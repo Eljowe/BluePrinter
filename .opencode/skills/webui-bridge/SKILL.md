@@ -36,14 +36,10 @@ All frontend events are in `FRONTEND_EVENTS`, backend events in `BACKEND_EVENTS`
 - `updateSnippet`, `deleteSnippet`, `detectSnippetKey`, `saveSnippet`, `saveLoop`, `revealSnippet`
 - `chooseLibraryFolder`, `openLibraryFolder`, `refreshLibrary`, `getSnippets`
 - `setMetronome`, `setBpm`, `setCountInBeats`, `setMidiClock`, `setMidiDevice`
-- `setMidiSequencerRecording`, `setMidiSequencerPlaying`, `setMidiSequencerLooping`, `clearMidiSequence`
-- Sequencer transport snapshots include `midiSequencerEventCount`, `midiSequencerPosition`, and `midiSequencerLength`; the UI should derive the playhead from these values.
-- The combined audio/MIDI looper also exposes `audioLoopPosition` and `audioLoopLength`. Use these for the visual timeline and playhead because audio is the shared loop duration.
-- The looper saves as a **snippet**, not MIDI: `frontendSaveLoop` converts the captured audio loop into a library snippet and opens the same WAV + JSON save dialog as the take recorder (`saveSnippetWithDialog`). There is no `frontendSaveMidiSequence` / `frontendLoadMidiSequence` — those were removed. MIDI sequence persistence happens only inside plugin state (`midiSequence` JSON).
-- MIDI quantization payloads use `{ division: 0|4|8|16|32 }` via `frontendSetMidiQuantization`.
-- Transport snapshots expose `midiQuantizationDivision` so the frontend selector remains synchronized with processor state.
-- Transport snapshots also expose `midiEvents`; each event contains `position`, `note`, and `velocity`. `MidiLane.jsx` renders these as normalized pitch/time ticks and uses `audioLoopPosition` / `audioLoopLength` for the backend-driven playhead.
-- `MidiLane` is memoized and must not use decorative keyframe animation for transport movement. The playhead position comes directly from backend snapshots.
+- `setLooperRecording`, `setLooperPlaying`, `setLooperLooping`, `setLooperClick`, `setLooperCountIn`, `setLoopCrop`, `clearLoop`, `saveLoop`
+- The looper is **audio-only** (no MIDI event capture/quantize/lane — those were removed). Transport snapshots expose `looperRecording`, `looperPreRoll`, `looperPlaying`, `looperLooping`, `looperClickEnabled`, `looperCountInBeats`, `looperCropStartBars`, `looperCropEndBars`, and `audioLoopStart` / `audioLoopPosition` / `audioLoopLength`. Use `audioLoopPosition` / `audioLoopLength` for the visual timeline and playhead.
+- `frontendSetLoopCrop` payloads are `{ startBars, endBars }` in whole bars; `frontendSetLooperCountIn` is `{ beats: 0..8 }`; `frontendSetLooperClick` / `frontendSetLooperRecording` / `frontendSetLooperPlaying` / `frontendSetLooperLooping` are `{ enabled }`.
+- `saveLoop` converts the captured (cropped) audio loop into a library snippet and opens the same WAV + JSON save dialog as the take recorder (`saveSnippetWithDialog`). There is no MIDI `.mid` save/load.
 - `addVst3`, `removeVst3`, `moveVst3`, `setVst3Bypass`, `openVst3Editor`, `closeVst3Editor`
 - `scanVst3Folder`, `getVst3Chain`, `blockVst3Plugin`, `unblockVst3Plugin`
 

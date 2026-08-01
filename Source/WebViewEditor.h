@@ -30,7 +30,6 @@ public:
     static constexpr const char* frontendDetectSnippetKeyEvent = "frontendDetectSnippetKey";
     static constexpr const char* frontendSaveSnippetEvent      = "frontendSaveSnippet";
     static constexpr const char* frontendSaveLoopEvent         = "frontendSaveLoop";
-    static constexpr const char* frontendSetMidiQuantizationEvent = "frontendSetMidiQuantization";
     static constexpr const char* frontendRevealSnippetEvent    = "frontendRevealSnippet";
     static constexpr const char* frontendChooseFolderEvent     = "frontendChooseLibraryFolder";
     static constexpr const char* frontendOpenFolderEvent       = "frontendOpenLibraryFolder";
@@ -50,10 +49,13 @@ public:
     static constexpr const char* frontendSetCountInBeatsEvent  = "frontendSetCountInBeats";
     static constexpr const char* frontendSetMidiClockEvent     = "frontendSetMidiClock";
     static constexpr const char* frontendSetMidiDeviceEvent    = "frontendSetMidiDevice";
-    static constexpr const char* frontendSetMidiSequencerRecordingEvent = "frontendSetMidiSequencerRecording";
-    static constexpr const char* frontendSetMidiSequencerPlayingEvent = "frontendSetMidiSequencerPlaying";
-    static constexpr const char* frontendSetMidiSequencerLoopingEvent = "frontendSetMidiSequencerLooping";
-    static constexpr const char* frontendClearMidiSequenceEvent = "frontendClearMidiSequence";
+    static constexpr const char* frontendSetLooperRecordingEvent = "frontendSetLooperRecording";
+    static constexpr const char* frontendSetLooperPlayingEvent   = "frontendSetLooperPlaying";
+    static constexpr const char* frontendSetLooperLoopingEvent   = "frontendSetLooperLooping";
+    static constexpr const char* frontendSetLooperClickEvent     = "frontendSetLooperClick";
+    static constexpr const char* frontendSetLooperCountInEvent   = "frontendSetLooperCountIn";
+    static constexpr const char* frontendSetLoopCropEvent        = "frontendSetLoopCrop";
+    static constexpr const char* frontendClearLoopEvent          = "frontendClearLoop";
     static constexpr const char* frontendAddVst3Event          = "frontendAddVst3";
     static constexpr const char* frontendRemoveVst3Event       = "frontendRemoveVst3";
     static constexpr const char* frontendMoveVst3Event         = "frontendMoveVst3";
