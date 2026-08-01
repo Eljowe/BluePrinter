@@ -33,13 +33,14 @@ All frontend events are in `FRONTEND_EVENTS`, backend events in `BACKEND_EVENTS`
 
 **Frontend events** (React → C++):
 - `setParameter`, `startRecording`, `stopRecording`, `startPlayback`, `stopPlayback`
-- `updateSnippet`, `deleteSnippet`, `detectSnippetKey`, `saveSnippet`, `revealSnippet`
+- `updateSnippet`, `deleteSnippet`, `detectSnippetKey`, `saveSnippet`, `saveLoop`, `revealSnippet`
 - `chooseLibraryFolder`, `openLibraryFolder`, `refreshLibrary`, `getSnippets`
 - `setMetronome`, `setBpm`, `setCountInBeats`, `setMidiClock`, `setMidiDevice`
 - `setMidiSequencerRecording`, `setMidiSequencerPlaying`, `setMidiSequencerLooping`, `clearMidiSequence`
 - Sequencer transport snapshots include `midiSequencerEventCount`, `midiSequencerPosition`, and `midiSequencerLength`; the UI should derive the playhead from these values.
 - The combined audio/MIDI looper also exposes `audioLoopPosition` and `audioLoopLength`. Use these for the visual timeline and playhead because audio is the shared loop duration.
-- MIDI sequencer bridge events include `frontendSaveMidiSequence`, `frontendLoadMidiSequence`, and `frontendSetMidiQuantization`. File chooser/load work stays on the message thread; quantization payloads use `{ division: 0|4|8|16|32 }`.
+- The looper saves as a **snippet**, not MIDI: `frontendSaveLoop` converts the captured audio loop into a library snippet and opens the same WAV + JSON save dialog as the take recorder (`saveSnippetWithDialog`). There is no `frontendSaveMidiSequence` / `frontendLoadMidiSequence` — those were removed. MIDI sequence persistence happens only inside plugin state (`midiSequence` JSON).
+- MIDI quantization payloads use `{ division: 0|4|8|16|32 }` via `frontendSetMidiQuantization`.
 - Transport snapshots expose `midiQuantizationDivision` so the frontend selector remains synchronized with processor state.
 - Transport snapshots also expose `midiEvents`; each event contains `position`, `note`, and `velocity`. `MidiLane.jsx` renders these as normalized pitch/time ticks and uses `audioLoopPosition` / `audioLoopLength` for the backend-driven playhead.
 - `MidiLane` is memoized and must not use decorative keyframe animation for transport movement. The playhead position comes directly from backend snapshots.
@@ -88,6 +89,7 @@ The C++ side loads `WebUI/dist/index.html` via `findLocalWebUiDistIndex()` in `W
 - Global styles in `WebUI/src/styles.css`.
 - Component-level styles use class names prefixed with the component name (e.g., `.transport-`, `.snippet-card-`, `.plugin-chain-`).
 - Layout uses flexbox. The app is a single-page vertical layout with `header`, `Transport`, `PluginChain`, `library-section`, and `footer`.
+- Controls that reveal extra UI on demand (e.g. the MIDI device selector under the transport's MIDI toggle) must not push sibling controls around: absolutely position the revealed element below its anchor (`.midi-pair { position: relative }` + `.midi-device-control { position: absolute; top: calc(100% + 4px) }`) instead of adding it to the flex row.
 
 ## Don't
 

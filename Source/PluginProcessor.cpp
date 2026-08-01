@@ -785,49 +785,36 @@ void BluePrinterAudioProcessor::trimLooperToMusicalGrid()
     midiSequencerLength.store (target, std::memory_order_release);
 }
 
-bool BluePrinterAudioProcessor::saveMidiSequenceToFile (const juce::File& file,
-                                                        const juce::String& name,
-                                                        juce::String& error) const
+int BluePrinterAudioProcessor::addLoopSnippet()
 {
-    const auto count = midiSequencerEventCount.load (std::memory_order_acquire);
-    if (count <= 0)
+    const auto captured = audioLoopLength.load (std::memory_order_acquire);
+    if (recordBuffer == nullptr || captured <= 0)
+        return -1;
+
+    std::shared_ptr<Snippet> snippet;
+
     {
-        error = "There is no MIDI sequence to save.";
-        return false;
+        // The audio thread only writes the loop while recording is armed,
+        // so a message-thread read here is safe once capture has stopped.
+        const juce::ScopedLock sl (recordLock);
+        if (midiSequencerRecordArmed.load (std::memory_order_acquire)
+            || audioLoopRecording.load (std::memory_order_acquire))
+            return -1;
+
+        const int channels = recordBuffer->getNumChannels();
+        auto snippetBuffer = std::make_shared<juce::AudioBuffer<float>> (channels, static_cast<int> (captured));
+        for (int ch = 0; ch < channels; ++ch)
+            snippetBuffer->copyFrom (ch, 0, *recordBuffer, ch, 0, static_cast<int> (captured));
+
+        auto defaultName = "Loop " + juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H:%M:%S");
+        snippet = library.addSnippet (snippetBuffer, getSampleRate(), defaultName);
     }
 
-    juce::MidiMessageSequence sequence;
-    for (int i = 0; i < count; ++i)
-    {
-        const auto& event = midiSequence[static_cast<size_t> (i)];
-        sequence.addEvent (event.message, static_cast<double> (event.position));
-    }
-    sequence.updateMatchedPairs();
+    if (snippet == nullptr)
+        return -1;
 
-    if (! file.getParentDirectory().createDirectory())
-    {
-        error = "Could not create the destination folder.";
-        return false;
-    }
-
-    juce::FileOutputStream stream (file);
-    if (! stream.openedOk())
-    {
-        error = "Could not open the MIDI file for writing.";
-        return false;
-    }
-
-    juce::MidiFile midiFile;
-    midiFile.setTicksPerQuarterNote (960);
-    midiFile.addTrack (sequence);
-    if (! midiFile.writeTo (stream))
-    {
-        error = "Could not write the MIDI sequence.";
-        return false;
-    }
-
-    juce::ignoreUnused (name);
-    return true;
+    listeners.call ([](Listener& l) { l.libraryChanged(); });
+    return snippet->id;
 }
 
 int64_t BluePrinterAudioProcessor::quantizeMidiPosition (int64_t position, double sampleRate, float bpmValue, int division)

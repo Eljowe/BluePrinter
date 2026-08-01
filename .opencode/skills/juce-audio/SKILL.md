@@ -18,14 +18,23 @@ BluePrinter uses JUCE for audio processing, VST3 hosting, and WebView2 UI integr
 ## Audio Path (`processBlock`)
 
 ```
-1. Get input buffer, clear unused channels
-2. Read gain parameter via apvts.getRawParameterValue("Gain")->load()
-3. Apply gain to buffer
-4. Forward to recording buffer (if recording)
-5. Run buffer through midiChain.processBlock() then audioChain.processBlock()
-6. Apply metronome click (50 ms percussive click: 800 Hz fundamental + harmonics, decaying envelope — not a pure sine)
-7. Playback: substitute recorded buffer at playback position, run through chains
-8. Output the processed buffer
+1. MIDI sequencer: capture incoming events (if armed, filtering clock/Start/Stop),
+   flush active-note note-offs when not playing, render recorded MIDI events
+2. Audio loop playback: addFrom recordBuffer at the loop position (with a
+   precomputed crossfade at the wrap point)
+3. Apply gain parameter (apvts.getRawParameterValue("Gain")->load())
+4. Run the MIDI chain on its own scratch copy of the post-gain buffer, sum its
+   output back in; run the audio chain on the summed buffer (shared MIDI buffer)
+5. Record the processed (post-gain, pre-click) signal into the record buffer
+   under recordLock, if recording is requested
+6. Compute input levels (RMS + peak) from the clean signal
+7. Playback: substitute the recorded buffer in place of live input
+   (does NOT re-run the chains)
+8. Pre-roll count-in: render the metronome click, flip into actual recording
+   once the configured beats elapse
+9. Metronome click during recording + advance the continuous beat clock
+10. MIDI clock output (24 ppqn from metronomePosition) + flush pending
+    MIDI Start / Stop
 ```
 
 ## Threading Model
@@ -49,7 +58,7 @@ Key methods:
 - `addPlugin(file, error)` — sync load
 - `addPluginAsync(file, callback)` — async load on worker thread
 - `prepareToPlay(sampleRate, blockSize)` — forwards to all plugins
-- Saves/loads chain state as XML (`juce::XmlElement`)
+- Serializes state as a `juce::DynamicObject` (per-slot path, bypass flag, base64 plugin state); the processor stores it as JSON under the `pluginChains` state property (`makeChainState()` / `applyChainState()` in `PluginProcessor.cpp`)
 - Serializes state as a `juce::DynamicObject` for the WebView
 
 ## Snippet Library (`SnippetLibrary.h/.cpp`)
@@ -82,7 +91,7 @@ Thread-safe behind a mutex. Supports:
 
 ## Parameters (APVTS)
 
-Currently the APVTS exposes only **`Gain`** (`AudioParameterFloat`, range 0.0–1.0, step 0.01, default 0.7), defined in `createParameterLayout()` at `PluginProcessor.cpp:1285`. The metronome, BPM, count-in, MIDI-clock, and MIDI-device settings are **not** APVTS parameters — they live in standalone user state (`juce::PropertiesFile`) and `std::atomic` audio-thread flags. Add them there, not to the APVTS.
+Currently the APVTS exposes only **`Gain`** (`AudioParameterFloat`, range 0.0–1.0, step 0.01, default 0.7), defined in `createParameterLayout()` in `PluginProcessor.cpp`. The metronome, BPM, count-in, MIDI-clock, and MIDI-device settings are **not** APVTS parameters — they live in standalone user state (`juce::PropertiesFile`) and `std::atomic` audio-thread flags. Add them there, not to the APVTS.
 
 ## Adding a New Parameter
 

@@ -71,14 +71,16 @@ For the full event listing and the add-a-new-event recipe, see the **webui-bridg
   - `frontendSetMidiSequencerPlaying`
   - `frontendSetMidiSequencerLooping`
   - `frontendClearMidiSequence`
+  - `frontendSaveLoop` (converts the captured audio loop into a library snippet via `addLoopSnippet()`)
+  - `frontendSetMidiQuantization`
 - Transport snapshots expose `midiSequencerRecording`, `midiSequencerPlaying`, `midiSequencerLooping`, and `midiSequencerEventCount`.
 - The current loop is sample-position based and follows the existing transport clock. It is intended for testing drum machines, MIDI keyboards, and MIDI instruments alongside guitar recording.
-- Current limitations: no MIDI sequence persistence, clip naming, quantization UI, piano-roll editing, per-track routing, or note cleanup on loop boundaries. Add those deliberately rather than assuming the current event looper provides them.
+- Current limitations: no piano-roll editing, per-track routing, or note cleanup on loop boundaries. MIDI sequence persistence (JSON in plugin state), clip/loop naming via snippet saving, and a quantization UI all exist — do not assume the looper lacks them.
 - Filter realtime MIDI clock, Start, Continue, and Stop messages while recording; they are transport signals, not musical sequence events.
 - The UI playhead uses backend-reported `midiSequencerPosition` and `midiSequencerLength`; do not replace it with a decorative CSS animation. The event lane uses the same normalized loop width.
 - MIDI event storage is fixed/preallocated (`maxMidiSequenceEvents`) and event count/position/length are published atomically. Do not use `std::vector::push_back()` or message-thread mutation of storage read by `processBlock`.
 - The audio loop reuses the prepared `recordBuffer` and reports `audioLoopPosition` / `audioLoopLength` in the transport snapshot. The frontend derives the combined loop playhead from the audio loop timing so MIDI-only event density does not distort the timeline.
-- Loop controls are currently exposed through the existing sequencer events: record/stop capture, play/stop loop, loop toggle, clear, and MIDI save. MIDI `.mid` export remains separate from audio loop capture.
+- Loop controls are currently exposed through the existing sequencer events: record/stop capture, play/stop loop, loop toggle, clear, and save loop. There is no MIDI `.mid` export — the loop's save action converts the captured audio into a library snippet through `BluePrinterAudioProcessor::addLoopSnippet()`, then opens the same WAV + JSON sidecar dialog the recording block uses (`saveSnippetWithDialog`).
 - MIDI sequence state is serialized as JSON inside plugin state under `midiSequence`, with event positions and explicit MIDI byte arrays. The JSON loader restores only into the fixed preallocated event array and is message-thread only.
 - MIDI quantization is non-destructive at capture time: `midiQuantizationDivision` accepts `0` (off), `4` (quarter), `8` (eighth), `16` (sixteenth), or `32` (thirty-second). Grid spacing is derived from current BPM and sample rate.
 - Active sequencer notes are tracked by channel/note on the audio thread. Flush note-offs when playback transitions from active to stopped and at loop wrap boundaries to prevent hanging instrument voices.
