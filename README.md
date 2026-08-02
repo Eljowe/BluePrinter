@@ -30,11 +30,18 @@ to disk (WAV + sidecar JSON).
   count-in before recording starts.
 - **MIDI clock output** — 24 ppqn clock, Start/Stop to a selectable MIDI
   output device for syncing drum machines and sequencers.
-- **Two VST3 FX chains** — a `midiChain` (arpeggiators, chord generators,
-  instruments) that runs before an `audioChain` (amp sims, EQ, reverb), so a
-  synth in the MIDI chain can't clobber the guitar signal.
-- **Audio looper** — capture a loop of whatever the plugin chains produce
-  (guitar, synth sounds from the MIDI chain, FX — all baked in), with its
+- **Flexible VST3 FX chains** — any number of parallel chains
+  (arpeggiators, chord generators, instruments, amp sims, EQ, reverb),
+  each selecting which input channels feed it (from a 1–8 channel input
+  bus — checkboxes per input, or none for MIDI-only chains), a
+  per-chain **MIDI toggle** plus a **MIDI channel filter** (1–16) so
+  note-aware plugins only see the keys you want, and a **Record toggle**
+  so you choose which chains get baked into takes and loops. Every chain
+  has its own **volume knob**, **mute** switch, and live **level meter**.
+  A synth chain can sit next to a guitar chain without either clobbering
+  the other's signal — chains never hear each other.
+- **Audio looper** — capture a loop of the record mix (dry input +
+  selected chains — guitar, synth sounds, FX — all baked in), with its
   own click + count-in, bar-stepped start/end cropping, and loop/one-shot
   playback. Saving a loop converts it into a library snippet using the
   same WAV + JSON flow as the take recorder. Audio-only: there is no MIDI
@@ -58,8 +65,9 @@ trim monitoring level while recording.
 - **WebView2 editor** (`Source/WebViewEditor.{h,cpp}`) — main editor.
   Serves the built React app from `WebUI/dist/` and bridges recording,
   playback, snippet metadata, looper, and file-dialog events.
-- **VST3 chains** (`Source/PluginChain.{h,cpp}`) — two parallel chains
-  (`midiChain`, `audioChain`) with async plugin loading, per-slot bypass,
+- **VST3 chains** (`Source/PluginChain.{h,cpp}`) — a flexible list of
+  parallel chains (ids, names, input masks, MIDI + record toggles,
+  volume/mute/level meters) with async plugin loading, per-slot bypass,
   native editor windows, and state persistence.
 - **VST3 scanner** (`Source/Vst3Library.{h,cpp}`) — folder scanning with a
   blocklist and async per-file description.
@@ -177,6 +185,7 @@ Events flow through `window.__JUCE__.backend`:
 | `frontendSetLoopCrop` / `frontendClearLoop` / `frontendSaveLoop` | Looper: crop start/end bars / clear / save as snippet |
 | `frontendAddVst3` / `frontendRemoveVst3` / `frontendMoveVst3` | VST3 chain: add / remove / reorder slots       |
 | `frontendSetVst3Bypass` / `frontendOpenVst3Editor` / `frontendCloseVst3Editor` | Chain slot bypass + native editor |
+| `frontendSetVst3MidiPass`                               | Per-chain MIDI pass-through toggle (default: FX chain off) |
 | `frontendScanVst3Folder` / `frontendGetVst3Chain`         | VST3 scan / chain snapshot                        |
 | `frontendBlockVst3Plugin` / `frontendUnblockVst3Plugin`   | Blocklist management                              |
 
@@ -213,15 +222,17 @@ through `withInitialisationData("parameters" | "snippets" | "transport", ...)`.
 The looper panel is audio-only. It captures whatever the plugin chains
 produce, so the loop sounds exactly like what you heard while recording:
 
-- Capture taps the **post-chain** signal (after both VST3 chains, before the
-  metronome click is mixed) into the shared pre-allocated `recordBuffer`, so
-  synth sounds from the MIDI chain and FX from the audio chain are baked in.
+- Capture taps the **record mix** (dry post-gain input + the chains whose
+  Record toggle is on, before the metronome click is mixed) into the shared
+  pre-allocated `recordBuffer`, so synth sounds and FX from the selected
+  chains are baked in and deselected chains are left out.
 - Its own **click + count-in** run off the same metronome clock; the click is
   mixed after the capture tap so it never ends up in the loop.
 - On stop, the captured length is trimmed to the nearest full 4/4 bar
   (beat-length fallback). **Crop start / end** steppers trim whole bars off
   either side — the audible window is `[audioLoopStart, audioLoopStart +
-  audioLoopLength)`.
+  audioLoopLength)`. The timeline shows a live waveform of the cropped
+  loop, with the trimmed regions shaded.
 - Playback mixes the loop over the live input, post-chain (the loop audio is
   already processed, so it isn't re-run through the chains), with a
   precomputed crossfade at the wrap point. Loop/one-shot is toggleable.
@@ -230,7 +241,7 @@ produce, so the loop sounds exactly like what you heard while recording:
   opens the same WAV + JSON save dialog as the take recorder. The library
   snippet is the only persistence story — there is no MIDI `.mid` export,
   and MIDI event recording/quantization was removed from the looper
-  entirely (the MIDI chain still plays instruments live).
+  entirely (MIDI-listening chains still play instruments live).
 - The looper and the take recorder share `recordBuffer` and preempt each
   other, so they never capture simultaneously.
 

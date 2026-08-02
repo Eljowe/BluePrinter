@@ -27,6 +27,11 @@ struct Snippet
     // strongest first. Populated by the same Analyse pass as the key,
     // empty if analysis hasn't run or the audio has no clear pitches.
     juce::StringArray detectedNotes;
+    // Organisational colour tag, one of the 8 palette keys the UI
+    // offers ("red", "orange", "yellow", "green", "teal", "blue",
+    // "purple", "pink"). Empty string = no colour. Persisted in the
+    // sidecar JSON.
+    juce::String color;
 };
 
 class SnippetLibrary
@@ -41,6 +46,10 @@ public:
     bool removeSnippet (int id);
 
     bool updateMeta (int id, const juce::String& name, const juce::String& comments);
+
+    // Set the organisational colour tag on a snippet. `color` should be
+    // one of the 8 palette keys the UI offers, or empty to clear it.
+    bool updateColor (int id, const juce::String& color);
 
     bool markSaved (int id, const juce::String& path);
 

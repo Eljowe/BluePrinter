@@ -26,6 +26,7 @@ public:
     static constexpr const char* frontendStartPlaybackEvent    = "frontendStartPlayback";
     static constexpr const char* frontendStopPlaybackEvent     = "frontendStopPlayback";
     static constexpr const char* frontendUpdateSnippetEvent    = "frontendUpdateSnippetMeta";
+    static constexpr const char* frontendSetSnippetColorEvent  = "frontendSetSnippetColor";
     static constexpr const char* frontendDeleteSnippetEvent    = "frontendDeleteSnippet";
     static constexpr const char* frontendDetectSnippetKeyEvent = "frontendDetectSnippetKey";
     static constexpr const char* frontendSaveSnippetEvent      = "frontendSaveSnippet";
@@ -47,6 +48,8 @@ public:
     static constexpr const char* frontendSetMetronomeEvent     = "frontendSetMetronome";
     static constexpr const char* frontendSetBpmEvent           = "frontendSetBpm";
     static constexpr const char* frontendSetCountInBeatsEvent  = "frontendSetCountInBeats";
+    static constexpr const char* frontendSetDryLevelEvent      = "frontendSetDryLevel";
+    static constexpr const char* frontendSetClickParamsEvent   = "frontendSetClickParams";
     static constexpr const char* frontendSetMidiClockEvent     = "frontendSetMidiClock";
     static constexpr const char* frontendSetMidiDeviceEvent    = "frontendSetMidiDevice";
     static constexpr const char* frontendSetLooperRecordingEvent = "frontendSetLooperRecording";
@@ -60,12 +63,21 @@ public:
     static constexpr const char* frontendRemoveVst3Event       = "frontendRemoveVst3";
     static constexpr const char* frontendMoveVst3Event         = "frontendMoveVst3";
     static constexpr const char* frontendSetVst3BypassEvent    = "frontendSetVst3Bypass";
+    static constexpr const char* frontendSetVst3MidiPassEvent  = "frontendSetVst3MidiPass";
     static constexpr const char* frontendOpenVst3EditorEvent   = "frontendOpenVst3Editor";
     static constexpr const char* frontendCloseVst3EditorEvent  = "frontendCloseVst3Editor";
     static constexpr const char* frontendScanVst3FolderEvent   = "frontendScanVst3Folder";
     static constexpr const char* frontendGetVst3ChainEvent     = "frontendGetVst3Chain";
     static constexpr const char* frontendBlockVst3PluginEvent  = "frontendBlockVst3Plugin";
     static constexpr const char* frontendUnblockVst3PluginEvent = "frontendUnblockVst3Plugin";
+    static constexpr const char* frontendAddChainEvent         = "frontendAddChain";
+    static constexpr const char* frontendRemoveChainEvent      = "frontendRemoveChain";
+    static constexpr const char* frontendRenameChainEvent      = "frontendRenameChain";
+    static constexpr const char* frontendSetChainInputsEvent   = "frontendSetChainInputs";
+    static constexpr const char* frontendSetChainRecordEvent   = "frontendSetChainRecord";
+    static constexpr const char* frontendSetChainVolumeEvent   = "frontendSetChainVolume";
+    static constexpr const char* frontendSetChainMuteEvent     = "frontendSetChainMute";
+    static constexpr const char* frontendSetChainMidiChannelsEvent = "frontendSetChainMidiChannels";
 
     static constexpr const char* backendVst3ChainEvent        = "backendVst3Chain";
     static constexpr const char* backendVst3ScanProgressEvent = "backendVst3ScanProgress";
@@ -85,13 +97,31 @@ public:
     void handleOpenLibraryFolder();
 
     // VST3 chain handlers — public so the listener lambdas can drive them.
-    // The "chain" argument is "midiChain" or "audioChain" and picks
-    // which of the two chains the operation targets. Index is the
-    // slot index within that chain.
+    // The "chain" argument is a stable chain id (e.g. "chain0") that the
+    // processor resolves to a PluginChain; index is the slot index within
+    // that chain.
     void openVst3Editor (const juce::String& chain, int slotIndex);
     void closeVst3Editor (const juce::String& chain, int slotIndex, bool deleteAfterClose);
     void closeAllVst3Editors();
     void emitVst3ChainSnapshot();
+    // Chain lifecycle handlers. The processor owns the chain objects;
+    // these wrappers add/remove/rename and then refresh the editor's
+    // per-chain window bindings and the UI snapshot.
+    void handleAddChain (const juce::var& data);
+    void handleRemoveChain (const juce::var& data);
+    void handleRenameChain (const juce::var& data);
+    void handleSetChainInputs (const juce::var& data);
+    void handleSetChainRecord (const juce::var& data);
+    void handleSetChainVolume (const juce::var& data);
+    void handleSetChainMute (const juce::var& data);
+    void handleSetChainMidiChannels (const juce::var& data);
+    // (Re)wire the per-chain onSlotRemoved callbacks and drop editor
+    // windows for chains that no longer exist. Called after the chain
+    // list changes so a removed slot/chain always closes its windows.
+    void refreshChainEditorBindings();
+    // Id of the first chain, used as the fallback when a chain event
+    // arrives without a "chain" field (empty when no chains exist).
+    juce::String defaultChainId() const;
     // Push a fresh snippet + library-folder snapshot to the
     // WebView. The frontendGetSnippetsEvent listener inside
     // makeWebViewOptions calls this when React asks for a fresh
@@ -147,16 +177,14 @@ private:
     juce::WebBrowserComponent webView;
     juce::Label fallbackLabel;
 
-    // Per-slot native VST3 editor windows, one map per chain. The key
-    // in each map matches the slot's index in that chain. The
-    // unique_ptr owns the DialogWindow, which in turn owns the
-    // AudioProcessorEditor. The actual stored type is the
-    // Vst3EditorWindow subclass declared in WebViewEditor.cpp; we
+    // Per-slot native VST3 editor windows, keyed by chain id and then
+    // by slot index. The unique_ptr owns the DialogWindow, which in
+    // turn owns the AudioProcessorEditor. The actual stored type is
+    // the Vst3EditorWindow subclass declared in WebViewEditor.cpp; we
     // keep the map's pointer type as DialogWindow because the
     // subclass lives in an anonymous namespace and can't be named in
     // this header.
-    std::map<int, std::unique_ptr<juce::DialogWindow>> midiEditorWindows;
-    std::map<int, std::unique_ptr<juce::DialogWindow>> audioEditorWindows;
+    std::map<juce::String, std::map<int, std::unique_ptr<juce::DialogWindow>>> editorWindows;
 
     std::atomic<bool> parameterUpdatePending { false };
     std::atomic<bool> libraryUpdatePending   { false };

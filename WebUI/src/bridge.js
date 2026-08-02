@@ -1,16 +1,11 @@
 // Bridge helpers — every interaction with the JUCE backend goes through here.
 //
-// Chain events carry a "chain" field that is either "midiChain" or
-// "audioChain", picking which of the two parallel plugin chains the
-// operation targets. The MIDI chain runs first in the audio thread
-// (good for arpeggiators / chord generators / instruments) and the
-// audio chain runs second (good for amp sims / EQ / reverb). See
+// Chain events carry a "chain" field that is a stable chain id
+// ("chain0", "chain1", …). Chains are independent parallel processors
+// of the input: each selects which input channels feed it (none /
+// left / right / both), whether it receives the MIDI buffer, and
+// whether its output is included in take/loop captures. See
 // PluginChain.h and PluginProcessor.h for the details.
-
-export const CHAIN_IDS = {
-  midi: "midiChain",
-  audio: "audioChain",
-};
 
 export const FRONTEND_EVENTS = {
   setParameter: "frontendSetParameter",
@@ -19,6 +14,9 @@ export const FRONTEND_EVENTS = {
   startPlayback: "frontendStartPlayback",
   stopPlayback: "frontendStopPlayback",
   updateSnippet: "frontendUpdateSnippetMeta",
+  // Organisational colour tag for a snippet: { id, color } where
+  // color is one of the 8 palette keys or "" to clear.
+  setSnippetColor: "frontendSetSnippetColor",
   deleteSnippet: "frontendDeleteSnippet",
   detectSnippetKey: "frontendDetectSnippetKey",
   saveSnippet: "frontendSaveSnippet",
@@ -35,6 +33,11 @@ export const FRONTEND_EVENTS = {
   setMetronome: "frontendSetMetronome",
   setBpm: "frontendSetBpm",
   setCountInBeats: "frontendSetCountInBeats",
+  // Level of the direct dry pass-through (0..1). { level }
+  setDryLevel: "frontendSetDryLevel",
+  // Click sound tuning popup: { pitch, accentPitch, decay, volume,
+  // accentVolume, noise } — all values sent on every change.
+  setClickParams: "frontendSetClickParams",
   setMidiClock: "frontendSetMidiClock",
   setMidiDevice: "frontendSetMidiDevice",
   setLooperRecording: "frontendSetLooperRecording",
@@ -48,12 +51,25 @@ export const FRONTEND_EVENTS = {
   removeVst3: "frontendRemoveVst3",
   moveVst3: "frontendMoveVst3",
   setVst3Bypass: "frontendSetVst3Bypass",
+  setVst3MidiPass: "frontendSetVst3MidiPass",
   openVst3Editor: "frontendOpenVst3Editor",
   closeVst3Editor: "frontendCloseVst3Editor",
   scanVst3Folder: "frontendScanVst3Folder",
   getVst3Chain: "frontendGetVst3Chain",
   blockVst3Plugin: "frontendBlockVst3Plugin",
   unblockVst3Plugin: "frontendUnblockVst3Plugin",
+  // Chain lifecycle. "chain" fields are chain ids; addChain takes
+  // { name?, inputs?: [0..7], wantsMidi?, recordOnCapture? }.
+  addChain: "frontendAddChain",
+  removeChain: "frontendRemoveChain",
+  renameChain: "frontendRenameChain",
+  setChainInputs: "frontendSetChainInputs",
+  setChainRecord: "frontendSetChainRecord",
+  // Chain mix controls: volume in dB (-60..+12), mute, and the MIDI
+  // channel filter (channels: [1..16]).
+  setChainVolume: "frontendSetChainVolume",
+  setChainMute: "frontendSetChainMute",
+  setChainMidiChannels: "frontendSetChainMidiChannels",
 };
 
 export const BACKEND_EVENTS = {

@@ -10,6 +10,7 @@
 #include "PluginEditor.h"
 #include "WebViewEditor.h"
 
+#include <set>
 #include <thread>
 
 //==============================================================================
@@ -24,8 +25,6 @@ BluePrinterAudioProcessor::BluePrinterAudioProcessor()
                      #endif
                        )
 #endif
-    , midiChain  (vst3Library)
-    , audioChain (vst3Library)
 {
     // Restore the library folder at startup. VST3 chain restoration is
     // intentionally deferred until the editor requests it; constructing a
@@ -42,17 +41,233 @@ BluePrinterAudioProcessor::BluePrinterAudioProcessor()
         }
     }
 
-    // Wire the chain persistence AFTER the restore so we don't write
-    // the just-loaded state back over the file on startup. Both chains
-    // share one persistence callback because the save format is a
-    // single bundle containing both.
-    midiChain.onChanged  = [this] { persistPluginChain(); };
-    audioChain.onChanged = [this] { persistPluginChain(); };
+    // Seed the default chain layout (mirrors the pre-multi-chain
+    // behaviour): a MIDI chain that sees the keyboard, and an audio FX
+    // chain that doesn't. A saved state replaces these via
+    // applyChainState. Restoring the just-loaded state back over the
+    // file is prevented by the persistingPluginChain guard in
+    // persistPluginChain.
+    createChain ("MIDI Chain", ChainInputBoth, true, true);
+    createChain ("Audio FX Chain", ChainInputBoth, false, true);
+
+    // Wire the chain persistence AFTER the default chains are seeded so
+    // the startup write only happens if the user actually mutates a
+    // chain. Every chain shares one persistence callback because the
+    // save format is a single bundle containing all of them.
+    for (auto& chain : chains)
+        chain->onChanged = [this] { persistPluginChain(); };
+}
+
+void BluePrinterAudioProcessor::setChainWantsMidi (const juce::String& chainId, bool enabled)
+{
+    if (auto* chain = getChainById (chainId))
+    {
+        chain->setWantsMidi (enabled);
+        persistPluginChain();
+        listeners.call ([](Listener& l) { l.pluginChainChanged(); });
+    }
+}
+
+PluginChain* BluePrinterAudioProcessor::getChainById (const juce::String& chainId) const
+{
+    const juce::ScopedLock sl (chainLock);
+    for (auto& chain : chains)
+        if (chain->getChainId() == chainId)
+            return chain.get();
+    return nullptr;
+}
+
+juce::String BluePrinterAudioProcessor::addChain (const juce::String& name,
+                                                 int inputMask,
+                                                 bool wantsMidi,
+                                                 bool recordOnCapture)
+{
+    auto* chain = createChain (name, inputMask, wantsMidi, recordOnCapture);
+    if (chain == nullptr)
+        return {};
+
+    persistPluginChain();
+    listeners.call ([](Listener& l) { l.pluginChainChanged(); });
+    return chain->getChainId();
+}
+
+bool BluePrinterAudioProcessor::removeChain (const juce::String& chainId)
+{
+    std::unique_ptr<PluginChain> removed;
+    {
+        const juce::ScopedLock sl (chainLock);
+        for (auto it = chains.begin(); it != chains.end(); ++it)
+        {
+            if ((*it)->getChainId() == chainId)
+            {
+                removed = std::move (*it);
+                chains.erase (it);
+                break;
+            }
+        }
+    }
+
+    if (removed == nullptr)
+        return false;
+
+    // Dropping every slot closes any open editor windows (via
+    // onSlotRemoved) and releases the plugin instances before the
+    // chain object itself is destroyed.
+    removed->clear();
+    persistPluginChain();
+    listeners.call ([](Listener& l) { l.pluginChainChanged(); });
+    return true;
+}
+
+bool BluePrinterAudioProcessor::renameChain (const juce::String& chainId, const juce::String& name)
+{
+    if (auto* chain = getChainById (chainId))
+    {
+        chain->setName (name);
+        persistPluginChain();
+        listeners.call ([](Listener& l) { l.pluginChainChanged(); });
+        return true;
+    }
+    return false;
+}
+
+bool BluePrinterAudioProcessor::setChainInputs (const juce::String& chainId, int mask)
+{
+    if (auto* chain = getChainById (chainId))
+    {
+        chain->setInputMask (mask);
+        persistPluginChain();
+        listeners.call ([](Listener& l) { l.pluginChainChanged(); });
+        return true;
+    }
+    return false;
+}
+
+bool BluePrinterAudioProcessor::setChainRecordOnCapture (const juce::String& chainId, bool enabled)
+{
+    if (auto* chain = getChainById (chainId))
+    {
+        chain->setRecordOnCapture (enabled);
+        persistPluginChain();
+        listeners.call ([](Listener& l) { l.pluginChainChanged(); });
+        return true;
+    }
+    return false;
+}
+
+bool BluePrinterAudioProcessor::setChainVolume (const juce::String& chainId, float volumeDb)
+{
+    if (auto* chain = getChainById (chainId))
+    {
+        chain->setVolumeDb (juce::jlimit (-60.0f, 12.0f, volumeDb));
+        // No pluginChainChanged notification: the panel tracks the knob
+        // optimistically, and a full chain snapshot (which serializes
+        // every plugin's state) per drag tick is what made the knob
+        // laggy. Persistence is debounced too.
+        persistPluginChain();
+        return true;
+    }
+    return false;
+}
+
+bool BluePrinterAudioProcessor::setChainMute (const juce::String& chainId, bool muted)
+{
+    if (auto* chain = getChainById (chainId))
+    {
+        chain->setMuted (muted);
+        // Same as setChainVolume: the toggle is optimistic in the UI.
+        persistPluginChain();
+        return true;
+    }
+    return false;
+}
+
+bool BluePrinterAudioProcessor::setChainMidiChannels (const juce::String& chainId, uint16_t mask)
+{
+    if (auto* chain = getChainById (chainId))
+    {
+        chain->setMidiChannelsMask (mask);
+        persistPluginChain();
+        listeners.call ([](Listener& l) { l.pluginChainChanged(); });
+        return true;
+    }
+    return false;
+}
+
+PluginChain* BluePrinterAudioProcessor::createChain (const juce::String& name,
+                                                     int inputMask,
+                                                     bool wantsMidi,
+                                                     bool recordOnCapture)
+{
+    auto chain = std::make_unique<PluginChain> (vst3Library);
+    chain->setChainId (juce::String ("chain") + juce::String (nextChainId++));
+    chain->setName (name.isNotEmpty() ? name : juce::String ("Chain ") + juce::String (nextChainId));
+    chain->setInputMask (inputMask);
+    chain->setWantsMidi (wantsMidi);
+    chain->setRecordOnCapture (recordOnCapture);
+
+    PluginChain* raw = chain.get();
+    {
+        const juce::ScopedLock sl (chainLock);
+        chains.push_back (std::move (chain));
+    }
+    return raw;
+}
+
+void BluePrinterAudioProcessor::clearChains()
+{
+    std::vector<std::unique_ptr<PluginChain>> removed;
+    {
+        const juce::ScopedLock sl (chainLock);
+        removed = std::move (chains);
+    }
+    for (auto& chain : removed)
+        chain->clear();
+}
+
+void BluePrinterAudioProcessor::ensureUniqueChainIds()
+{
+    std::set<juce::String> seen;
+    int maxId = -1;
+    {
+        const juce::ScopedLock sl (chainLock);
+
+        // First pass: find the highest numeric id in use ("chainN"),
+        // so regenerated ids never collide with existing ones.
+        for (auto& chain : chains)
+        {
+            const juce::String id = chain->getChainId();
+            if (id.startsWith ("chain") && id.length() > 5)
+            {
+                const juce::String suffix = id.substring (5);
+                const int numeric = suffix.getIntValue();
+                if (suffix == juce::String (numeric))
+                    maxId = juce::jmax (maxId, numeric);
+            }
+        }
+
+        // Second pass: assign fresh ids to missing/duplicate ids,
+        // starting above the highest id in use.
+        int next = juce::jmax (maxId + 1, nextChainId);
+        for (auto& chain : chains)
+        {
+            const juce::String id = chain->getChainId();
+            if (id.isEmpty() || seen.count (id) > 0)
+                chain->setChainId (juce::String ("chain") + juce::String (next++));
+            else
+                seen.insert (id);
+        }
+        nextChainId = next;
+    }
 }
 
 BluePrinterAudioProcessor::~BluePrinterAudioProcessor()
 {
     stopTimer();
+    // Persist any debounced chain change so the very last mutation of a
+    // session (e.g. a volume knob drag finished moments before closing)
+    // is not lost.
+    flushPendingChainPersist();
 }
 
 //==============================================================================
@@ -130,37 +345,37 @@ void BluePrinterAudioProcessor::prepareToPlay (double sampleRate, int samplesPer
     maxRecordSamples = maxSamples;
     recordWritePos.store (0, std::memory_order_release);
 
-    // Per-block scratch for the MIDI chain — see the member comment.
-    midiChainBuffer.setSize (channels, samplesPerBlock, false, false, true);
+    // Per-block scratch buffers for the chain routing — see the
+    // member comments. Sized to the input channel count like the old
+    // midiChainBuffer scratch.
+    chainInputBuffer.setSize (channels, samplesPerBlock, false, false, true);
+    chainScratchBuffer.setSize (channels, samplesPerBlock, false, false, true);
+    recordingMixBuffer.setSize (channels, samplesPerBlock, false, false, true);
+    blockChains.clear();
 
     currentSampleRate = sampleRate;
     loopCrossfadeSamples = juce::jlimit (1, 256, static_cast<int> (sampleRate * 0.003));
 
-    // Hand the new rate/block size to both chains so every loaded
-    // plugin is prepared with the right values. The MIDI chain is
-    // prepared first (it runs first in processBlock); the audio chain
-    // is prepared second. Order doesn't actually matter for prepare,
-    // but doing it in the same order as processBlock keeps the
-    // mental model consistent.
-    midiChain.prepareToPlay (sampleRate, samplesPerBlock);
-    audioChain.prepareToPlay (sampleRate, samplesPerBlock);
-
-    // Synthesize a 50 ms percussive click: fundamental 800 Hz + a couple of
-    // harmonics, fast exponential decay. Single-channel, mixed into all
-    // output channels.
-    const double clickDuration = 0.05;
-    const int clickSamples = juce::jmax (1, static_cast<int> (sampleRate * clickDuration));
-    clickBuffer.assign (static_cast<size_t> (clickSamples), 0.0f);
-    for (int i = 0; i < clickSamples; ++i)
+    // Hand the new rate/block size to every chain so all loaded
+    // plugins are prepared with the right values.
     {
-        const float t = static_cast<float> (i) / static_cast<float> (sampleRate);
-        const float envelope = std::exp (-t * 80.0f);
-        float s = 0.0f;
-        s += std::sin (2.0f * juce::MathConstants<float>::twoPi *  800.0f * t) * 0.55f;
-        s += std::sin (2.0f * juce::MathConstants<float>::twoPi * 1600.0f * t) * 0.30f;
-        s += std::sin (2.0f * juce::MathConstants<float>::twoPi * 2400.0f * t) * 0.15f;
-        clickBuffer[static_cast<size_t> (i)] = s * envelope * 0.40f;
+        const juce::ScopedLock sl (chainLock);
+        for (auto& chain : chains)
+            chain->prepareToPlay (sampleRate, samplesPerBlock);
     }
+
+    // Synthesize the metronome clicks from the current click
+    // parameters. Two distinct sounds, rendered on the message thread
+    // and read-only on the audio thread:
+    //   - clickBuffer:      the normal beat tick (clickPitch, snappy)
+    //   - accentClickBuffer: the first beat of each bar
+    //     (clickAccentPitch, louder, slightly longer)
+    // Both are short percussive bursts. A 2 ms linear attack ramp
+    // starts at zero so the mix-in doesn't pop at the beat boundary; a
+    // fast exponential decay plus a 2 ms tail fade end the sound
+    // smoothly; a low-level deterministic noise transient during the
+    // first few ms gives it the woodblock "tick" attack.
+    resynthesizeClicks();
 
     startTimerHz (transportTimerHz);
 }
@@ -168,6 +383,9 @@ void BluePrinterAudioProcessor::prepareToPlay (double sampleRate, int samplesPer
 void BluePrinterAudioProcessor::releaseResources()
 {
     stopTimer();
+    // Flush the debounced chain save; the 30 Hz timer that would do it
+    // is being stopped and the host may tear the plugin down.
+    flushPendingChainPersist();
     preRollActive.store (false, std::memory_order_release);
     transportPosition.store (0, std::memory_order_release);
     if (recordingRequested.load())
@@ -189,9 +407,13 @@ void BluePrinterAudioProcessor::releaseResources()
     recordWritePos.store (0, std::memory_order_release);
     playbackSnippet.reset();
 
-    midiChain.releaseResources();
-    audioChain.releaseResources();
-    clickBuffer.clear();
+    {
+        const juce::ScopedLock sl (chainLock);
+        for (auto& chain : chains)
+            chain->releaseResources();
+    }
+    clickBuffer.reset();
+    accentClickBuffer.reset();
 }
 
 #ifndef JucePlugin_PreferredChannelConfigurations
@@ -201,15 +423,19 @@ bool BluePrinterAudioProcessor::isBusesLayoutSupported (const BusesLayout& layou
     juce::ignoreUnused (layouts);
     return true;
   #else
-    if (layouts.getMainOutputChannelSet() != juce::AudioChannelSet::mono()
-     && layouts.getMainOutputChannelSet() != juce::AudioChannelSet::stereo())
+    // Accept any layout with 1..8 input channels and the same output
+    // channel count, so a multi-input interface can route separate
+    // inputs to separate chains. Stereo remains the preferred default.
+    const auto inSet  = layouts.getMainInputChannelSet();
+    const auto outSet = layouts.getMainOutputChannelSet();
+
+    if (inSet == juce::AudioChannelSet::disabled() || outSet == juce::AudioChannelSet::disabled())
         return false;
 
-   #if ! JucePlugin_IsSynth
-    if (layouts.getMainInputChannelSet() != juce::AudioChannelSet::mono()
-     && layouts.getMainInputChannelSet() != juce::AudioChannelSet::stereo())
+    const int numIn  = inSet.size();
+    const int numOut = outSet.size();
+    if (numIn < 1 || numIn > 8 || numOut != numIn)
         return false;
-   #endif
 
     return true;
   #endif
@@ -224,45 +450,147 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     const int numSamples = buffer.getNumSamples();
     const int numChannels = buffer.getNumChannels();
 
+    // Where the metronome beat clock starts this block. The transport
+    // steps (count-in / recording / looper) advance it below; if none
+    // of them run but the MIDI clock is enabled, we advance it
+    // ourselves so the clock free-runs without recording.
+    const int64_t blockStartMetronomePos = metronomePosition.load (std::memory_order_acquire);
+
     // Apply gain. This is the post-DSP signal we want to record and the
     // pass-through signal when nothing else is happening.
     const auto gain = apvts.getRawParameterValue ("Gain")->load();
     for (int channel = 0; channel < numChannels; ++channel)
         buffer.applyGain (channel, 0, numSamples, gain);
 
-    // 1. Run the VST3 chains in parallel. The MIDI chain runs on its
-    //    own copy of the post-gain input so a synth/instrument in the
-    //    MIDI chain can't clobber the analog signal; its audio output
-    //    is then summed back into the main buffer so it mixes in
-    //    alongside the guitar. The audio chain runs second on the
-    //    summed buffer so note-aware plugins (e.g. some amp sims) can
-    //    react to the (possibly transformed) MIDI events, and so the
-    //    synth in the MIDI chain also picks up the audio FX.
-    //    The MIDI chain's MIDI output is still passed to the audio
-    //    chain via the shared midiMessages buffer.
+    // 1. Snapshot the chain list so a message-thread add/remove
+    //    mid-block can't invalidate our iteration. Same raw-pointer
+    //    snapshot model PluginChain uses for its slots.
     {
-        const int midiCh = juce::jmin (numChannels, midiChainBuffer.getNumChannels());
-        for (int ch = 0; ch < midiCh; ++ch)
-            midiChainBuffer.copyFrom (ch, 0, buffer, ch, 0, numSamples);
-
-        // Clear any channels in the scratch beyond what we just filled
-        // in case a previous block had more channels (host channel-count
-        // change between prepareToPlay calls).
-        for (int ch = midiCh; ch < midiChainBuffer.getNumChannels(); ++ch)
-            midiChainBuffer.clear (ch, 0, numSamples);
-
-        midiChain.processBlock (midiChainBuffer, midiMessages);
-
-        for (int ch = 0; ch < midiCh; ++ch)
-            buffer.addFrom (ch, 0, midiChainBuffer, ch, 0, numSamples);
+        const juce::ScopedLock sl (chainLock);
+        blockChains.clear();
+        for (auto& chain : chains)
+            blockChains.push_back (chain.get());
     }
-    audioChain.processBlock (buffer, midiMessages);
 
-    // 2. Looper capture: tap the post-chain signal so the loop bakes in
-    //    whatever the chains produce (synth sounds, FX). Deliberately
-    //    before the click is mixed in so the click never ends up in the
-    //    loop. Uses the same pre-allocated recordBuffer as the take
-    //    recorder.
+    // 1b. Pristine dry-input snapshot. Every chain copies its selected
+    //    channels from this buffer, so chains are fully parallel —
+    //    chain N can never hear chain M's output.
+    {
+        const int dryCh = juce::jmin (numChannels, chainInputBuffer.getNumChannels());
+        for (int ch = 0; ch < dryCh; ++ch)
+            chainInputBuffer.copyFrom (ch, 0, buffer, ch, 0, numSamples);
+    }
+
+    // 1c. Scale the direct dry pass-through by the Dry level. Chains
+    //    still receive the full input (chainInputBuffer was copied
+    //    above); this only controls how much raw dry is heard in the
+    //    mix — turn it to zero and only the chains are audible.
+    {
+        const float dry = dryLevel.load (std::memory_order_acquire);
+        for (int ch = 0; ch < numChannels; ++ch)
+            buffer.applyGain (ch, 0, numSamples, dry);
+    }
+
+    // 2. Run the chains in parallel. Every chain gets its own scratch
+    //    copy of the input channels it selected, processes it in place,
+    //    and its output is summed into the main buffer alongside the
+    //    dry signal (scaled by the chain's volume, unless muted).
+    //    Chains read from chainInputBuffer — a pristine snapshot of the
+    //    post-gain input taken above — never from the accumulating mix,
+    //    so one chain can never process another chain's output.
+    //    Each chain also gets its own copy of the MIDI buffer (filtered
+    //    to the chain's MIDI channel selection), so notes can't leak
+    //    between chains, and the host's output MIDI stays as the raw
+    //    input. recordingMixBuffer starts as the dry post-gain input
+    //    (scaled by the Dry level so captures match what you hear) and
+    //    accumulates only the chains whose record toggle is on — that
+    //    is what captures (take recorder + looper) record.
+    recordingMixBuffer.clear();
+    {
+        const int mixCh = juce::jmin (numChannels, recordingMixBuffer.getNumChannels());
+        for (int ch = 0; ch < mixCh; ++ch)
+            recordingMixBuffer.copyFrom (ch, 0, chainInputBuffer, ch, 0, numSamples);
+    }
+    recordingMixBuffer.applyGain (dryLevel.load (std::memory_order_acquire));
+
+    for (auto* chain : blockChains)
+    {
+        // A chain with no active plugins is transparent: its scratch
+        // would merely hold a copy of the dry input, so summing it
+        // back into the mix would double (or triple) the dry signal.
+        // Skip it entirely.
+        if (! chain->hasActivePlugins())
+        {
+            chain->outputLevel.store (0.0f, std::memory_order_release);
+            chain->outputPeak.store  (0.0f, std::memory_order_release);
+            continue;
+        }
+
+        chainScratchBuffer.clear();
+        const int mask = chain->getInputMask();
+        const int scratchCh = chainScratchBuffer.getNumChannels();
+        for (int ch = 0; ch < scratchCh; ++ch)
+        {
+            // Only copy channels the chain selected AND that actually
+            // exist in this block (mono layout: other channels stay
+            // silent).
+            if ((mask & (1 << ch)) != 0 && ch < numChannels)
+                chainScratchBuffer.copyFrom (ch, 0, chainInputBuffer, ch, 0, numSamples);
+        }
+
+        // Per-chain MIDI copy so one chain's generated notes can't leak
+        // into another. Copies into the member's existing storage (no
+        // allocation unless the input MIDI grows beyond its capacity).
+        // The chain's MIDI channel filter is applied here too.
+        chainMidiScratch = midiMessages;
+        juce::MidiBuffer* midiForChain = &chainMidiScratch;
+        const uint16_t midiMask = chain->getMidiChannelsMask();
+        if (midiMask != 0xFFFF)
+        {
+            chainMidiFiltered.clear();
+            juce::MidiBuffer::Iterator it (chainMidiScratch);
+            juce::MidiMessage msg;
+            int samplePos = 0;
+            while (it.getNextEvent (msg, samplePos))
+            {
+                if (chain->acceptsMidiChannel (msg.getChannel()))
+                    chainMidiFiltered.addEvent (msg, samplePos);
+            }
+            midiForChain = &chainMidiFiltered;
+        }
+        chain->processBlock (chainScratchBuffer, *midiForChain);
+
+        const int sumCh = juce::jmin (numChannels, chainScratchBuffer.getNumChannels());
+
+        // Output volume + mute. Muted chains still run (their plugins
+        // keep internal state consistent) but contribute nothing to the
+        // mix or the capture.
+        const float gain = chain->isMuted()
+            ? 0.0f
+            : juce::Decibels::decibelsToGain (chain->getVolumeDb());
+
+        for (int ch = 0; ch < sumCh; ++ch)
+            buffer.addFrom (ch, 0, chainScratchBuffer, ch, 0, numSamples, gain);
+
+        if (chain->isRecordOnCapture() && gain > 0.0f)
+        {
+            const int mixCh = juce::jmin (recordingMixBuffer.getNumChannels(), sumCh);
+            for (int ch = 0; ch < mixCh; ++ch)
+                recordingMixBuffer.addFrom (ch, 0, chainScratchBuffer, ch, 0, numSamples, gain);
+        }
+
+        // Per-chain output meter (post-volume; muted chains read 0).
+        // Smoothed against the chain's previous values, like the main
+        // input meter.
+        computeLevelsInto (chainScratchBuffer, numSamples,
+                           chain->outputLevel, chain->outputPeak, gain);
+    }
+
+    // 3. Looper capture: tap the record mix so the loop bakes in
+    //    whatever the selected chains produce (synth sounds, FX).
+    //    Deliberately before the click is mixed in so the click never
+    //    ends up in the loop. Uses the same pre-allocated recordBuffer
+    //    as the take recorder.
     if (looperCaptureArmed.load (std::memory_order_acquire))
     {
         const auto writePos = audioLoopLength.load (std::memory_order_relaxed);
@@ -270,24 +598,25 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         if (toCopy > 0)
         {
             for (int ch = 0; ch < juce::jmin (numChannels, recordBuffer->getNumChannels()); ++ch)
-                recordBuffer->copyFrom (ch, static_cast<int> (writePos), buffer, ch, 0, toCopy);
+                recordBuffer->copyFrom (ch, static_cast<int> (writePos), recordingMixBuffer, ch, 0, toCopy);
             audioLoopLength.store (writePos + toCopy, std::memory_order_release);
         }
     }
 
-    // 3. Record the clean (post-gain, pre-click) input. Access to the
-    //    record buffer is serialised with the message thread via recordLock.
+    // 4. Record the clean (post-gain, pre-click) record mix. Access to
+    //    the record buffer is serialised with the message thread via
+    //    recordLock.
     {
         const juce::ScopedLock sl (recordLock);
         if (recordingRequested.load (std::memory_order_acquire))
-            writeRecording (buffer, numSamples);
+            writeRecording (recordingMixBuffer, numSamples);
     }
 
-    // 4. Compute input levels from the still-clean signal so the click
+    // 5. Compute input levels from the still-clean signal so the click
     //    doesn't pump the meter.
     computeLevels (buffer, numSamples);
 
-    // 5. Audio loop playback. Runs after the chains so the already-
+    // 6. Audio loop playback. Runs after the chains so the already-
     //    processed loop audio isn't re-processed (it was captured
     //    post-chain). Mixed over the live input rather than replacing
     //    it, so you can play over the loop. Reads the cropped window
@@ -329,12 +658,12 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         }
     }
 
-    // 6. Playback overwrites the output buffer. Done after recording so
+    // 7. Playback overwrites the output buffer. Done after recording so
     //    monitoring of the input stops while a snippet is playing.
     if (playbackActive.load (std::memory_order_acquire))
         renderPlayback (buffer, numSamples);
 
-    // 7. Looper count-in: play the click, advance the beat clock, and flip
+    // 8. Looper count-in: play the click, advance the beat clock, and flip
     //    into capture once the configured beats have elapsed. Mirrors the
     //    take-recorder pre-roll below but drives the looper's own capture
     //    state. Rendered post-chain so the click is at the same level and
@@ -371,7 +700,7 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         transportPosition.store (newPos, std::memory_order_release);
     }
 
-    // 8. Pre-roll (count-in) for the take recorder: add the click to the
+    // 9. Pre-roll (count-in) for the take recorder: add the click to the
     //    output, advance the position, and flip into recording once the
     //    configured number of beats has elapsed. Uses metronomePosition as
     //    the continuous beat clock so counts stay evenly spaced across the
@@ -407,7 +736,7 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         }
     }
 
-    // 9. Click during recording. The metronome beat clock runs
+    // 10. Click during recording. The metronome beat clock runs
     //    continuously from the recording start (or count-in end) so
     //    beats land at evenly-spaced positions regardless of when the
     //    recording was started. The clock keeps advancing even when
@@ -424,7 +753,7 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         transportPosition.store (newPos, std::memory_order_release);
     }
 
-    // 10. Click during looper capture. Same beat clock, so the looper's
+    // 11. Click during looper capture. Same beat clock, so the looper's
     //    count-in flows straight into capture with evenly spaced beats.
     //    Mixed after the capture tap so the click never lands in the loop.
     if (looperCaptureArmed.load (std::memory_order_acquire))
@@ -438,12 +767,31 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         transportPosition.store (newPos, std::memory_order_release);
     }
 
-    // 11. MIDI clock output. Clock pulses (0xF8) are generated at
+    // 12. MIDI clock output. Clock pulses (0xF8) are generated at
     //    24 ppqn from the continuous metronomePosition so they align
     //    with the audible metronome and run through count-in into the
-    //    recording. Queued MIDI Start / Stop are flushed here so the
-    //    receiver gets them at a block boundary.
+    //    recording. When nothing is recording or looping, the clock
+    //    still advances the position itself so it runs free — the user
+    //    can drive a drum machine's presets without recording, and the
+    //    audible click plays along so the beats can be heard (subject
+    //    to the metronome toggle). Queued MIDI Start / Stop are flushed
+    //    here so the receiver gets them at a block boundary.
     {
+        const bool clockEnabled = midiClockEnabled.load (std::memory_order_acquire);
+        const bool clockFreeRan = clockEnabled
+            && metronomePosition.load (std::memory_order_acquire) == blockStartMetronomePos;
+
+        if (clockFreeRan)
+        {
+            metronomePosition.store (blockStartMetronomePos + numSamples,
+                                     std::memory_order_release);
+
+            // Sound the click for the free-running clock so the beats
+            // are audible without recording or looping.
+            if (metronomeEnabled.load (std::memory_order_acquire))
+                renderMetronomeInBlock (buffer, blockStartMetronomePos, numSamples);
+        }
+
         const int64_t clockPos = metronomePosition.load (std::memory_order_acquire);
         renderMidiClockInBlock (midiMessages, clockPos, numSamples);
 
@@ -486,7 +834,13 @@ void BluePrinterAudioProcessor::renderMetronomeInBlock (juce::AudioBuffer<float>
                                                         int64_t startPos,
                                                         int numSamples)
 {
-    if (clickBuffer.empty() || numSamples <= 0)
+    // Copy the shared_ptrs once per block so a message-thread
+    // resynthesizeClicks() (click sound settings changed) can never
+    // invalidate the buffers mid-render.
+    const auto normalClick = clickBuffer;
+    const auto accentClick = accentClickBuffer;
+    if ((normalClick == nullptr || normalClick->empty())
+     && (accentClick == nullptr || accentClick->empty()))
         return;
 
     const double bpmValue = bpm.load (std::memory_order_acquire);
@@ -498,14 +852,13 @@ void BluePrinterAudioProcessor::renderMetronomeInBlock (juce::AudioBuffer<float>
         return;
 
     const int numChannels = buffer.getNumChannels();
-    const int clickLen    = static_cast<int> (clickBuffer.size());
 
     // Accent the first beat of every bar — beats whose index is a
     // multiple of countInBeats (default 4). Falls back to 4-beat bars
     // when count-in is disabled so the accent still works during plain
-    // recording.
+    // recording. The accent uses its own brighter, louder click; the
+    // other beats use the softer tick.
     const int beatsPerBar = juce::jmax (1, countInBeats.load (std::memory_order_acquire));
-    const float accentGain = 1.8f;
 
     // Beat boundaries that fall inside [startPos, startPos + numSamples).
     const int64_t endPos = startPos + numSamples;
@@ -519,11 +872,17 @@ void BluePrinterAudioProcessor::renderMetronomeInBlock (juce::AudioBuffer<float>
         if (blockOffset < 0 || blockOffset >= numSamples)
             continue;
 
-        const float gain = (beat % beatsPerBar == 0) ? accentGain : 1.0f;
+        const std::vector<float>* click = normalClick.get();
+        if (beat % beatsPerBar == 0 && accentClick != nullptr && ! accentClick->empty())
+            click = accentClick.get();
+        if (click == nullptr || click->empty())
+            continue;
+
+        const int clickLen = static_cast<int> (click->size());
         const int remaining = juce::jmin (clickLen, numSamples - blockOffset);
         for (int j = 0; j < remaining; ++j)
         {
-            const float sample = clickBuffer[static_cast<size_t> (j)] * gain;
+            const float sample = (*click)[static_cast<size_t> (j)];
             for (int ch = 0; ch < numChannels; ++ch)
                 buffer.addSample (ch, blockOffset + j, sample);
         }
@@ -655,7 +1014,11 @@ void BluePrinterAudioProcessor::renderPlayback (juce::AudioBuffer<float>& destin
     }
 }
 
-void BluePrinterAudioProcessor::computeLevels (const juce::AudioBuffer<float>& source, int numSamples)
+void BluePrinterAudioProcessor::computeLevelsInto (const juce::AudioBuffer<float>& source,
+                                                   int numSamples,
+                                                   std::atomic<float>& levelAtomic,
+                                                   std::atomic<float>& peakAtomic,
+                                                   float gain)
 {
     if (numSamples <= 0)
         return;
@@ -682,14 +1045,19 @@ void BluePrinterAudioProcessor::computeLevels (const juce::AudioBuffer<float>& s
         ? std::sqrt (sumSquares / static_cast<double> (countedSamples))
         : 0.0;
 
-    const float prevLevel = inputLevel.load (std::memory_order_acquire);
-    const float prevPeak  = inputPeak.load  (std::memory_order_acquire);
+    const float prevLevel = levelAtomic.load (std::memory_order_acquire);
+    const float prevPeak  = peakAtomic.load  (std::memory_order_acquire);
     const float alpha     = 1.0f / static_cast<float> (levelSmoothing);
-    const float newLevel  = prevLevel + (static_cast<float> (rms) - prevLevel) * alpha;
+    const float newLevel  = prevLevel + (static_cast<float> (rms) * gain - prevLevel) * alpha;
     const float decayPeak = prevPeak * 0.95f;
 
-    inputLevel.store (newLevel, std::memory_order_release);
-    inputPeak.store  (juce::jmax (peak, decayPeak), std::memory_order_release);
+    levelAtomic.store (newLevel, std::memory_order_release);
+    peakAtomic.store  (juce::jmax (peak * gain, decayPeak), std::memory_order_release);
+}
+
+void BluePrinterAudioProcessor::computeLevels (const juce::AudioBuffer<float>& source, int numSamples)
+{
+    computeLevelsInto (source, numSamples, inputLevel, inputPeak, 1.0f);
 }
 
 //==============================================================================
@@ -753,6 +1121,7 @@ void BluePrinterAudioProcessor::setLooperRecording (bool enabled)
         audioLoopPosition.store (0, std::memory_order_release);
         looperCropStartBars = 0;
         looperCropEndBars = 0;
+        looperPeaks.clear();
 
         if (looperMetronomeEnabled.load (std::memory_order_acquire)
             && looperCountInBeats.load (std::memory_order_acquire) > 0)
@@ -783,6 +1152,26 @@ void BluePrinterAudioProcessor::setLooperRecording (bool enabled)
     listeners.call ([](Listener& l) { l.transportChanged(); });
 }
 
+void BluePrinterAudioProcessor::refreshLooperPeaks()
+{
+    looperPeaks.clear();
+
+    const auto start = audioLoopStart.load (std::memory_order_acquire);
+    const auto length = audioLoopLength.load (std::memory_order_acquire);
+    if (recordBuffer == nullptr || length <= 0)
+        return;
+
+    // Copy the cropped window out under the lock (guards against the take
+    // recorder writing concurrently) and downsample for the UI.
+    juce::AudioBuffer<float> region (recordBuffer->getNumChannels(), static_cast<int> (length));
+    {
+        const juce::ScopedLock sl (recordLock);
+        for (int ch = 0; ch < region.getNumChannels(); ++ch)
+            region.copyFrom (ch, 0, *recordBuffer, ch, static_cast<int> (start), static_cast<int> (length));
+    }
+    looperPeaks = SnippetLibrary::computePeaks (region, 256);
+}
+
 void BluePrinterAudioProcessor::trimLooperToMusicalGrid()
 {
     const auto captured = audioLoopLength.load (std::memory_order_acquire);
@@ -799,6 +1188,7 @@ void BluePrinterAudioProcessor::trimLooperToMusicalGrid()
     audioLoopLength.store (target, std::memory_order_release);
     looperCropStartBars = 0;
     looperCropEndBars = 0;
+    refreshLooperPeaks();
 }
 
 int BluePrinterAudioProcessor::addLoopSnippet()
@@ -892,6 +1282,7 @@ void BluePrinterAudioProcessor::setLoopCrop (int startBars, int endBars)
     if (remaining <= 0)
         audioLoopPlaying.store (false, std::memory_order_release);
 
+    refreshLooperPeaks();
     listeners.call ([](Listener& l) { l.transportChanged(); });
 }
 
@@ -906,6 +1297,7 @@ void BluePrinterAudioProcessor::clearLoop()
     audioLoopPosition.store (0, std::memory_order_release);
     looperCropStartBars = 0;
     looperCropEndBars = 0;
+    looperPeaks.clear();
     listeners.call ([](Listener& l) { l.transportChanged(); });
 }
 
@@ -1054,6 +1446,25 @@ bool BluePrinterAudioProcessor::updateSnippetMeta (int id, const juce::String& n
     return false;
 }
 
+bool BluePrinterAudioProcessor::setSnippetColor (int id, const juce::String& color)
+{
+    const bool ok = library.updateColor (id, color);
+    if (ok)
+    {
+        // Persist the change to the sidecar JSON so the tag survives a
+        // reload of the library folder.
+        const bool persisted = library.persistMetadata (id);
+        if (! persisted)
+        {
+            juce::ScopedLock lock (libraryFolderLock);
+            lastSaveError = "Could not save metadata to disk. Make sure a library folder is set.";
+        }
+        listeners.call ([](Listener& l) { l.libraryChanged(); });
+        return persisted;
+    }
+    return false;
+}
+
 void BluePrinterAudioProcessor::detectSnippetKeyAndNotes (int id)
 {
     // Hold a strong ref to the snippet's audio so the worker thread
@@ -1179,6 +1590,98 @@ void BluePrinterAudioProcessor::setCountInBeats (int beats)
     listeners.call ([](Listener& l) { l.transportChanged(); });
 }
 
+void BluePrinterAudioProcessor::setDryLevel (float level)
+{
+    const float clamped = juce::jlimit (0.0f, 1.0f, level);
+    if (dryLevel.load (std::memory_order_acquire) == clamped)
+        return;
+    dryLevel.store (clamped, std::memory_order_release);
+    listeners.call ([](Listener& l) { l.transportChanged(); });
+}
+
+void BluePrinterAudioProcessor::setClickParams (float pitch, float accentPitch,
+                                                float decay, float volume,
+                                                float accentVolume, float noise)
+{
+    clickPitch        = juce::jlimit (400.0f, 3000.0f, pitch);
+    clickAccentPitch  = juce::jlimit (400.0f, 3000.0f, accentPitch);
+    clickDecay        = juce::jlimit (20.0f, 300.0f, decay);
+    clickVolume       = juce::jlimit (0.0f, 1.0f, volume);
+    clickAccentVolume = juce::jlimit (0.0f, 1.0f, accentVolume);
+    clickNoise        = juce::jlimit (0.0f, 0.3f, noise);
+
+    resynthesizeClicks();
+    listeners.call ([](Listener& l) { l.transportChanged(); });
+}
+
+void BluePrinterAudioProcessor::resynthesizeClicks()
+{
+    const double sampleRate = currentSampleRate;
+    if (sampleRate <= 0.0)
+        return;
+
+    struct ClickParams
+    {
+        double fundamental;
+        double decayRate;
+        double duration;
+        float  amplitude;
+        float  noiseLevel;
+    };
+
+    auto makeClick = [sampleRate](const ClickParams& p) -> std::vector<float>
+    {
+        const int n = juce::jmax (1, static_cast<int> (sampleRate * p.duration));
+        std::vector<float> buf (static_cast<size_t> (n));
+
+        const int attackSamples = juce::jmax (1, static_cast<int> (sampleRate * 0.002));
+        const int fadeSamples   = juce::jmax (1, static_cast<int> (sampleRate * 0.002));
+        const double noiseWindow = 0.004;
+
+        // Deterministic LCG so the click is identical every launch.
+        uint32_t noiseState = 0x1B3F5A91u;
+        auto nextNoise = [&noiseState]()
+        {
+            noiseState = noiseState * 1664525u + 1013904223u;
+            return (static_cast<float> (noiseState) / static_cast<float> (0xFFFFFFFFu)) * 2.0f - 1.0f;
+        };
+
+        const float twoPi = juce::MathConstants<float>::twoPi;
+        for (int i = 0; i < n; ++i)
+        {
+            const double t = static_cast<double> (i) / sampleRate;
+
+            double env = std::exp (-p.decayRate * t);
+            if (i < attackSamples)
+                env *= static_cast<double> (i) / attackSamples;
+            const int tailLeft = n - i;
+            if (tailLeft < fadeSamples)
+                env *= static_cast<double> (tailLeft) / fadeSamples;
+
+            const float f = static_cast<float> (t);
+            const float tonal = std::sin (twoPi * static_cast<float> (p.fundamental) * f) * 0.55f
+                              + std::sin (twoPi * static_cast<float> (p.fundamental * 2.0) * f) * 0.30f
+                              + std::sin (twoPi * static_cast<float> (p.fundamental * 3.0) * f) * 0.15f;
+            const float noise = t < noiseWindow ? nextNoise() * p.noiseLevel : 0.0f;
+
+            buf[static_cast<size_t> (i)] = (tonal * p.amplitude + noise) * static_cast<float> (env);
+        }
+        return buf;
+    };
+
+    // The accent decays a little slower than the tick so it rings
+    // slightly longer, and both get a touch of the same onset noise.
+    clickBuffer       = std::make_shared<const std::vector<float>> (
+        makeClick ({ static_cast<double> (clickPitch),
+                     static_cast<double> (clickDecay),
+                     0.040, clickVolume, clickNoise }));
+
+    accentClickBuffer = std::make_shared<const std::vector<float>> (
+        makeClick ({ static_cast<double> (clickAccentPitch),
+                     static_cast<double> (clickDecay) * 0.78,
+                     0.055, clickAccentVolume, clickNoise }));
+}
+
 // -------------------------------------------------------------------------
 // MIDI clock output — syncs external drum machines / sequencers
 // -------------------------------------------------------------------------
@@ -1190,9 +1693,20 @@ void BluePrinterAudioProcessor::setMidiClockEnabled (bool enabled)
         return;
 
     if (enabled)
+    {
         openMidiOutputDevice();
+        midiStartPending.store (true, std::memory_order_release);
+        // Standalone: the host MIDI buffer is never forwarded to the
+        // hardware device, so punch Start straight out — without this
+        // a drum machine sits silent until a recording starts.
+        sendDirectMidiStart (midiOutput, midiOutputLock);
+    }
     else
+    {
+        midiStopPending.store (true, std::memory_order_release);
+        sendDirectMidiStop (midiOutput, midiOutputLock);
         closeMidiOutputDevice();
+    }
 
     listeners.call ([](Listener& l) { l.transportChanged(); });
 }
@@ -1311,25 +1825,34 @@ juce::String BluePrinterAudioProcessor::getLastChainRestoreError() const
 }
 
 // Build the combined plugin-chain bundle that gets written to host
-// state and the standalone properties file. Holds both the MIDI
-// chain's slots and the audio chain's slots, plus the folder-wide
-// blocklist and cached scan result on the shared library. The MIDI
-// chain is intentionally named "midiChain" and the audio chain
-// "audioChain" so a future "sidechain" or "aux" chain slots in
-// without a backwards-compat break.
+// state and the standalone properties file. Holds every chain's slots
+// and routing config, plus the folder-wide blocklist and cached scan
+// result on the shared library, and the chain-id counter so ids stay
+// stable across restores.
 //
 // Format:
 //   {
-//     "midiChain":  { "slots": [...] },
-//     "audioChain": { "slots": [...] },
+//     "chains": [
+//       { "id": "chain0", "name": "...", "inputs": [0, 1],
+//         "recordOnCapture": true, "wantsMidi": true, "slots": [...] },
+//       ...
+//     ],
+//     "nextChainId":       5,
 //     "blocklist":         ["...\\Foo.vst3", ...],
 //     "availablePlugins":  [{ "name": ..., "path": ..., ... }, ...]
 //   }
 juce::var BluePrinterAudioProcessor::makeChainState() const
 {
     auto* obj = new juce::DynamicObject();
-    obj->setProperty ("midiChain",  midiChain.getChainState());
-    obj->setProperty ("audioChain", audioChain.getChainState());
+
+    juce::Array<juce::var> chainsArray;
+    {
+        const juce::ScopedLock sl (chainLock);
+        for (const auto& chain : chains)
+            chainsArray.add (chain->getChainState());
+    }
+    obj->setProperty ("chains", chainsArray);
+    obj->setProperty ("nextChainId", nextChainId);
 
     {
         juce::Array<juce::var> blocklistArray;
@@ -1345,10 +1868,15 @@ juce::var BluePrinterAudioProcessor::makeChainState() const
     return juce::var (obj);
 }
 
-// Inverse of makeChainState. Accepts both the new (midiChain/
-// audioChain-keyed) format and the pre-split format where a single
-// top-level "slots" array was the only chain — that legacy state is
-// loaded into the audio chain so users keep their existing guitar FX.
+// Inverse of makeChainState. Accepts three formats:
+//
+//   1. The current chains-array format ("chains": [...]) — restored
+//      verbatim, with ids validated by ensureUniqueChainIds.
+//   2. The midiChain/audioChain-keyed split format — migrated to two
+//      chains preserving each chain's slots and MIDI toggle.
+//   3. The pre-split format with a single top-level "slots" array —
+//      migrated to one chain holding the old guitar FX.
+//
 // Returns a (possibly empty) human-readable error string listing any
 // plugins that were skipped; the caller surfaces it to the UI.
 void BluePrinterAudioProcessor::applyChainState (const juce::var& state, juce::String& outError)
@@ -1356,6 +1884,16 @@ void BluePrinterAudioProcessor::applyChainState (const juce::var& state, juce::S
     auto* obj = state.getDynamicObject();
     if (obj == nullptr)
         return;
+
+    // Suppress persistence for the whole restore. clearChains() and the
+    // per-chain setChainState() fire onChanged, which would otherwise
+    // echo the mid-restore (partial/empty) state back into the
+    // properties file — the standalone wrapper calls setStateInformation
+    // at startup (reloadPluginState), and without this guard that echo
+    // wiped the saved chains on every launch. Nested suppression is
+    // fine (restoreSavedPluginChains also sets the flag).
+    const bool wasPersisting = persistingPluginChain;
+    persistingPluginChain = true;
 
     // Blocklist first so each chain's setChainState can check it. The
     // blocklist is folder-wide, so restoring it is a single set
@@ -1375,64 +1913,94 @@ void BluePrinterAudioProcessor::applyChainState (const juce::var& state, juce::S
     if (obj->hasProperty ("availablePlugins"))
         vst3Library.setAvailablePlugins (obj->getProperty ("availablePlugins"));
 
-    // Pre-split format detection: if the state has neither
-    // "midiChain" nor "audioChain" but does have a top-level
-    // "slots", it's the old single-chain format — load it into the
-    // audio chain so existing users keep their guitar FX.
-    const bool newFormat = obj->hasProperty ("midiChain")
-                        || obj->hasProperty ("audioChain");
+    clearChains();
+
+    const bool splitFormat = obj->hasProperty ("midiChain")
+                          || obj->hasProperty ("audioChain");
+    const bool newFormat = obj->hasProperty ("chains");
 
     if (! newFormat)
     {
-        // Old { slots, blocklist, availablePlugins } shape.
-        // blocklist/availablePlugins were already handled above.
-        const auto slotsVar = obj->getProperty ("slots");
-
-        midiChain.clear();
-
-        juce::String audioError;
-        audioChain.setChainState (slotsVar, audioError);
-        if (audioError.isNotEmpty())
+        // Legacy formats. Both chains default to the same behaviour the
+        // old code had: MIDI chain sees the keyboard, audio FX chain
+        // doesn't, both take the full stereo input and record.
+        if (splitFormat)
         {
-            if (outError.isNotEmpty()) outError += "\n";
-            outError += "Audio chain: " + audioError;
+            juce::String midiError, audioError;
+
+            auto* midiChain = createChain ("MIDI Chain", ChainInputBoth, true, true);
+            const auto midiVar = obj->getProperty ("midiChain");
+            if (midiVar.isObject())
+            {
+                midiChain->setChainState (midiVar, midiError);
+                if (! midiVar.getDynamicObject()->hasProperty ("wantsMidi"))
+                    midiChain->setWantsMidi (true);
+            }
+
+            auto* audioChain = createChain ("Audio FX Chain", ChainInputBoth, false, true);
+            const auto audioVar = obj->getProperty ("audioChain");
+            if (audioVar.isObject())
+            {
+                audioChain->setChainState (audioVar, audioError);
+                if (! audioVar.getDynamicObject()->hasProperty ("wantsMidi"))
+                    audioChain->setWantsMidi (false);
+            }
+
+            if (midiError.isNotEmpty())
+            {
+                if (outError.isNotEmpty()) outError += "\n";
+                outError += "MIDI chain: " + midiError;
+            }
+            if (audioError.isNotEmpty())
+            {
+                if (outError.isNotEmpty()) outError += "\n";
+                outError += "Audio chain: " + audioError;
+            }
         }
-        return;
-    }
-
-    // New format. Either or both chains may be present; missing
-    // chains are simply left empty (the chain's clear() inside
-    // setChainState handles that for any key that IS present).
-    juce::String midiError, audioError;
-
-    if (obj->hasProperty ("midiChain"))
-    {
-        midiChain.setChainState (obj->getProperty ("midiChain"), midiError);
-    }
-    else
-    {
-        midiChain.clear();
-    }
-
-    if (obj->hasProperty ("audioChain"))
-    {
-        audioChain.setChainState (obj->getProperty ("audioChain"), audioError);
+        else
+        {
+            // Old { slots, blocklist, availablePlugins } shape.
+            juce::String audioError;
+            auto* chain = createChain ("Audio FX Chain", ChainInputBoth, false, true);
+            chain->setChainState (obj->getProperty ("slots"), audioError);
+            if (audioError.isNotEmpty())
+            {
+                if (outError.isNotEmpty()) outError += "\n";
+                outError += "Audio chain: " + audioError;
+            }
+        }
     }
     else
     {
-        audioChain.clear();
+        // Current format. Each chain object carries its own id/name/
+        // routing config; setChainState restores those plus the slots.
+        auto chainArray = obj->getProperty ("chains");
+        if (auto* arr = chainArray.getArray())
+        {
+            for (const auto& chainVar : *arr)
+            {
+                if (! chainVar.isObject())
+                    continue;
+                auto* chain = createChain ({}, ChainInputBoth, true, true);
+                juce::String chainError;
+                chain->setChainState (chainVar, chainError);
+                if (chainError.isNotEmpty())
+                {
+                    if (outError.isNotEmpty()) outError += "\n";
+                    outError += "Chain: " + chainError;
+                }
+            }
+        }
     }
 
-    if (midiError.isNotEmpty())
-    {
-        if (outError.isNotEmpty()) outError += "\n";
-        outError += "MIDI chain: " + midiError;
-    }
-    if (audioError.isNotEmpty())
-    {
-        if (outError.isNotEmpty()) outError += "\n";
-        outError += "Audio chain: " + audioError;
-    }
+    // The saved state may predate the id counter or contain duplicate
+    // ids (hand-edited files); fix both so every chain has a stable,
+    // unique id.
+    if (obj->hasProperty ("nextChainId"))
+        nextChainId = juce::jmax (nextChainId, static_cast<int> (obj->getProperty ("nextChainId")));
+    ensureUniqueChainIds();
+
+    persistingPluginChain = wasPersisting;
 }
 
 void BluePrinterAudioProcessor::clearLastChainRestoreError()
@@ -1443,6 +2011,10 @@ void BluePrinterAudioProcessor::clearLastChainRestoreError()
 //==============================================================================
 void BluePrinterAudioProcessor::timerCallback()
 {
+    // Flush the debounced chain save once it has been quiet for 500 ms.
+    if (chainPersistPending && juce::Time::currentTimeMillis() >= chainPersistDeadline)
+        flushPendingChainPersist();
+
     if (recordingFinalizePending.exchange (false, std::memory_order_acq_rel))
         finalizeRecordingOnMessageThread();
 
@@ -1531,8 +2103,16 @@ void BluePrinterAudioProcessor::getStateInformation (juce::MemoryBlock& destData
     state.setProperty ("metronomeEnabled", metronomeEnabled.load(), nullptr);
     state.setProperty ("bpm",              bpm.load(),              nullptr);
     state.setProperty ("countInBeats",     countInBeats.load(),     nullptr);
+    state.setProperty ("dryLevel",         dryLevel.load(),         nullptr);
     state.setProperty ("midiClockEnabled", midiClockEnabled.load(), nullptr);
     state.setProperty ("midiDeviceName",   midiOutputDeviceName,    nullptr);
+    // Click sound tuning.
+    state.setProperty ("clickPitch",        clickPitch,        nullptr);
+    state.setProperty ("clickAccentPitch",  clickAccentPitch,  nullptr);
+    state.setProperty ("clickDecay",        clickDecay,        nullptr);
+    state.setProperty ("clickVolume",       clickVolume,       nullptr);
+    state.setProperty ("clickAccentVolume", clickAccentVolume, nullptr);
+    state.setProperty ("clickNoise",        clickNoise,        nullptr);
     // VST3 chains: per-slot path + bypass + base64 plugin state for
     // both the MIDI and the audio chain, plus the folder-wide
     // blocklist and cached scan result. Stored as a JSON string so
@@ -1556,8 +2136,18 @@ void BluePrinterAudioProcessor::setStateInformation (const void* data, int sizeI
             metronomeEnabled.store (static_cast<bool>  (state.getProperty ("metronomeEnabled", true)));
             bpm.store              (static_cast<float> (state.getProperty ("bpm",              120.0f)));
             countInBeats.store     (static_cast<int>   (state.getProperty ("countInBeats",     4)));
+            dryLevel.store         (static_cast<float> (state.getProperty ("dryLevel",         1.0f)));
             midiClockEnabled.store (static_cast<bool>  (state.getProperty ("midiClockEnabled", false)));
             midiOutputDeviceName  = state.getProperty ("midiDeviceName", juce::String()).toString();
+
+            // Click sound tuning (defaults match resynthesizeClicks).
+            clickPitch        = static_cast<float> (state.getProperty ("clickPitch",        1000.0f));
+            clickAccentPitch  = static_cast<float> (state.getProperty ("clickAccentPitch",  1500.0f));
+            clickDecay        = static_cast<float> (state.getProperty ("clickDecay",         90.0f));
+            clickVolume       = static_cast<float> (state.getProperty ("clickVolume",         0.35f));
+            clickAccentVolume = static_cast<float> (state.getProperty ("clickAccentVolume",   0.50f));
+            clickNoise        = static_cast<float> (state.getProperty ("clickNoise",          0.10f));
+            resynthesizeClicks();
 
             // Read either the new "pluginChains" key or the pre-split
             // "pluginChain" key. The old key is the single-chain
@@ -1664,6 +2254,60 @@ juce::PropertiesFile* BluePrinterAudioProcessor::getUserState()
     return userState.get();
 }
 
+juce::var BluePrinterAudioProcessor::loadSavedChainState()
+{
+    auto* props = getUserState();
+    if (props == nullptr)
+        return {};
+
+    const auto newJson = props->getValue ("pluginChains");
+    const auto oldJson = props->getValue ("pluginChain");
+
+    auto parse = [](const juce::String& json) -> juce::var
+    {
+        return json.isNotEmpty() ? juce::JSON::parse (json) : juce::var();
+    };
+    const auto newVar = parse (newJson);
+    const auto oldVar = parse (oldJson);
+
+    // Count how many plugin slots a saved bundle actually holds, across
+    // every format (new "chains" array, legacy midiChain/audioChain
+    // split, and the pre-split single "slots" array).
+    auto countSlots = [](const juce::var& v) -> int
+    {
+        if (! v.isObject())
+            return 0;
+        auto* obj = v.getDynamicObject();
+
+        int slots = 0;
+        if (auto* chainsArr = obj->getProperty ("chains").getArray())
+        {
+            for (const auto& c : *chainsArr)
+                if (auto* co = c.getDynamicObject())
+                    if (auto* s = co->getProperty ("slots").getArray())
+                        slots += s->size();
+            return slots;
+        }
+        for (const char* key : { "midiChain", "audioChain" })
+            if (auto* co = obj->getProperty (key).getDynamicObject())
+                if (auto* s = co->getProperty ("slots").getArray())
+                    slots += s->size();
+        if (auto* s = obj->getProperty ("slots").getArray())
+            slots += s->size();
+        return slots;
+    };
+
+    // Prefer whichever key actually holds chain content. A newer
+    // pluginChains that is empty or stale (e.g. the "chains": [] echo a
+    // pre-fix restore wrote) must not shadow the older, valid
+    // pluginChain. Ties favour the new format.
+    if (countSlots (newVar) > 0)
+        return newVar;
+    if (countSlots (oldVar) > 0)
+        return oldVar;
+    return newVar.isObject() ? newVar : oldVar;
+}
+
 void BluePrinterAudioProcessor::restoreUserState()
 {
     auto* props = getUserState();
@@ -1695,26 +2339,18 @@ void BluePrinterAudioProcessor::restoreUserState()
 
     // 2. VST3 chains. Guarded so the addPlugin calls inside don't
     // trigger a redundant write back to the file. The bundle holds
-    // both the MIDI and audio chain slots plus the shared library
-    // (blocklist + cached scan). Read both the new "pluginChains"
-    // key and the pre-split "pluginChain" key — the latter is the
-    // single-chain format that gets mapped to the audio chain in
-    // applyChainState.
-    const auto chainJson = props->getValue ("pluginChains").isNotEmpty()
-        ? props->getValue ("pluginChains")
-        : props->getValue ("pluginChain");
-    if (chainJson.isNotEmpty())
+    // the chain slots plus the shared library (blocklist + cached
+    // scan). loadSavedChainState picks whichever saved key actually
+    // holds chain content.
+    const auto chainVar = loadSavedChainState();
+    if (chainVar.isObject())
     {
-        const auto chainVar = juce::JSON::parse (chainJson);
-        if (chainVar.isObject())
-        {
-            persistingPluginChain = true;
-            juce::String error;
-            applyChainState (chainVar, error);
-            persistingPluginChain = false;
-            if (error.isNotEmpty())
-                lastChainRestoreError = error;
-        }
+        persistingPluginChain = true;
+        juce::String error;
+        applyChainState (chainVar, error);
+        persistingPluginChain = false;
+        if (error.isNotEmpty())
+            lastChainRestoreError = error;
     }
 }
 
@@ -1724,17 +2360,8 @@ void BluePrinterAudioProcessor::restoreSavedPluginChains()
         return;
 
     pluginChainsRestored = true;
-    auto* props = getUserState();
-    if (props == nullptr)
-        return;
 
-    const auto chainJson = props->getValue ("pluginChains").isNotEmpty()
-        ? props->getValue ("pluginChains")
-        : props->getValue ("pluginChain");
-    if (chainJson.isEmpty())
-        return;
-
-    const auto chainVar = juce::JSON::parse (chainJson);
+    const auto chainVar = loadSavedChainState();
     if (! chainVar.isObject())
         return;
 
@@ -1760,6 +2387,18 @@ void BluePrinterAudioProcessor::persistPluginChain()
 {
     if (persistingPluginChain)
         return; // restore in progress, don't echo back
+    // Debounced: the actual save (serializing every plugin's state and
+    // writing the file) happens once, 500 ms after the last mutation —
+    // see flushPendingChainPersist and timerCallback.
+    chainPersistPending = true;
+    chainPersistDeadline = juce::Time::currentTimeMillis() + 500;
+}
+
+void BluePrinterAudioProcessor::flushPendingChainPersist()
+{
+    if (! chainPersistPending)
+        return;
+    chainPersistPending = false;
     if (auto* props = getUserState())
     {
         props->setValue ("pluginChains",

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Knob } from "./controls";
 import { LevelMeter } from "./LevelMeter";
-import { IconMetronome, IconMidi, IconStop } from "./icons";
+import { IconMetronome, IconStop, IconX } from "./icons";
 import { formatTime } from "../utils";
 import { FRONTEND_EVENTS, emit } from "../bridge";
 
@@ -46,6 +46,119 @@ function NumberInput({ value, min, max, step, className, onChange, suffix, title
   );
 }
 
+// One row of the "Click sound" popover: label + range slider + value.
+function ClickSlider({ label, min, max, step, value, onChange, format }) {
+  return (
+    <label className="click-slider">
+      <span className="click-slider-label">{label}</span>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+      />
+      <span className="click-slider-value">{format ? format(value) : value}</span>
+    </label>
+  );
+}
+
+const CLICK_DEFAULTS = {
+  pitch: 1000,
+  accentPitch: 1500,
+  decay: 90,
+  volume: 0.35,
+  accentVolume: 0.5,
+  noise: 0.1,
+};
+
+function ClickSoundPopover({ transport, onClose }) {
+  // Optimistic local state: values are initialized from the last
+  // backend push and every change emits the full parameter set. The
+  // popup never re-binds to the 30 Hz transport snapshot, so dragging
+  // a slider is never fighting incoming updates.
+  const [draft, setDraft] = useState(() => ({
+    pitch: Number(transport?.clickPitch ?? CLICK_DEFAULTS.pitch),
+    accentPitch: Number(transport?.clickAccentPitch ?? CLICK_DEFAULTS.accentPitch),
+    decay: Number(transport?.clickDecay ?? CLICK_DEFAULTS.decay),
+    volume: Number(transport?.clickVolume ?? CLICK_DEFAULTS.volume),
+    accentVolume: Number(transport?.clickAccentVolume ?? CLICK_DEFAULTS.accentVolume),
+    noise: Number(transport?.clickNoise ?? CLICK_DEFAULTS.noise),
+  }));
+
+  const update = (key, value) => {
+    const next = { ...draft, [key]: value };
+    setDraft(next);
+    emit(FRONTEND_EVENTS.setClickParams, next);
+  };
+
+  const reset = () => {
+    setDraft(CLICK_DEFAULTS);
+    emit(FRONTEND_EVENTS.setClickParams, CLICK_DEFAULTS);
+  };
+
+  return (
+    <div className="click-popover" role="dialog" aria-label="Click sound settings">
+      <div className="click-popover-header">
+        <span className="click-popover-title">Click sound</span>
+        <div className="click-popover-actions">
+          <button type="button" className="btn btn-ghost btn-sm" onClick={reset} title="Reset to defaults">
+            Reset
+          </button>
+          <button type="button" className="icon-btn" onClick={onClose} title="Close" aria-label="Close">
+            <IconX size={13} />
+          </button>
+        </div>
+      </div>
+
+      <ClickSlider
+        label="Tick pitch"
+        min={400} max={3000} step={50}
+        value={draft.pitch}
+        onChange={(v) => update("pitch", v)}
+        format={(v) => `${v} Hz`}
+      />
+      <ClickSlider
+        label="Accent pitch"
+        min={400} max={3000} step={50}
+        value={draft.accentPitch}
+        onChange={(v) => update("accentPitch", v)}
+        format={(v) => `${v} Hz`}
+      />
+      <ClickSlider
+        label="Snap"
+        min={20} max={300} step={5}
+        value={draft.decay}
+        onChange={(v) => update("decay", v)}
+        format={(v) => `${v}/s`}
+        title="How fast the click dies away — higher is snappier"
+      />
+      <ClickSlider
+        label="Tick vol"
+        min={0} max={1} step={0.05}
+        value={draft.volume}
+        onChange={(v) => update("volume", v)}
+        format={(v) => v.toFixed(2)}
+      />
+      <ClickSlider
+        label="Accent vol"
+        min={0} max={1} step={0.05}
+        value={draft.accentVolume}
+        onChange={(v) => update("accentVolume", v)}
+        format={(v) => v.toFixed(2)}
+      />
+      <ClickSlider
+        label="Attack noise"
+        min={0} max={0.3} step={0.01}
+        value={draft.noise}
+        onChange={(v) => update("noise", v)}
+        format={(v) => v.toFixed(2)}
+      />
+    </div>
+  );
+}
+
 export function Transport({
   transport,
   gain,
@@ -55,18 +168,17 @@ export function Transport({
   metronomeEnabled,
   bpm,
   countInBeats,
+  dryLevel,
   midiClockEnabled,
-  midiOutputDevice,
-  midiOutputDeviceList,
   onMetronomeChange,
   onBpmChange,
   onCountInBeatsChange,
-  onMidiClockChange,
-  onMidiDeviceChange,
+  onDryLevelChange,
 }) {
   const isPreRoll = Boolean(transport?.preRollActive);
   const isRecording = Boolean(transport?.recording) || isPreRoll;
   const isPlaying = (transport?.playingSnippetId ?? -1) >= 0;
+  const [clickOpen, setClickOpen] = useState(false);
   const recordingSeconds = isRecording && transport?.recordingSampleRate > 0
     ? (transport.recordingLength ?? 0) / transport.recordingSampleRate
     : 0;
@@ -85,7 +197,7 @@ export function Transport({
 
   const status = countdown !== null
     ? "count-in"
-    : (isRecording ? "recording" : (isPlaying ? "playing" : "ready"));
+    : (isRecording ? "recording" : (isPlaying ? "playing" : (midiClockEnabled ? "clock" : "ready")));
 
   const toggleRecording = () => {
     if (isRecording) emit(FRONTEND_EVENTS.stopRecording);
@@ -130,46 +242,28 @@ export function Transport({
       </div>
 
       <div className="transport-group">
-        <button
-          type="button"
-          className={`metronome-toggle ${metronomeEnabled ? "is-on" : ""}`}
-          onClick={() => onMetronomeChange(!metronomeEnabled)}
-          title={metronomeEnabled ? "Click is on during recording and count-in" : "Click is off"}
-          aria-pressed={metronomeEnabled}
-        >
-          <IconMetronome size={15} />
-          <span className="metronome-state">{metronomeEnabled ? "Click on" : "Click off"}</span>
-        </button>
-
-        <div className="midi-pair">
+        <div className="click-pair">
           <button
             type="button"
-            className={`metronome-toggle ${midiClockEnabled ? "is-on" : ""}`}
-            onClick={() => onMidiClockChange(!midiClockEnabled)}
-            title={midiClockEnabled ? "MIDI clock is being sent to external gear" : "MIDI clock output is off"}
-            aria-pressed={midiClockEnabled}
+            className={`metronome-toggle ${metronomeEnabled ? "is-on" : ""}`}
+            onClick={() => onMetronomeChange(!metronomeEnabled)}
+            title={metronomeEnabled ? "Click is on during recording and count-in" : "Click is off"}
+            aria-pressed={metronomeEnabled}
           >
-            <IconMidi size={14} />
-            <span className="metronome-state">{midiClockEnabled ? "MIDI on" : "MIDI off"}</span>
+            <IconMetronome size={15} />
+            <span className="metronome-state">{metronomeEnabled ? "Click on" : "Click off"}</span>
           </button>
-
-          {midiClockEnabled && midiOutputDeviceList.length > 0 ? (
-            <div className="midi-device-control">
-              <select
-                className="midi-device-select"
-                value={midiOutputDevice}
-                onChange={(e) => onMidiDeviceChange(e.target.value)}
-                title="Select the MIDI output device"
-              >
-                {midiOutputDeviceList.map((name) => (
-                  <option key={name} value={name}>{name}</option>
-                ))}
-              </select>
-            </div>
-          ) : midiClockEnabled ? (
-            <span className="midi-no-devices" title="No MIDI output devices found. Connect your drum machine via USB and restart the app.">
-              No MIDI device found
-            </span>
+          <button
+            type="button"
+            className="click-sound-toggle"
+            onClick={() => setClickOpen((v) => !v)}
+            title="Tune the click sound (pitch, snap, volume)"
+            aria-expanded={clickOpen}
+          >
+            Click sound
+          </button>
+          {clickOpen ? (
+            <ClickSoundPopover transport={transport} onClose={() => setClickOpen(false)} />
           ) : null}
         </div>
 
@@ -199,6 +293,15 @@ export function Transport({
       </div>
 
       <div className="transport-group transport-gain">
+        <Knob
+          label="Dry"
+          min={0}
+          max={1}
+          value={dryLevel}
+          onChange={onDryLevelChange}
+          step="0.01"
+          decimals={2}
+        />
         <Knob
           label="Gain"
           min={0}

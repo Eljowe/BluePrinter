@@ -1,5 +1,6 @@
 import { FRONTEND_EVENTS, emit } from "../bridge";
 import { IconMetronome, IconPlay, IconSave, IconStop, IconTrash } from "./icons";
+import { Waveform } from "./Waveform";
 
 function Stepper({ label, value, min, max, onChange, title }) {
   const step = (delta) => {
@@ -68,6 +69,11 @@ export function Looper({ transport }) {
 
       <div className="looper-timeline" aria-label={`${croppedBars} bar loop`}>
         <div className="looper-grid-lines"><i /><i /><i /><i /><i /><i /><i /><i /></div>
+        {hasLoop ? (
+          <div className="looper-waveform">
+            <Waveform peaks={transport.audioLoopPeaks ?? []} width={360} height={88} />
+          </div>
+        ) : null}
         {hasLoop ? <div className="looper-crop-left" style={{ width: `${cropStartPct}%` }} /> : null}
         {hasLoop ? <div className="looper-crop-right" style={{ width: `${cropEndPct}%` }} /> : null}
         {hasLoop ? <div className="looper-playhead" style={{ left: `${loopProgress}%` }} /> : null}

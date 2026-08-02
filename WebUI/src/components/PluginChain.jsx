@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
-import { CHAIN_IDS, FRONTEND_EVENTS, emit } from "../bridge";
+import { FRONTEND_EVENTS, emit } from "../bridge";
+import { LevelMeter } from "./LevelMeter";
+import { Knob } from "./controls";
 import {
   IconArrowDown,
   IconArrowUp,
@@ -9,6 +11,7 @@ import {
   IconGrip,
   IconPlus,
   IconScan,
+  IconTrash,
   IconX,
 } from "./icons";
 
@@ -18,9 +21,13 @@ function basename(path) {
   return parts[parts.length - 1] || String(path);
 }
 
-// One row in the chain list. Shared between the MIDI and the audio
-// panel — the visual difference is just the "MIDI"/"FX" prefix on
-// the open-editor window title (which the backend sets, not us).
+function sortedNumbers(values) {
+  return [...new Set(values.filter((v) => Number.isFinite(Number(v))).map(Number))].sort((a, b) => a - b);
+}
+
+const ALL_MIDI_CHANNELS = Array.from({ length: 16 }, (_, i) => i + 1);
+
+// One row in the chain list. Rendered for every chain panel.
 function ChainSlotRow({ chain, slot, index, openEditors, onBypassToggle, onRemove, onOpenEditor, onCloseEditor, onMove }) {
   const editorOpen = openEditors.some((e) => e && e.chain === chain && e.index === index);
   return (
@@ -120,35 +127,144 @@ function ChainSlotRow({ chain, slot, index, openEditors, onBypassToggle, onRemov
   );
 }
 
-// One of the two chain panels. The "chain" prop is the chain id
-// (CHAIN_IDS.midi or CHAIN_IDS.audio); the parent passes a closure
-// factory so every action carries the chain id automatically.
+// One chain panel. The "chain" prop is the stable chain id; the parent
+// passes closure factories so every action carries the chain id.
 function ChainPanel({
   chain,
-  title,
-  subtitle,
+  name,
+  inputs,
+  wantsMidi,
+  recordOnCapture,
+  volume,
+  muted,
+  midiChannels,
   slots,
   available,
   openEditors,
   scanning,
+  inputChannels,
+  levels,
   onAdd,
   onPickFile,
-  onScanFolder,
   onBypassToggle,
   onRemove,
   onOpenEditor,
   onCloseEditor,
   onMove,
+  onRemoveChain,
 }) {
   const [showAvailable, setShowAvailable] = useState(false);
+  const [showMidiChannels, setShowMidiChannels] = useState(false);
+  const [nameDraft, setNameDraft] = useState(name);
+  // Optimistic drafts for the continuous/high-frequency controls. The
+  // backend does not round-trip a chain snapshot for volume/mute (that
+  // snapshot serializes every plugin's state, which made the knob
+  // laggy), so these mirrors are the source of truth between backend
+  // pushes.
+  const [volumeDraft, setVolumeDraft] = useState(volume);
+  const [mutedDraft, setMutedDraft] = useState(muted);
 
+  // Keep the drafts in sync when the backend pushes a snapshot, unless
+  // the user is actively interacting.
+  useEffect(() => {
+    setNameDraft(name);
+  }, [name]);
+  useEffect(() => {
+    setVolumeDraft(volume);
+  }, [volume]);
+  useEffect(() => {
+    setMutedDraft(muted);
+  }, [muted]);
+
+  const toggleMidi = (enabled) => emit(FRONTEND_EVENTS.setVst3MidiPass, { chain, enabled });
+  const toggleRecord = (enabled) => emit(FRONTEND_EVENTS.setChainRecord, { chain, enabled });
+  const toggleMute = (nextMuted) => {
+    setMutedDraft(nextMuted);
+    emit(FRONTEND_EVENTS.setChainMute, { chain, muted: nextMuted });
+  };
+  const changeVolume = (next) => {
+    setVolumeDraft(next);
+    emit(FRONTEND_EVENTS.setChainVolume, { chain, volume: next });
+  };
+
+  const toggleInput = (ch) => {
+    const set = new Set(inputs);
+    if (set.has(ch)) set.delete(ch);
+    else set.add(ch);
+    emit(FRONTEND_EVENTS.setChainInputs, { chain, inputs: sortedNumbers([...set]) });
+  };
+
+  const toggleMidiChannel = (ch) => {
+    const set = new Set(midiChannels);
+    if (set.has(ch)) set.delete(ch);
+    else set.add(ch);
+    emit(FRONTEND_EVENTS.setChainMidiChannels, { chain, channels: sortedNumbers([...set]) });
+  };
+
+  const setAllMidiChannels = (on) => {
+    emit(FRONTEND_EVENTS.setChainMidiChannels, {
+      chain,
+      channels: on ? ALL_MIDI_CHANNELS : [],
+    });
+  };
+
+  const commitName = () => {
+    const trimmed = nameDraft.trim();
+    if (trimmed && trimmed !== name) emit(FRONTEND_EVENTS.renameChain, { chain, name: trimmed });
+  };
+
+  const channelCount = Math.min(Math.max(1, Number(inputChannels) || 1), 8);
+  const midiCount = midiChannels.length;
+
+  const inputLabel = inputs.length === 0
+    ? "no audio in"
+    : `in ${sortedNumbers(inputs).map((i) => i + 1).join("+")}`;
+  const midiLabel = !wantsMidi ? "no MIDI"
+    : midiCount >= 16 ? "all MIDI"
+    : midiCount === 0 ? "MIDI none"
+    : `MIDI ${sortedNumbers(midiChannels).join(",")}`;
+  const pluginLabel = slots.length === 0 ? "no plugins" : `${slots.length} plugin${slots.length === 1 ? "" : "s"}`;
   return (
     <div className="fx-chain-panel" data-chain={chain}>
       <header className="fx-chain-header">
-        <div className="fx-chain-title">
-          <h3>{title}</h3>
-          <p className="fx-chain-subtitle">{subtitle}</p>
-        </div>
+        <input
+          type="text"
+          className="fx-chain-name"
+          value={nameDraft}
+          onChange={(e) => setNameDraft(e.target.value)}
+          onBlur={commitName}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") e.currentTarget.blur();
+            if (e.key === "Escape") setNameDraft(name);
+          }}
+          title="Chain name"
+          aria-label="Chain name"
+        />
+        <label
+          className={`fx-midi-toggle ${recordOnCapture ? "is-on" : ""}`}
+          title="Include this chain's output in take and loop captures"
+        >
+          <input type="checkbox" checked={recordOnCapture} onChange={(e) => toggleRecord(e.target.checked)} />
+          <span className="fx-midi-toggle-box" aria-hidden="true" />
+          Record
+        </label>
+        <label
+          className={`fx-midi-toggle ${wantsMidi ? "is-on" : ""}`}
+          title="Pass the MIDI buffer to this chain's plugins (note-aware amp sims, synths, arpeggiators)"
+        >
+          <input type="checkbox" checked={wantsMidi} onChange={(e) => toggleMidi(e.target.checked)} />
+          <span className="fx-midi-toggle-box" aria-hidden="true" />
+          MIDI
+        </label>
+        <button
+          type="button"
+          className={`fx-midi-toggle ${showMidiChannels ? "is-on" : ""}`}
+          onClick={() => setShowMidiChannels((v) => !v)}
+          title="Which MIDI channels (1–16) this chain listens to"
+          aria-expanded={showMidiChannels}
+        >
+          Ch
+        </button>
         <button
           type="button"
           className="btn btn-sm"
@@ -159,7 +275,87 @@ function ChainPanel({
           <IconPlus size={13} />
           Add
         </button>
+        <button
+          type="button"
+          className="icon-btn icon-btn-danger"
+          onClick={onRemoveChain}
+          title="Remove this chain"
+          aria-label="Remove chain"
+        >
+          <IconTrash size={13} />
+        </button>
       </header>
+
+      {showMidiChannels ? (
+        <div className="fx-midi-channels">
+          <div className="fx-midi-channels-actions">
+            <span className="fx-midi-channels-label">MIDI channels</span>
+            <button type="button" className="fx-midi-channels-all" onClick={() => setAllMidiChannels(true)}>
+              All
+            </button>
+            <button type="button" className="fx-midi-channels-all" onClick={() => setAllMidiChannels(false)}>
+              None
+            </button>
+          </div>
+          <div className="fx-midi-channel-grid">
+            {ALL_MIDI_CHANNELS.map((ch) => (
+              <button
+                key={ch}
+                type="button"
+                className={`fx-midi-channel-chip ${midiChannels.includes(ch) ? "is-on" : ""}`}
+                onClick={() => toggleMidiChannel(ch)}
+                aria-pressed={midiChannels.includes(ch)}
+              >
+                {ch}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      <div className="fx-chain-controls">
+        <div className="fx-input-checks" title="Which input channels feed this chain">
+          <span className="fx-input-checks-label">In</span>
+          {Array.from({ length: channelCount }, (_, i) => i).map((ch) => (
+            <button
+              key={ch}
+              type="button"
+              className={`fx-input-chip ${inputs.includes(ch) ? "is-on" : ""}`}
+              onClick={() => toggleInput(ch)}
+              title={`Input channel ${ch + 1}`}
+              aria-pressed={inputs.includes(ch)}
+            >
+              {ch + 1}
+            </button>
+          ))}
+        </div>
+        <Knob
+          label="Vol"
+          min={-60}
+          max={12}
+          value={volumeDraft}
+          onChange={changeVolume}
+          step="0.5"
+          decimals={1}
+          unit="dB"
+          className="fx-volume-knob"
+        />
+        <label
+          className={`fx-midi-toggle ${mutedDraft ? "is-on" : ""}`}
+          title="Mute this chain's output"
+        >
+          <input type="checkbox" checked={mutedDraft} onChange={(e) => toggleMute(e.target.checked)} />
+          <span className="fx-midi-toggle-box" aria-hidden="true" />
+          Mute
+        </label>
+        <div className="fx-chain-meter">
+          <LevelMeter level={levels?.level ?? 0} peak={levels?.peak ?? 0} />
+        </div>
+      </div>
+
+      <p className="fx-chain-subtitle">
+        {inputLabel} · {midiLabel} · {mutedDraft ? "muted" : pluginLabel}
+      </p>
 
       {slots.length === 0 ? (
         <p className="fx-chain-empty">No plugins loaded. The signal passes through dry.</p>
@@ -219,24 +415,28 @@ function ChainPanel({
   );
 }
 
-export function PluginChain({ chainState, availablePlugins, defaultFolder, scanState }) {
-  // The backend pushes a single snapshot that holds both chains. The
-  // shape is:
+export function PluginChain({ chainState, inputChannels, chainLevels, availablePlugins, defaultFolder, scanState }) {
+  // The backend pushes a single snapshot. The shape is:
   //   {
   //     folder: "C:\\Program Files\\Common Files\\VST3",
-  //     midiChain:  { slots: [...] },
-  //     audioChain: { slots: [...] },
+  //     inputChannels: 4,
+  //     chains: [
+  //       { id, name, inputs: [0,1], wantsMidi, recordOnCapture,
+  //         volume, muted, midiChannels: [1..16],
+  //         slots: [{ path, bypassed, name }] },
+  //       ...
+  //     ],
   //     plugins:    [...],          // the folder scan result
   //     blocklist:  ["...\\Foo.vst3"],
   //     openEditors: [{ chain, index }, ...],
   //     restoreError: "..."
   //   }
-  // Each chain's `slots` array is the same shape PluginChain.jsx used
-  // pre-split, so the row component is identical.
-  const midiSlots  = Array.isArray(chainState?.midiChain?.slots)  ? chainState.midiChain.slots  : [];
-  const audioSlots = Array.isArray(chainState?.audioChain?.slots) ? chainState.audioChain.slots : [];
+  // chainLevels (from the 30 Hz transport push) carries the live meters:
+  //   [{ chain, level, peak }, ...]
+  const chains = Array.isArray(chainState?.chains) ? chainState.chains : [];
   const available = Array.isArray(availablePlugins) ? availablePlugins : [];
   const openEditors = Array.isArray(chainState?.openEditors) ? chainState.openEditors : [];
+  const levels = Array.isArray(chainLevels) ? chainLevels : [];
 
   const scanning = Boolean(scanState?.active);
   const scanTotal = Number(scanState?.total ?? 0);
@@ -258,9 +458,7 @@ export function PluginChain({ chainState, availablePlugins, defaultFolder, scanS
   }, []);
 
   // Per-action factories: each closure captures the chain id so the
-  // caller doesn't have to remember it on every event. The backend
-  // defaults to "audioChain" if the field is absent, but we always
-  // pass it explicitly to keep the intent clear.
+  // caller doesn't have to remember it on every event.
 
   const makeAddHandlers = (chain) => ({
     onPickFile: () => emit(FRONTEND_EVENTS.addVst3, { chain }),
@@ -271,7 +469,7 @@ export function PluginChain({ chainState, availablePlugins, defaultFolder, scanS
     emit(FRONTEND_EVENTS.setVst3Bypass, { chain, index, bypassed: !currentBypassed });
 
   const makeRemoveHandler = (chain) => (index) => {
-    if (window.confirm(`Remove this plugin from the ${chain === CHAIN_IDS.midi ? "MIDI" : "FX"} chain?`)) {
+    if (window.confirm(`Remove this plugin from the chain?`)) {
       emit(FRONTEND_EVENTS.removeVst3, { chain, index });
     }
   };
@@ -282,17 +480,20 @@ export function PluginChain({ chainState, availablePlugins, defaultFolder, scanS
   const makeCloseEditorHandler = (chain) => (index) =>
     emit(FRONTEND_EVENTS.closeVst3Editor, { chain, index });
 
-  const makeMoveHandler = (chain) => (from, to) => {
+  const makeMoveHandler = (chain) => (slots) => (from, to) => {
     if (from === to) return;
-    const limit = chain === CHAIN_IDS.midi ? midiSlots.length : audioSlots.length;
-    if (to < 0 || to >= limit) return;
+    if (to < 0 || to >= slots.length) return;
     emit(FRONTEND_EVENTS.moveVst3, { chain, from, to });
   };
 
-  const midiAdd  = makeAddHandlers(CHAIN_IDS.midi);
-  const audioAdd = makeAddHandlers(CHAIN_IDS.audio);
-
+  const handleAddChain = () => emit(FRONTEND_EVENTS.addChain, {});
   const handleScanFolder = () => emit(FRONTEND_EVENTS.scanVst3Folder, {});
+
+  const handleRemoveChain = (chain, name) => {
+    if (window.confirm(`Remove chain "${name}"? Its plugins will be removed.`)) {
+      emit(FRONTEND_EVENTS.removeChain, { chain });
+    }
+  };
 
   return (
     <section className="fx-chain">
@@ -317,53 +518,59 @@ export function PluginChain({ chainState, availablePlugins, defaultFolder, scanS
             <IconScan size={13} />
             {scanning ? "Scanning…" : "Scan VST3 folder"}
           </button>
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={handleAddChain}
+            title="Add a new parallel chain"
+          >
+            <IconPlus size={13} />
+            Add chain
+          </button>
         </div>
       </header>
 
       <p className="fx-chain-help">
-        The MIDI chain runs first on your keyboard input (arpeggiators, chord generators,
-        instruments). The audio chain runs second on the combined signal (amp sims, EQ,
-        reverb). Plugins in either chain can read the MIDI buffer, so note-aware audio
-        plugins still see what you're playing.
+        Chains run in parallel: each one processes only its selected input channels (and the MIDI
+        channels it listens to) and its output is mixed over the dry signal with its own volume.
+        The Record toggle decides which chains are baked into take and loop captures — leave a
+        synth chain out of a guitar take, or record a chain with no audio input for a pure MIDI
+        instrument. Chains never hear each other: a guitar amp sim only ever sees your guitar.
       </p>
 
-      <div className="fx-chain-panels">
-        <ChainPanel
-          chain={CHAIN_IDS.midi}
-          title="MIDI chain"
-          subtitle="Arpeggiators, chord tools, instruments"
-          slots={midiSlots}
-          available={available}
-          openEditors={openEditors}
-          scanning={scanning}
-          onPickFile={midiAdd.onPickFile}
-          onAdd={midiAdd.onAdd}
-          onScanFolder={handleScanFolder}
-          onBypassToggle={makeBypassHandler(CHAIN_IDS.midi)}
-          onRemove={makeRemoveHandler(CHAIN_IDS.midi)}
-          onOpenEditor={makeOpenEditorHandler(CHAIN_IDS.midi)}
-          onCloseEditor={makeCloseEditorHandler(CHAIN_IDS.midi)}
-          onMove={makeMoveHandler(CHAIN_IDS.midi)}
-        />
-
-        <ChainPanel
-          chain={CHAIN_IDS.audio}
-          title="Audio FX chain"
-          subtitle="Amp sims, EQ, reverb on the combined signal"
-          slots={audioSlots}
-          available={available}
-          openEditors={openEditors}
-          scanning={scanning}
-          onPickFile={audioAdd.onPickFile}
-          onAdd={audioAdd.onAdd}
-          onScanFolder={handleScanFolder}
-          onBypassToggle={makeBypassHandler(CHAIN_IDS.audio)}
-          onRemove={makeRemoveHandler(CHAIN_IDS.audio)}
-          onOpenEditor={makeOpenEditorHandler(CHAIN_IDS.audio)}
-          onCloseEditor={makeCloseEditorHandler(CHAIN_IDS.audio)}
-          onMove={makeMoveHandler(CHAIN_IDS.audio)}
-        />
-      </div>
+      {chains.length === 0 ? (
+        <p className="fx-chain-empty">No chains yet. Add one to process your signal.</p>
+      ) : (
+        <div className="fx-chain-panels">
+          {chains.map((chain) => (
+            <ChainPanel
+              key={chain.id}
+              chain={chain.id}
+              name={chain.name}
+              inputs={Array.isArray(chain.inputs) ? chain.inputs : [0, 1]}
+              wantsMidi={chain.wantsMidi !== false}
+              recordOnCapture={chain.recordOnCapture !== false}
+              volume={Number.isFinite(Number(chain.volume)) ? Number(chain.volume) : 0}
+              muted={Boolean(chain.muted)}
+              midiChannels={Array.isArray(chain.midiChannels) ? chain.midiChannels : ALL_MIDI_CHANNELS}
+              slots={Array.isArray(chain.slots) ? chain.slots : []}
+              available={available}
+              openEditors={openEditors}
+              scanning={scanning}
+              inputChannels={inputChannels}
+              levels={levels.find((l) => l && l.chain === chain.id)}
+              onPickFile={makeAddHandlers(chain.id).onPickFile}
+              onAdd={makeAddHandlers(chain.id).onAdd}
+              onBypassToggle={makeBypassHandler(chain.id)}
+              onRemove={makeRemoveHandler(chain.id)}
+              onOpenEditor={makeOpenEditorHandler(chain.id)}
+              onCloseEditor={makeCloseEditorHandler(chain.id)}
+              onMove={makeMoveHandler(chain.id)(Array.isArray(chain.slots) ? chain.slots : [])}
+              onRemoveChain={() => handleRemoveChain(chain.id, chain.name || "Unnamed chain")}
+            />
+          ))}
+        </div>
+      )}
     </section>
   );
 }

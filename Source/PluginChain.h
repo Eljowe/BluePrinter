@@ -14,6 +14,19 @@ struct ChainSlot
     juce::String path;
 };
 
+// Which of the plugin's input channels feed a chain. Bit N = channel N
+// (0..7); the plugin negotiates an input bus of up to 8 channels. Read
+// on the audio thread, so it's stored as a plain int bitmask. Channels
+// beyond the block's channel count (e.g. "Right" in a mono layout)
+// receive silence.
+enum ChainInputBits : int
+{
+    ChainInputNone  = 0,
+    ChainInputLeft  = 1,
+    ChainInputRight = 2,
+    ChainInputBoth  = ChainInputLeft | ChainInputRight
+};
+
 // Owns a list of VST3 plugin instances and processes audio through them
 // in order. All chain mutations (add/remove/bypass/state) happen on the
 // message thread; processBlock is called from the audio thread.
@@ -36,8 +49,73 @@ public:
     // Run the buffer through every non-bypassed plugin in order. The
     // chain assumes the buffer already has the right channel layout; a
     // plugin that changes channel count will be reflected on the next
-    // block once the host reconfigures.
+    // block once the host reconfigures. When wantsMidi is off the
+    // plugins get an empty MIDI buffer instead of the live one.
     void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi);
+
+    // Whether this chain's plugins receive the MIDI buffer. The MIDI
+    // chain defaults to true; the audio FX chain defaults to false (MIDI
+    // there is opt-in via the UI toggle). Set on the message thread,
+    // read on the audio thread.
+    void setWantsMidi (bool wants) { wantsMidi.store (wants); }
+    bool wantsMidiPass() const { return wantsMidi.load (std::memory_order_acquire); }
+
+    // Stable identity (e.g. "chain0", "chain1"). Assigned by the
+    // processor at creation and restored from saved state, so slots
+    // survive renames and reordering. Message-thread only.
+    const juce::String& getChainId() const { return chainId; }
+    void setChainId (const juce::String& id) { chainId = id; }
+
+    // User-facing name shown in the chain panel. Message-thread only.
+    const juce::String& getName() const { return name; }
+    void setName (const juce::String& newName) { name = newName; }
+
+    // Which input channels feed this chain (ChainInputBits mask).
+    // Bit N selects input channel N (0..7). Set on the message thread,
+    // read on the audio thread.
+    void setInputMask (int mask) { inputMask.store (mask); }
+    int getInputMask() const { return inputMask.load (std::memory_order_acquire); }
+    bool acceptsInputChannel (int channel) const
+    {
+        return (inputMask.load (std::memory_order_acquire) & (1 << channel)) != 0;
+    }
+
+    // Whether this chain's output is included in take/loop captures.
+    // Set on the message thread, read on the audio thread.
+    void setRecordOnCapture (bool record) { recordOnCapture.store (record); }
+    bool isRecordOnCapture() const { return recordOnCapture.load (std::memory_order_acquire); }
+
+    // Output volume in dB (-60..+12, 0 = unity). Set on the message
+    // thread, read on the audio thread. The processor converts to a
+    // linear gain once per block.
+    void setVolumeDb (float db) { volumeDb.store (db); }
+    float getVolumeDb() const { return volumeDb.load (std::memory_order_acquire); }
+
+    // Mute toggle. A muted chain still runs its plugins (so tails and
+    // internal state stay consistent) but its output is neither mixed
+    // nor recorded.
+    void setMuted (bool m) { muted.store (m); }
+    bool isMuted() const { return muted.load (std::memory_order_acquire); }
+
+    // Per-chain output level meter (post-volume, 0..1). Written by the
+    // audio thread via computeLevelsInto in the processor, read by the
+    // message thread for the 30 Hz transport push.
+    float getOutputLevel() const { return outputLevel.load (std::memory_order_acquire); }
+    float getOutputPeak()  const { return outputPeak.load  (std::memory_order_acquire); }
+
+    // Which MIDI channels (1..16) this chain listens to, as a bitmask
+    // (bit n = channel n+1). System messages always pass through.
+    // Set on the message thread, read on the audio thread.
+    void setMidiChannelsMask (uint16_t mask) { midiChannelsMask.store (mask); }
+    uint16_t getMidiChannelsMask() const { return midiChannelsMask.load (std::memory_order_acquire); }
+    bool acceptsMidiChannel (int channel) const
+    {
+        // channel 0 = system message (clock, start, stop…) — always pass.
+        if (channel <= 0)
+            return true;
+        const uint16_t bit = static_cast<uint16_t> (1u << (channel - 1));
+        return (midiChannelsMask.load (std::memory_order_acquire) & bit) != 0;
+    }
 
     // Add a .vst3 file to the end of the chain. Returns the new slot
     // index, or -1 on failure (outError is set). Skips plugins that are
@@ -81,6 +159,20 @@ public:
     // Drop every slot.
     void clear();
 
+    // Whether any slot currently has a non-bypassed plugin loaded.
+    // Safe to call from the audio thread (short lock). The processor
+    // uses it to skip chains that have nothing to run — a transparent
+    // chain's scratch is just a copy of the dry input, so summing it
+    // back into the mix would double the dry signal.
+    bool hasActivePlugins() const
+    {
+        const juce::ScopedLock sl (lock);
+        for (auto& slot : slots)
+            if (slot->plugin != nullptr && ! slot->bypassed)
+                return true;
+        return false;
+    }
+
     int getNumPlugins() const;
     juce::AudioPluginInstance* getPlugin (int index) const;
     juce::String getSlotName (int index) const;
@@ -116,12 +208,30 @@ public:
     juce::String getLastRestoreError() const;
     void clearLastRestoreError();
 
+    // Output level meter state. Deliberately public: the audio thread
+    // writes these every block (via the processor's computeLevelsInto)
+    // and the message thread reads them for the 30 Hz transport push.
+    std::atomic<float> outputLevel { 0.0f };
+    std::atomic<float> outputPeak  { 0.0f };
+
 private:
     Vst3Library& library;
     std::vector<std::unique_ptr<ChainSlot>> slots;
     juce::AudioPluginFormatManager formatManager;
     double currentSampleRate = 44100.0;
     int    currentBlockSize  = 512;
+    std::atomic<bool> wantsMidi { true };
+
+    // Stable id + display name (message-thread only), input channel
+    // mask, capture-recording toggle, volume, mute, and MIDI channel
+    // filter (audio-thread reads).
+    juce::String chainId;
+    juce::String name;
+    std::atomic<int>     inputMask { ChainInputBoth };
+    std::atomic<bool>    recordOnCapture { true };
+    std::atomic<float>   volumeDb { 0.0f };
+    std::atomic<bool>    muted { false };
+    std::atomic<uint16_t> midiChannelsMask { 0xFFFF };
 
     mutable juce::CriticalSection lock;
 
