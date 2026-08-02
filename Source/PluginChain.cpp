@@ -53,6 +53,17 @@ void PluginChain::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
                 snapshot.push_back (slot.get());
     }
 
+    if (! wantsMidi.load (std::memory_order_acquire))
+    {
+        // MIDI pass-through switched off for this chain: hand the
+        // plugins an empty buffer so note-aware FX can't see the
+        // keyboard input.
+        juce::MidiBuffer emptyMidi;
+        for (auto* slot : snapshot)
+            slot->plugin->processBlock (buffer, emptyMidi);
+        return;
+    }
+
     for (auto* slot : snapshot)
         slot->plugin->processBlock (buffer, midi);
 }
@@ -395,6 +406,28 @@ juce::var PluginChain::getChainState() const
 {
     auto* obj = new juce::DynamicObject();
 
+    // Per-chain identity and routing config. Inputs are serialized as
+    // an array of channel indices so a future multi-channel bus slots
+    // in without a format break; MIDI channels are 1-based.
+    obj->setProperty ("id", chainId);
+    obj->setProperty ("name", name);
+    juce::Array<juce::var> inputArray;
+    const int mask = inputMask.load (std::memory_order_acquire);
+    for (int ch = 0; ch < 8; ++ch)
+        if ((mask & (1 << ch)) != 0)
+            inputArray.add (ch);
+    obj->setProperty ("inputs", inputArray);
+    obj->setProperty ("recordOnCapture", recordOnCapture.load (std::memory_order_acquire));
+    obj->setProperty ("volume", volumeDb.load (std::memory_order_acquire));
+    obj->setProperty ("muted", muted.load (std::memory_order_acquire));
+
+    juce::Array<juce::var> midiChannels;
+    const uint16_t midiMask = midiChannelsMask.load (std::memory_order_acquire);
+    for (int ch = 1; ch <= 16; ++ch)
+        if ((midiMask & (1u << (ch - 1))) != 0)
+            midiChannels.add (ch);
+    obj->setProperty ("midiChannels", midiChannels);
+
     const juce::ScopedLock sl (lock);
     juce::Array<juce::var> slotArray;
     for (const auto& slot : slots)
@@ -414,6 +447,7 @@ juce::var PluginChain::getChainState() const
         slotArray.add (juce::var (slotObj));
     }
     obj->setProperty ("slots", slotArray);
+    obj->setProperty ("wantsMidi", wantsMidi.load (std::memory_order_acquire));
     return juce::var (obj);
 }
 
@@ -424,6 +458,62 @@ void PluginChain::setChainState (const juce::var& state, juce::String& outError)
     auto* obj = state.getDynamicObject();
     if (obj == nullptr)
         return;
+
+    // Identity + routing config. Missing fields (pre-multi-chain
+    // states) keep the defaults set by the processor.
+    if (obj->hasProperty ("id"))
+        chainId = obj->getProperty ("id").toString();
+    if (obj->hasProperty ("name"))
+        name = obj->getProperty ("name").toString();
+    if (obj->hasProperty ("inputs"))
+    {
+        if (auto* inputArray = obj->getProperty ("inputs").getArray())
+        {
+            int mask = ChainInputNone;
+            for (const auto& v : *inputArray)
+            {
+                const int ch = static_cast<int> (v);
+                if (ch >= 0 && ch < 8)
+                    mask |= (1 << ch);
+            }
+            inputMask.store (mask, std::memory_order_release);
+        }
+        else if (obj->getProperty ("inputs").isInt() || obj->getProperty ("inputs").isDouble())
+        {
+            // Old integer-mask shape, kept for robustness.
+            inputMask.store (static_cast<int> (obj->getProperty ("inputs")),
+                             std::memory_order_release);
+        }
+    }
+    if (obj->hasProperty ("recordOnCapture"))
+        recordOnCapture.store (static_cast<bool> (obj->getProperty ("recordOnCapture")),
+                               std::memory_order_release);
+    if (obj->hasProperty ("volume"))
+        volumeDb.store (static_cast<float> (obj->getProperty ("volume")),
+                        std::memory_order_release);
+    if (obj->hasProperty ("muted"))
+        muted.store (static_cast<bool> (obj->getProperty ("muted")),
+                     std::memory_order_release);
+    if (obj->hasProperty ("midiChannels"))
+    {
+        uint16_t midiMask = 0;
+        if (auto* midiArray = obj->getProperty ("midiChannels").getArray())
+        {
+            for (const auto& v : *midiArray)
+            {
+                const int ch = static_cast<int> (v);
+                if (ch >= 1 && ch <= 16)
+                    midiMask = static_cast<uint16_t> (midiMask | (1u << (ch - 1)));
+            }
+        }
+        midiChannelsMask.store (midiMask, std::memory_order_release);
+    }
+
+    // MIDI pass-through preference. Missing in states saved before the
+    // toggle existed — leave the default (true) to preserve old behaviour.
+    if (obj->hasProperty ("wantsMidi"))
+        wantsMidi.store (static_cast<bool> (obj->getProperty ("wantsMidi")),
+                         std::memory_order_release);
 
     auto slotArray = obj->getProperty ("slots");
     if (! slotArray.isArray())

@@ -90,6 +90,28 @@ bool SnippetLibrary::updateMeta (int id, const juce::String& name, const juce::S
     return false;
 }
 
+bool SnippetLibrary::updateColor (int id, const juce::String& color)
+{
+    // Only the 8 palette keys the UI offers, or empty to clear.
+    static const juce::StringArray allowedColors {
+        "", "red", "orange", "yellow", "green", "teal", "blue", "purple", "pink"
+    };
+    const juce::String cleaned = color.trim();
+    if (! allowedColors.contains (cleaned))
+        return false;
+
+    const std::lock_guard<std::mutex> lock (mutex);
+    for (auto& s : snippets)
+    {
+        if (s->id == id)
+        {
+            s->color = cleaned;
+            return true;
+        }
+    }
+    return false;
+}
+
 bool SnippetLibrary::markSaved (int id, const juce::String& path)
 {
     const std::lock_guard<std::mutex> lock (mutex);
@@ -266,6 +288,7 @@ bool SnippetLibrary::loadFromFolder (const juce::File& folder, juce::String& out
         juce::String key;
         float keyConfidence = 0.0f;
         juce::StringArray detectedNotes;
+        juce::String color;
 
         auto jsonFile = audioFile.getSiblingFile (audioFile.getFileNameWithoutExtension() + ".json");
         if (jsonFile.existsAsFile())
@@ -282,6 +305,7 @@ bool SnippetLibrary::loadFromFolder (const juce::File& folder, juce::String& out
                 idFromJson = static_cast<int> (obj->getProperty ("id"));
                 key = obj->getProperty ("key").toString();
                 keyConfidence = static_cast<float> (obj->getProperty ("keyConfidence"));
+                color = obj->getProperty ("color").toString();
 
                 // Old sidecars won't have this; missing field is fine.
                 if (auto* notesArray = obj->getProperty ("notes").getArray())
@@ -315,6 +339,7 @@ bool SnippetLibrary::loadFromFolder (const juce::File& folder, juce::String& out
         snippet->key          = key;
         snippet->keyConfidence = keyConfidence;
         snippet->detectedNotes = detectedNotes;
+        snippet->color        = color;
 
         {
             const std::lock_guard<std::mutex> lock (mutex);
@@ -410,6 +435,8 @@ bool SnippetLibrary::writeMetadataFile (const Snippet& snippet, const juce::File
             notesVar.add (n);
         meta->setProperty ("notes", notesVar);
     }
+    if (snippet.color.isNotEmpty())
+        meta->setProperty ("color", snippet.color);
 
     jsonFile.deleteFile();
     juce::FileOutputStream stream (jsonFile);

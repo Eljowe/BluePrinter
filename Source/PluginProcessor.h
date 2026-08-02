@@ -80,6 +80,11 @@ public:
     bool deleteSnippet (int id);
     bool updateSnippetMeta (int id, const juce::String& name, const juce::String& comments);
 
+    // Set the organisational colour tag on a snippet (one of the 8
+    // palette keys, or empty to clear). Persists to the sidecar JSON
+    // and notifies the UI.
+    bool setSnippetColor (int id, const juce::String& color);
+
     // Run musical-key detection on the snippet's audio. The FFT-based
     // chroma analysis runs on a worker thread; the snippet is updated
     // and the sidecar JSON rewritten on the message thread, then
@@ -96,28 +101,45 @@ public:
     // them to the in-memory library. Already-loaded files are skipped.
     void refreshLibraryFromFolder();
 
-    // VST3 chains. Two parallel chains run between the input and the
-    // recording tap so the recording captures the processed signal:
+    // VST3 chains. A flexible list of independent parallel chains runs
+    // between the input and the recording tap so captures contain the
+    // processed signal:
     //
-    //   1. The MIDI chain runs first. Its plugins see the raw input
-    //      MIDI (and audio) and may transform the MIDI buffer (e.g. an
-    //      arpeggiator, chord generator, MPE modifier) without touching
-    //      the audio. This is the natural home for MIDI-only plugins
-    //      and instruments.
-    //   2. The audio chain runs second. Its plugins see the (possibly
-    //      MIDI-altered) buffer. This is the natural home for audio
-    //      effects like amp sims, EQ, and reverb. The MIDI buffer is
-    //      still passed through, so note-aware plugins (e.g. some amp
-    //      sims) can react to the keys the user is holding.
-    //
-    // Splitting the chains solves the "MIDI plugin overwrites guitar"
-    // problem: a synth in the MIDI chain does not eat the guitar
-    // signal, and a guitar amp sim in the audio chain does not have
-    // to share a slot with a synth.
-    PluginChain&       getMidiPluginChain()        { return midiChain; }
-    const PluginChain& getMidiPluginChain()  const { return midiChain; }
-    PluginChain&       getAudioPluginChain()       { return audioChain; }
-    const PluginChain& getAudioPluginChain() const { return audioChain; }
+    //   - Each chain selects which input channels feed it (ChainInputBits
+    //     mask: none / left / right / both) and whether its plugins
+    //     receive the MIDI buffer ("MIDI" toggle in the chain panel).
+    //   - Chains run in parallel: each chain processes its selected
+    //     input channels into a scratch buffer, and its output is summed
+    //     into the main mix alongside the dry signal.
+    //   - Each chain has a "record" toggle. The take recorder and the
+    //     looper capture the dry input + the outputs of the selected
+    //     chains only, so e.g. a synth chain can be left out of a
+    //     guitar take.
+    //   - Chains are identified by a stable id ("chain0", "chain1", …)
+    //     and a user-editable name, both persisted.
+    const std::vector<std::unique_ptr<PluginChain>>& getChains() const { return chains; }
+    PluginChain* getChainById (const juce::String& chainId) const;
+
+    // Chain lifecycle (message thread). All of these persist and notify
+    // the UI. addChain returns the new chain's id (empty on failure).
+    juce::String addChain (const juce::String& name,
+                           int inputMask,
+                           bool wantsMidi,
+                           bool recordOnCapture);
+    bool removeChain (const juce::String& chainId);
+    bool renameChain (const juce::String& chainId, const juce::String& name);
+    bool setChainInputs (const juce::String& chainId, int mask);
+    bool setChainRecordOnCapture (const juce::String& chainId, bool enabled);
+    // Output volume in dB (-60..+12), mute toggle, and MIDI channel
+    // filter (bitmask, bit n = channel n+1). All persist + notify.
+    bool setChainVolume (const juce::String& chainId, float volumeDb);
+    bool setChainMute (const juce::String& chainId, bool muted);
+    bool setChainMidiChannels (const juce::String& chainId, uint16_t mask);
+
+    // Toggle whether a chain's plugins receive the MIDI buffer ("MIDI"
+    // toggle in the chain panel). Persists to user state and notifies
+    // the UI.
+    void setChainWantsMidi (const juce::String& chainId, bool enabled);
 
     // Folder-wide VST3 metadata shared between both chains: the
     // blocklist of plugins to skip and the cached scan result.
@@ -134,6 +156,26 @@ public:
     void setMetronomeEnabled (bool enabled);
     void setBpm (float newBpm);
     void setCountInBeats (int beats);
+
+    // Level of the direct dry pass-through in the output (0..1, 1 =
+    // full dry as before). Independent of the chains — turn it down to
+    // hear mostly/only what the chains produce, or to zero to silence
+    // the dry when all chains are muted. The chains still receive the
+    // full input regardless.
+    float getDryLevel() const { return dryLevel.load (std::memory_order_acquire); }
+    void setDryLevel (float level);
+
+    // Click sound tuning (all message-thread). Stored, re-synthesized
+    // immediately, and notified via transportChanged. Persisted in host
+    // state with the other metronome settings.
+    float getClickPitch()        const { return clickPitch; }
+    float getClickAccentPitch()  const { return clickAccentPitch; }
+    float getClickDecay()        const { return clickDecay; }
+    float getClickVolume()       const { return clickVolume; }
+    float getClickAccentVolume() const { return clickAccentVolume; }
+    float getClickNoise()        const { return clickNoise; }
+    void setClickParams (float pitch, float accentPitch, float decay,
+                         float volume, float accentVolume, float noise);
 
     // Audio looper. Captures the post-chain audio (so synth and FX
     // sounds are baked into the loop) into the shared recordBuffer,
@@ -153,6 +195,9 @@ public:
     int64_t getAudioLoopPosition() const { return audioLoopPosition.load(); }
     int64_t getAudioLoopLength() const { return audioLoopLength.load(); }
     int64_t getAudioLoopStart() const { return audioLoopStart.load(); }
+    // Waveform peaks for the cropped loop region, recomputed on the
+    // message thread whenever the loop changes (stop/trim/crop).
+    const std::vector<float>& getLooperPeaks() const { return looperPeaks; }
     void    setLooperRecording (bool enabled);
     void    setLooperPlaying (bool enabled);
     void    setLooperLooping (bool enabled);
@@ -216,18 +261,31 @@ private:
     void writeRecording (const juce::AudioBuffer<float>& source, int numSamples);
     void renderPlayback (juce::AudioBuffer<float>& destination, int numSamples);
     void computeLevels  (const juce::AudioBuffer<float>& source, int numSamples);
+    // Level-metering core, shared by the main input meter and the
+    // per-chain meters. gain scales the meter to reflect the chain's
+    // output volume.
+    void computeLevelsInto (const juce::AudioBuffer<float>& source,
+                            int numSamples,
+                            std::atomic<float>& levelAtomic,
+                            std::atomic<float>& peakAtomic,
+                            float gain);
     void renderMetronomeInBlock (juce::AudioBuffer<float>& buffer, int64_t startPos, int numSamples);
 
     juce::ListenerList<Listener> listeners;
 
     SnippetLibrary library;
     Vst3Library    vst3Library;
-    // The MIDI chain runs before the audio chain in processBlock.
-    // Plugins in the MIDI chain see (and may transform) the MIDI
-    // buffer; plugins in the audio chain see the (possibly altered)
-    // result.
-    PluginChain    midiChain;
-    PluginChain    audioChain;
+    // The chain list. Chains are independent parallel processors of the
+    // input; see the chain API comments above. Owned by the processor
+    // (unique_ptr), guarded by chainLock. The audio thread iterates a
+    // raw-pointer snapshot (blockChains) taken under chainLock at the
+    // start of each block — same lifetime model PluginChain uses for
+    // its slots.
+    std::vector<std::unique_ptr<PluginChain>> chains;
+    mutable juce::CriticalSection chainLock;
+    // Counter for generating stable chain ids. Persisted with the chain
+    // state so ids never collide after a restore.
+    int nextChainId = 0;
 
     // Pre-allocated record buffer. Allocated on the message thread inside
     // prepareToPlay, written to from the audio thread — no allocations there.
@@ -235,12 +293,27 @@ private:
     int maxRecordSamples = 0;
     juce::CriticalSection recordLock;
 
-    // Scratch buffer the MIDI chain runs on. We give the chain its own
-    // copy of the input audio so a synth in the MIDI chain can't clobber
-    // the analog signal the audio chain is about to process; we then
-    // sum the MIDI chain's output back into the main buffer so synths
-    // and arpeggiators still mix in. Sized in prepareToPlay.
-    juce::AudioBuffer<float> midiChainBuffer;
+    // Per-block scratch buffers, sized in prepareToPlay.
+    // chainInputBuffer is a pristine copy of the post-gain input taken
+    // once per block — every chain copies its selected channels from
+    // HERE, never from the accumulating mix, so a chain can't process
+    // another chain's output. chainScratchBuffer holds the selected
+    // input channels for the chain currently running; its output is
+    // summed into the main buffer (× volume, unless muted) and, if the
+    // chain is selected for capture, into recordingMixBuffer.
+    // recordingMixBuffer starts as the dry post-gain input, so captures
+    // contain dry + selected chains — identical to the old single-
+    // record-buffer tap when every chain is selected.
+    juce::AudioBuffer<float> chainInputBuffer;
+    juce::AudioBuffer<float> chainScratchBuffer;
+    juce::AudioBuffer<float> recordingMixBuffer;
+    juce::MidiBuffer chainMidiScratch;
+    // Scratch for the per-chain MIDI channel filter. Member so the
+    // audio thread never allocates.
+    juce::MidiBuffer chainMidiFiltered;
+    // Audio-thread snapshot of the chain pointers for this block.
+    // Reused member so no allocation happens in processBlock.
+    std::vector<PluginChain*> blockChains;
 
     std::atomic<RecordingState> recordingState { RecordingState::Idle };
     std::atomic<bool> recordingRequested { false };
@@ -256,6 +329,7 @@ private:
     std::atomic<bool>    metronomeEnabled { true };
     std::atomic<float>   bpm              { 120.0f };
     std::atomic<int>     countInBeats     { 4 };
+    std::atomic<float>   dryLevel         { 1.0f };
     std::atomic<bool>    preRollActive    { false };
     std::atomic<int64_t> transportPosition { 0 };
     std::atomic<int64_t> metronomePosition { 0 };
@@ -277,12 +351,35 @@ private:
     int looperCropStartBars = 0;
     int looperCropEndBars   = 0;
     int loopCrossfadeSamples = 0;
+    // Message-thread only: downsampled waveform of the cropped loop,
+    // rebuilt by refreshLooperPeaks() after capture/trim/crop.
+    std::vector<float> looperPeaks;
 
+    void refreshLooperPeaks();
     void trimLooperToMusicalGrid();
 
-    // Pre-rendered click sample (50 ms of decaying harmonics). Filled in
-    // prepareToPlay, read-only on the audio thread.
-    std::vector<float> clickBuffer;
+    // Pre-rendered metronome clicks. Two sounds, both synthesized by
+    // resynthesizeClicks() (message thread only): a bright accent tick
+    // for the first beat of each bar (accentClickBuffer) and a softer
+    // tick for the other beats (clickBuffer). Each is a short
+    // percussive burst — 2 ms attack ramp (no pop), fast exponential
+    // decay, tail fade, and a tiny noise transient at the onset for
+    // the woodblock "tick" character. Held as shared_ptr so the audio
+    // thread can render while the message thread swaps in new buffers
+    // after a parameter change.
+    std::shared_ptr<const std::vector<float>> clickBuffer;
+    std::shared_ptr<const std::vector<float>> accentClickBuffer;
+
+    // Click sound parameters (message-thread only). Persisted in host
+    // state like the other metronome settings. Tuned via the "Click
+    // sound" popup in the transport.
+    float clickPitch        = 1000.0f;  // normal tick frequency (Hz)
+    float clickAccentPitch  = 1500.0f;  // bar-first-beat frequency (Hz)
+    float clickDecay        = 90.0f;    // exponential decay rate (/s)
+    float clickVolume       = 0.35f;    // normal tick level
+    float clickAccentVolume = 0.50f;    // accent tick level
+    float clickNoise        = 0.10f;    // onset transient level
+    void resynthesizeClicks();
     double currentSampleRate = 44100.0;
 
     // MIDI clock output. Clock pulses (0xF8, 24 ppqn) are generated in
@@ -336,20 +433,57 @@ private:
     // Serialise the VST3 chain to userState. Wired into
     // pluginChain.onChanged so it runs after every add/remove/
     // bypass/move. Skipped while a restore is in progress to avoid
-    // writing the just-loaded state back over the file.
+    // writing the just-loaded state back over the file. Debounced:
+    // the call only marks a pending save, and the actual (expensive —
+    // it serializes every plugin's state) serialize + disk write runs
+    // from timerCallback 500 ms after the last change. That keeps
+    // high-frequency mutations (dragging a chain volume knob) from
+    // stalling the message thread. flushPendingChainPersist runs the
+    // pending save immediately (also called on release/destruction so
+    // the final state is never lost).
     void persistPluginChain();
+    void flushPendingChainPersist();
     bool persistingPluginChain = false;
     bool pluginChainsRestored = false;
+    bool chainPersistPending = false;
+    int64_t chainPersistDeadline = 0;
 
-    // Build the combined plugin-chain bundle (both chains + library
+    // Build the combined plugin-chain bundle (all chains + library
     // metadata) for persistence. See PluginProcessor.cpp for the
     // exact format.
     juce::var makeChainState() const;
 
-    // Inverse of makeChainState. Accepts both the new
-    // (midiChain/audioChain-keyed) format and the pre-split single-
-    // chain format — the latter is loaded into the audio chain.
+    // Inverse of makeChainState. Accepts the new chains-array format,
+    // the midiChain/audioChain-keyed split format, and the pre-split
+    // single-chain format (the latter two are migrated to chains with
+    // the old behaviour preserved). Suppresses chain persistence for
+    // its whole duration so a restore can never echo a partial state
+    // back into the properties file.
     void applyChainState (const juce::var& state, juce::String& outError);
+
+    // Read the saved chain bundle from user state, preferring whichever
+    // of the "pluginChains"/"pluginChain" keys actually holds chain
+    // content (so a stale or corrupted newer key — e.g. an empty chains
+    // array written by an old restore echo — can't shadow the older
+    // valid one). Returns a void var when nothing usable is saved.
+    juce::var loadSavedChainState();
+
+    // Create a chain with the given config and push it into the list.
+    // Does NOT persist or notify — the caller decides (used during
+    // restore with persistingPluginChain set).
+    PluginChain* createChain (const juce::String& name,
+                              int inputMask,
+                              bool wantsMidi,
+                              bool recordOnCapture);
+
+    // Drop every chain (restore path). Fires onSlotRemoved so the
+    // editor can close any open plugin windows.
+    void clearChains();
+
+    // Reassign fresh ids to any chain whose id is missing or duplicated,
+    // and bump nextChainId past the highest id in use. Called after
+    // applyChainState.
+    void ensureUniqueChainIds();
 
     // Stashed when setStateInformation fails to restore one or more
     // chain plugins (e.g. expired-license VST3s). Read by the UI on

@@ -38,12 +38,29 @@ BluePrinter uses JUCE for audio processing, VST3 hosting, and WebView2 UI integr
 10. Click during take recording + advance the continuous beat clock
 11. Click during looper capture + advance the same beat clock
 12. MIDI clock output (24 ppqn from metronomePosition) + flush pending
-    MIDI Start / Stop
+    MIDI Start / Stop. When the clock is enabled and no transport step
+    advanced the position, the clock free-runs (advances `metronomePosition`
+    itself) and renders the audible click, so a drum machine + click can run
+    without recording. Toggling the clock also sends Start/Stop directly to
+    the hardware output device (`sendDirectMidiStart`/`sendDirectMidiStop` +
+    `midiOutputLock`) — the standalone never forwards the host MIDI buffer
+    to hardware, so without the direct send the drum machine stays silent
+    until a recording starts.
 ```
 
 The take recorder and the audio looper share `recordBuffer`; `startRecording`
 and `setLooperRecording` preempt each other so they never capture
 simultaneously. Both loops are otherwise independent of the metronome/clock.
+
+**MIDI input limitation**: in the standalone, all MIDI input devices are
+merged by the JUCE host into the single `MidiBuffer` that `processBlock`
+receives — `AudioProcessorPlayer::handleIncomingMidiMessage` drops the
+`MidiInput*`, and JUCE 8 `MidiMessage` has no source/device ID field. The
+MIDI channel is the only per-message discriminator; per-chain device routing
+is not possible without a custom standalone app main
+(`JUCE_USE_CUSTOM_PLUGIN_STANDALONE_APP`). Per-chain channel filtering lives
+in `PluginChain::processBlock` (`midiChannelsMask`, channels 1–16, system
+messages always pass).
 
 ## Threading Model
 
@@ -58,21 +75,22 @@ simultaneously. Both loops are otherwise independent of the metronome/clock.
 class PluginChain {
     std::vector<ChainSlot> slots;  // ChainSlot { unique_ptr<AudioPluginInstance>, bypassed, name, path }
     Vst3Library& library;          // shared reference, not owned
+    std::atomic<bool> wantsMidi;   // true: plugins get the live MIDI buffer; false: empty buffer
 };
 ```
 
 Key methods:
-- `processBlock(buffer, midi)` — runs through non-bypassed plugins sequentially
+- `processBlock(buffer, midi)` — runs through non-bypassed plugins sequentially; passes a local empty `MidiBuffer` when `wantsMidi` is off (audio-thread read, message-thread set)
 - `addPlugin(file, error)` — sync load
 - `addPluginAsync(file, callback)` — async load on worker thread
 - `prepareToPlay(sampleRate, blockSize)` — forwards to all plugins
-- Serializes state as a `juce::DynamicObject` (per-slot path, bypass flag, base64 plugin state); the processor stores it as JSON under the `pluginChains` state property (`makeChainState()` / `applyChainState()` in `PluginProcessor.cpp`)
+- Serializes state as a `juce::DynamicObject` (per-slot path, bypass flag, base64 plugin state, plus the chain's `wantsMidi` flag); the processor stores it as JSON under the `pluginChains` state property (`makeChainState()` / `applyChainState()` in `PluginProcessor.cpp`)
 - Serializes state as a `juce::DynamicObject` for the WebView
 
 ## Snippet Library (`SnippetLibrary.h/.cpp`)
 
 ```cpp
-struct Snippet { int id; String name; String comments; shared_ptr<const AudioBuffer<float>> audio; ... };
+struct Snippet { int id; String name; String comments; String color; shared_ptr<const AudioBuffer<float>> audio; ... };
 
 class SnippetLibrary {
     std::vector<std::shared_ptr<Snippet>> snippets;
@@ -82,8 +100,8 @@ class SnippetLibrary {
 
 Thread-safe behind a mutex. Supports:
 - `addSnippet()` — creates from audio buffer, assigns incrementing ID
-- `removeSnippet()`, `updateMeta()`, `markSaved()`
-- `findById()`, `saveToWav()`, `loadFromWav()` (16-bit, with JSON sidecar)
+- `removeSnippet()`, `updateMeta()`, `markSaved()`, `setColor()` (`frontendSetSnippetColor`)
+- `findById()`, `saveToWav()`, `loadFromWav()` (16-bit, with JSON sidecar — the sidecar stores the `color` field; snippets saved before it existed read back without one)
 - `computePeaks()` — downsampled waveform display data
 
 ## WebView2 Editor (`WebViewEditor.h/.cpp`)

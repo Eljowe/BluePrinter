@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Waveform } from "./Waveform";
-import { formatDate, formatTime } from "../utils";
+import { formatDate, formatTime, SNIPPET_COLORS, snippetColor } from "../utils";
 import { FRONTEND_EVENTS, emit } from "../bridge";
 import {
   IconAnalyze,
@@ -11,11 +11,13 @@ import {
   IconSave,
   IconStop,
   IconTrash,
+  IconX,
 } from "./icons";
 
 export function SnippetCard({ snippet, isPlaying, playPositionSeconds }) {
   const [name, setName] = useState(snippet.name ?? "");
   const [comments, setComments] = useState(snippet.comments ?? "");
+  const [color, setColor] = useState(snippet.color ?? "");
   const [expanded, setExpanded] = useState(false);
   // `detecting` flips on while an analysis request is in flight
   // and clears when the backend echoes the (possibly empty) result
@@ -38,11 +40,17 @@ export function SnippetCard({ snippet, isPlaying, playPositionSeconds }) {
       lastIdRef.current = snippet.id;
       setName(snippet.name ?? "");
       setComments(snippet.comments ?? "");
+      setColor(snippet.color ?? "");
       setExpanded(false);
       setDetecting(false);
       lastCommitted.current = { name: snippet.name ?? "", comments: snippet.comments ?? "" };
     }
   }, [snippet.id, snippet.name, snippet.comments]);
+
+  const handleColor = (next) => {
+    setColor(next);
+    emit(FRONTEND_EVENTS.setSnippetColor, { id: snippet.id, color: next });
+  };
 
   // The backend clears `key` immediately on a fresh detect request,
   // so the prop changing from "C major" -> "" signals that detection
@@ -103,10 +111,11 @@ export function SnippetCard({ snippet, isPlaying, playPositionSeconds }) {
   const keyTitle = hasKey
     ? `Detected key: ${snippet.key} (confidence ${Math.round(keyConfidence * 100)}%)`
     : "No key detected yet";
+  const currentColor = snippetColor(color);
 
   return (
     <article
-      className={`snippet ${isPlaying ? "is-playing" : ""} ${expanded ? "is-expanded" : "is-mini"}`}
+      className={`snippet ${isPlaying ? "is-playing" : ""} ${expanded ? "is-expanded" : "is-mini"} ${color ? `color-${color}` : ""}`}
     >
       <header className="snippet-header">
         <button
@@ -131,6 +140,14 @@ export function SnippetCard({ snippet, isPlaying, playPositionSeconds }) {
             }
           }}
         >
+          {currentColor ? (
+            <span
+              className="snippet-color-dot"
+              style={{ background: currentColor.main }}
+              title={`Colour: ${currentColor.label}`}
+              aria-hidden="true"
+            />
+          ) : null}
           <span className="snippet-name" title={displayName}>{displayName}</span>
           {hasKey ? (
             <span
@@ -179,6 +196,34 @@ export function SnippetCard({ snippet, isPlaying, playPositionSeconds }) {
                 }}
               />
             ) : null}
+          </div>
+
+          <div className="snippet-field snippet-color-field">
+            <span>Colour</span>
+            <div className="snippet-swatches" role="group" aria-label="Snippet colour">
+              {SNIPPET_COLORS.map((c) => (
+                <button
+                  key={c.key}
+                  type="button"
+                  className={`snippet-swatch ${color === c.key ? "is-active" : ""}`}
+                  style={{ background: c.main }}
+                  onClick={() => handleColor(c.key)}
+                  title={`${c.label} colour`}
+                  aria-label={`${c.label} colour`}
+                  aria-pressed={color === c.key}
+                />
+              ))}
+              <button
+                type="button"
+                className={`snippet-swatch snippet-swatch-none ${!color ? "is-active" : ""}`}
+                onClick={() => handleColor("")}
+                title="No colour"
+                aria-label="No colour"
+                aria-pressed={!color}
+              >
+                <IconX size={10} />
+              </button>
+            </div>
           </div>
 
           <label className="snippet-field">

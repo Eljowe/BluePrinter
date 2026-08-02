@@ -427,6 +427,12 @@ button {
 .transport.is-count-in .transport-status-dot { background: var(--warn); }
 .transport.is-playing .transport-status { color: var(--accent); }
 .transport.is-playing .transport-status-dot { background: var(--accent); }
+/* Free-running MIDI clock (no recording / looping) */
+.transport.is-clock .transport-status { color: var(--accent); }
+.transport.is-clock .transport-status-dot {
+  background: var(--accent);
+  animation: status-blink 1.2s ease-in-out infinite;
+}
 
 @keyframes status-blink {
   0%, 100% { opacity: 1; }
@@ -463,6 +469,184 @@ button {
   align-items: flex-start;
   gap: 4px;
   position: relative;
+}
+
+/* Standalone MIDI clock section: start/stop + device selector. */
+.midi-clock-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.midi-clock-hint {
+  margin: 0;
+  font-size: 0.76rem;
+  color: var(--text-3);
+  line-height: 1.5;
+}
+
+.midi-clock-body {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.clock-start-stop {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 18px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-2);
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.clock-start-stop:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.clock-start-stop.is-running {
+  background: var(--accent-dim);
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+.midi-clock-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.76rem;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.midi-clock-status.is-running {
+  color: var(--accent);
+}
+
+.midi-clock-device {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.74rem;
+  color: var(--text-3);
+}
+
+.clock-live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-3);
+  opacity: 0.35;
+  flex-shrink: 0;
+}
+
+.clock-live-dot.is-live {
+  background: var(--accent);
+  opacity: 1;
+  animation: status-blink 0.9s ease-in-out infinite;
+}
+
+/* Click (metronome sound) toggle + popover, same stacked pattern. */
+.click-pair {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  position: relative;
+}
+
+.click-sound-toggle {
+  padding: 0 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 0.66rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.click-sound-toggle:hover {
+  color: var(--text);
+  text-decoration: underline;
+}
+
+.click-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 30;
+  width: 270px;
+  padding: 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.click-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.click-popover-title {
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+
+.click-popover-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.click-slider {
+  display: grid;
+  grid-template-columns: 84px 1fr 56px;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.72rem;
+  color: var(--text-2);
+}
+
+.click-slider input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.click-slider-label {
+  white-space: nowrap;
+}
+
+.click-slider-value {
+  text-align: right;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  color: var(--text-3);
 }
 
 /* metronome toggle */
@@ -684,11 +868,15 @@ button {
 }
 
 .looper-grid-lines i { width: 1px; background: var(--border-soft); }
-.looper-crop-left, .looper-crop-right { position: absolute; top: 0; bottom: 0; background: var(--border-soft); opacity: 0.45; }
+.looper-waveform { position: absolute; inset: 0; padding: 14px 12px 26px; }
+.looper-waveform .waveform { height: 100%; }
+.looper-waveform .waveform-trace { stroke: var(--accent); opacity: 0.9; }
+.looper-waveform .waveform-baseline { display: none; }
+.looper-crop-left, .looper-crop-right { position: absolute; top: 0; bottom: 0; background: var(--border-soft); opacity: 0.45; z-index: 1; }
 .looper-crop-left { left: 0; }
 .looper-crop-right { right: 0; }
-.looper-playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--warn); box-shadow: 0 0 12px var(--warn); transition: left 0.08s linear; }
-.looper-timeline-caption { position: absolute; right: 11px; bottom: 7px; left: 11px; display: flex; justify-content: space-between; color: var(--text-3); font-family: var(--mono); font-size: 0.63rem; letter-spacing: 0.06em; text-transform: uppercase; }
+.looper-playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--warn); box-shadow: 0 0 12px var(--warn); transition: left 0.08s linear; z-index: 2; }
+.looper-timeline-caption { position: absolute; right: 11px; bottom: 7px; left: 11px; display: flex; justify-content: space-between; color: var(--text-3); font-family: var(--mono); font-size: 0.63rem; letter-spacing: 0.06em; text-transform: uppercase; z-index: 3; }
 
 .looper-primary-controls { display: flex; flex-wrap: wrap; gap: 8px; }
 .looper-record-button { display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font: inherit; font-size: 0.74rem; font-weight: 650; cursor: pointer; }
@@ -876,7 +1064,8 @@ button {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .fx-chain-title {
@@ -891,12 +1080,217 @@ button {
 }
 
 .fx-chain-subtitle {
-  margin: 2px 0 0 0;
+  margin: 0;
   font-size: 0.7rem;
   color: var(--text-3);
+  line-height: 1.4;
+}
+
+/* Per-chain MIDI pass-through toggle. Off by default on the audio
+   FX chain so notes don't leak into note-aware amp sims etc. */
+.fx-midi-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  cursor: pointer;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.fx-midi-toggle input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.fx-midi-toggle-box {
+  width: 9px;
+  height: 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  background: transparent;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.fx-midi-toggle:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.fx-midi-toggle.is-on {
+  background: var(--accent-dim);
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+.fx-midi-toggle.is-on .fx-midi-toggle-box {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+/* Chain identity + routing controls in the panel header. */
+.fx-chain-name {
+  flex: 1 1 120px;
+  min-width: 90px;
+  padding: 4px 8px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--inset);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  outline: none;
+  transition: border-color 0.12s ease;
+}
+
+.fx-chain-name:focus {
+  border-color: var(--accent-border);
+}
+
+.fx-midi-toggle {
+  font-family: var(--font);
+  background: transparent;
+}
+
+/* Second header row: input channel chips, volume knob, mute, meter. */
+.fx-chain-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.fx-input-checks {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  background: var(--inset);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+}
+
+.fx-input-checks-label {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  margin-right: 2px;
+}
+
+.fx-input-chip {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-3);
+  font-size: 0.66rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.fx-input-chip:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.fx-input-chip.is-on {
+  background: var(--accent-dim);
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+.fx-volume-knob {
+  flex: 0 0 auto;
+}
+
+.fx-chain-meter {
+  flex: 1 1 90px;
+  min-width: 90px;
+}
+
+/* MIDI channel picker (the "Ch" pill's popover). */
+.fx-midi-channels {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  background: var(--inset);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.fx-midi-channels-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fx-midi-channels-label {
+  flex: 1;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.fx-midi-channels-all {
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-3);
+  font-size: 0.66rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.fx-midi-channels-all:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.fx-midi-channel-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 4px;
+}
+
+.fx-midi-channel-chip {
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-3);
+  font-size: 0.64rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.fx-midi-channel-chip:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.fx-midi-channel-chip.is-on {
+  background: var(--accent-dim);
+  border-color: var(--accent-border);
+  color: var(--accent);
 }
 
 .fx-chain-empty {
@@ -1139,6 +1533,33 @@ button {
   font-size: 0.86rem;
 }
 
+/* Render-error fallback (ErrorBoundary) — never a white screen. */
+.error-boundary {
+  padding: 18px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.error-boundary-title {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--warn);
+}
+
+.error-boundary-message {
+  margin: 0;
+  font-size: 0.74rem;
+  color: var(--text-3);
+  font-family: var(--mono);
+  word-break: break-word;
+}
+
 .snippet-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
@@ -1344,6 +1765,75 @@ button {
 .snippet-field textarea:focus {
   outline: none;
   border-color: var(--accent);
+}
+
+/* Organisational colour tags. The card gets a strong left accent
+   (inset shadow so layout doesn't shift) and the waveform a pastel
+   wash; the summary shows a matching dot. */
+.snippet.color-red    { box-shadow: inset 3px 0 0 #e26d6a; }
+.snippet.color-orange { box-shadow: inset 3px 0 0 #e89b4e; }
+.snippet.color-yellow { box-shadow: inset 3px 0 0 #d9b93c; }
+.snippet.color-green  { box-shadow: inset 3px 0 0 #6bbf6a; }
+.snippet.color-teal   { box-shadow: inset 3px 0 0 #4db6ac; }
+.snippet.color-blue   { box-shadow: inset 3px 0 0 #4a90d9; }
+.snippet.color-purple { box-shadow: inset 3px 0 0 #9575cd; }
+.snippet.color-pink   { box-shadow: inset 3px 0 0 #e87ea0; }
+
+.snippet.color-red    .snippet-waveform { background: #f6d3d1; }
+.snippet.color-orange .snippet-waveform { background: #f7e0c8; }
+.snippet.color-yellow .snippet-waveform { background: #f7edc4; }
+.snippet.color-green  .snippet-waveform { background: #d7ecd3; }
+.snippet.color-teal   .snippet-waveform { background: #cdeae5; }
+.snippet.color-blue   .snippet-waveform { background: #d3e4f6; }
+.snippet.color-purple .snippet-waveform { background: #e2d9f2; }
+.snippet.color-pink   .snippet-waveform { background: #f7d8e2; }
+
+.snippet-color-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  align-self: center;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.15);
+}
+
+/* Colour picker swatches in the expanded snippet details. */
+.snippet-swatches {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.snippet-swatch {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: transform 0.1s ease, border-color 0.1s ease;
+}
+
+.snippet-swatch:hover {
+  transform: scale(1.15);
+}
+
+.snippet-swatch.is-active {
+  border-color: var(--text);
+  box-shadow: 0 0 0 2px var(--panel) inset;
+}
+
+.snippet-swatch-none {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--inset);
+  border: 1px dashed var(--border-strong);
+  color: var(--text-3);
+}
+
+.snippet-swatch-none:hover {
+  color: var(--text);
 }
 
 .snippet-footer {

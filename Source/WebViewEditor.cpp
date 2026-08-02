@@ -82,7 +82,7 @@ juce::File findLocalWebUiDistIndex()
 // event-listener payload is), returning `defaultValue` if the
 // property is absent. var::operator[] has a const char* overload
 // and returns a void var for missing keys, so the usual
-// JS-style `data.chain ?? "audioChain"` translates cleanly. A
+// JS-style `data.chain ?? defaultValue` translates cleanly. A
 // DynamicObject* also works because var has a converting
 // constructor from ReferenceCountedObject*, which DynamicObject
 // inherits from.
@@ -106,6 +106,7 @@ juce::var snippetToVar (const Snippet& s)
     obj->setProperty ("savedPath", s.savedPath);
     obj->setProperty ("key", s.key);
     obj->setProperty ("keyConfidence", s.keyConfidence);
+    obj->setProperty ("color", s.color);
 
     juce::Array<juce::var> notesVar;
     notesVar.ensureStorageAllocated (s.detectedNotes.size());
@@ -219,6 +220,19 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
                 }
             }
         })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetSnippetColorEvent, [&processor, owner](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+            {
+                const int id = static_cast<int> (obj->getProperty("id"));
+                const auto color = obj->getProperty("color").toString();
+                if (! processor.setSnippetColor (id, color))
+                {
+                    if (owner != nullptr)
+                        owner->sendNotification ("Failed to set snippet colour. Library folder may not be set.", "error");
+                }
+            }
+        })
         .withEventListener(BluePrinterWebViewEditor::frontendDeleteSnippetEvent, [&processor, owner](juce::var data)
         {
             if (auto* obj = data.getDynamicObject())
@@ -296,6 +310,24 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
             if (auto* obj = data.getDynamicObject())
                 processor.setCountInBeats (static_cast<int> (obj->getProperty ("beats")));
         })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetDryLevelEvent, [&processor](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+                processor.setDryLevel (static_cast<float> (obj->getProperty ("level")));
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetClickParamsEvent, [&processor](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+            {
+                processor.setClickParams (
+                    static_cast<float> (obj->getProperty ("pitch")),
+                    static_cast<float> (obj->getProperty ("accentPitch")),
+                    static_cast<float> (obj->getProperty ("decay")),
+                    static_cast<float> (obj->getProperty ("volume")),
+                    static_cast<float> (obj->getProperty ("accentVolume")),
+                    static_cast<float> (obj->getProperty ("noise")));
+            }
+        })
         .withEventListener(BluePrinterWebViewEditor::frontendSetMidiClockEvent, [&processor](juce::var data)
         {
             if (auto* obj = data.getDynamicObject())
@@ -328,10 +360,9 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
             // The "+ Add plugin…" button sends an empty payload and
             // wants the file picker. The available-plugins list sends
             // { path: "C:\\…\\Foo.vst3" } and wants a direct add.
-            // The "chain" field picks the target chain ("midiChain"
-            // or "audioChain"); absent means audio chain for
-            // backwards compatibility with the pre-split UI.
-            const auto chain = getStringProp (data, "chain", "audioChain");
+            // The "chain" field picks the target chain by id; absent
+            // means the first chain.
+            const auto chain = getStringProp (data, "chain", owner->defaultChainId());
             const auto path  = getStringProp (data, "path", {});
             if (path.isNotEmpty())
                 owner->addVst3FromPath (chain, juce::File (path));
@@ -342,14 +373,14 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
         {
             if (data.getDynamicObject() != nullptr)
             {
-                const auto chain = getStringProp (data, "chain", "audioChain");
+                const auto chain = getStringProp (data, "chain", owner != nullptr ? owner->defaultChainId() : juce::String());
                 const int index = static_cast<int> (data["index"]);
+                auto* target = processor.getChainById (chain);
+                if (target == nullptr)
+                    return;
                 if (owner != nullptr)
                     owner->closeVst3Editor (chain, index, false);
-                auto& target = (chain == "midiChain")
-                    ? processor.getMidiPluginChain()
-                    : processor.getAudioPluginChain();
-                target.removePlugin (index);
+                target->removePlugin (index);
                 if (owner != nullptr)
                     owner->emitVst3ChainSnapshot();
             }
@@ -358,19 +389,19 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
         {
             if (data.getDynamicObject() != nullptr)
             {
-                const auto chain = getStringProp (data, "chain", "audioChain");
+                const auto chain = getStringProp (data, "chain", owner != nullptr ? owner->defaultChainId() : juce::String());
                 const int from = static_cast<int> (data["from"]);
                 const int to   = static_cast<int> (data["to"]);
-                auto& target = (chain == "midiChain")
-                    ? processor.getMidiPluginChain()
-                    : processor.getAudioPluginChain();
-                if (target.movePlugin (from, to) && owner != nullptr)
+                auto* target = processor.getChainById (chain);
+                if (target == nullptr)
+                    return;
+                if (target->movePlugin (from, to) && owner != nullptr)
                 {
                     // The slots behind the moved one shifted index, so
                     // any open editor window keyed by the old index is
                     // now looking at the wrong plugin. Re-key the map
                     // by matching the window's plugin path against
-                    // the new chain before the snapshot goes out.
+                    // the chain before the snapshot goes out.
                     owner->rekeyVst3EditorWindows();
                     owner->emitVst3ChainSnapshot();
                 }
@@ -380,36 +411,80 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
         {
             if (data.getDynamicObject() != nullptr)
             {
-                const auto chain = getStringProp (data, "chain", "audioChain");
+                const auto chain = getStringProp (data, "chain", owner != nullptr ? owner->defaultChainId() : juce::String());
                 const int index = static_cast<int> (data["index"]);
                 const bool bypass = static_cast<bool> (data["bypassed"]);
-                auto& target = (chain == "midiChain")
-                    ? processor.getMidiPluginChain()
-                    : processor.getAudioPluginChain();
-                target.setBypass (index, bypass);
+                auto* target = processor.getChainById (chain);
+                if (target == nullptr)
+                    return;
+                target->setBypass (index, bypass);
                 if (owner != nullptr)
                     owner->emitVst3ChainSnapshot();
             }
         })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetVst3MidiPassEvent, [&processor](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+                processor.setChainWantsMidi (obj->getProperty ("chain").toString(),
+                                             static_cast<bool> (obj->getProperty ("enabled")));
+        })
         .withEventListener(BluePrinterWebViewEditor::frontendOpenVst3EditorEvent, [owner](juce::var data)
         {
-            if (data.getDynamicObject() != nullptr)
+            if (data.getDynamicObject() != nullptr && owner != nullptr)
             {
-                const auto chain = getStringProp (data, "chain", "audioChain");
+                const auto chain = getStringProp (data, "chain", owner->defaultChainId());
                 const int index = static_cast<int> (data["index"]);
-                if (owner != nullptr)
-                    owner->openVst3Editor (chain, index);
+                owner->openVst3Editor (chain, index);
             }
         })
         .withEventListener(BluePrinterWebViewEditor::frontendCloseVst3EditorEvent, [owner](juce::var data)
         {
-            if (data.getDynamicObject() != nullptr)
+            if (data.getDynamicObject() != nullptr && owner != nullptr)
             {
-                const auto chain = getStringProp (data, "chain", "audioChain");
+                const auto chain = getStringProp (data, "chain", owner->defaultChainId());
                 const int index = static_cast<int> (data["index"]);
-                if (owner != nullptr)
-                    owner->closeVst3Editor (chain, index, true);
+                owner->closeVst3Editor (chain, index, true);
             }
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendAddChainEvent, [owner](juce::var data)
+        {
+            if (owner != nullptr)
+                owner->handleAddChain (data);
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendRemoveChainEvent, [owner](juce::var data)
+        {
+            if (owner != nullptr)
+                owner->handleRemoveChain (data);
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendRenameChainEvent, [owner](juce::var data)
+        {
+            if (owner != nullptr)
+                owner->handleRenameChain (data);
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetChainInputsEvent, [owner](juce::var data)
+        {
+            if (owner != nullptr)
+                owner->handleSetChainInputs (data);
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetChainRecordEvent, [owner](juce::var data)
+        {
+            if (owner != nullptr)
+                owner->handleSetChainRecord (data);
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetChainVolumeEvent, [owner](juce::var data)
+        {
+            if (owner != nullptr)
+                owner->handleSetChainVolume (data);
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetChainMuteEvent, [owner](juce::var data)
+        {
+            if (owner != nullptr)
+                owner->handleSetChainMute (data);
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetChainMidiChannelsEvent, [owner](juce::var data)
+        {
+            if (owner != nullptr)
+                owner->handleSetChainMidiChannels (data);
         })
         .withEventListener(BluePrinterWebViewEditor::frontendScanVst3FolderEvent, [owner](juce::var)
         {
@@ -462,26 +537,21 @@ BluePrinterWebViewEditor::BluePrinterWebViewEditor(BluePrinterAudioProcessor& p)
 
     // When a chain slot is removed (e.g. user removed the plugin), close
     // any open native editor for it so we don't leak a window with a
-    // dangling plugin pointer. Each chain has its own map; the lambda
-    // captures a pointer to the right one.
-    audioProcessor.getMidiPluginChain().onSlotRemoved = [this] (int index)
-    {
-        midiEditorWindows.erase (index);
-    };
-    audioProcessor.getAudioPluginChain().onSlotRemoved = [this] (int index)
-    {
-        audioEditorWindows.erase (index);
-    };
+    // dangling plugin pointer. With dynamic chains the binding is
+    // (re)established every time the chain list changes; see
+    // refreshChainEditorBindings.
+    refreshChainEditorBindings();
 
     // The processor installs its own pluginChain.onChanged hook (which
     // persists state) and notifies us via the Listener::pluginChainChanged
     // callback below. So we don't wire onChanged here — the listener
-    // override already sets chainUpdatePending and triggers an async
-    // update.
+    // override sets chainUpdatePending, which the 30 Hz timerCallback
+    // flushes (coalesced chain snapshots).
 
     // Push the initial chain snapshot so the UI doesn't sit empty until
     // the user makes a change. Also push the default VST3 folder so the
-    // header can show it.
+    // header can show it. The snapshot is flushed by the first timer
+    // tick (the async update below doesn't handle the chain flag).
     chainUpdatePending.store (true, std::memory_order_release);
     triggerAsyncUpdate();
 
@@ -594,14 +664,21 @@ void BluePrinterWebViewEditor::handleAsyncUpdate()
         emitLibraryToFrontend();
     if (transportUpdatePending.exchange(false, std::memory_order_acq_rel))
         emitTransportToFrontend();
-    if (chainUpdatePending.exchange(false, std::memory_order_acq_rel))
-        emitVst3ChainSnapshot();
+    // The chain snapshot flag is flushed from timerCallback instead so
+    // rapid chain mutations coalesce into one snapshot per timer tick.
 }
 
 void BluePrinterWebViewEditor::timerCallback()
 {
     // Throttled push: always push transport so the meter / timecode moves.
     emitTransportToFrontend();
+
+    // Coalesced chain snapshot. Full snapshots are expensive (they
+    // serialize every plugin's state), so bursts of chain mutations
+    // (e.g. dragging a volume knob or clicking MIDI channel chips) are
+    // batched into at most one snapshot per 30 Hz tick.
+    if (chainUpdatePending.exchange(false, std::memory_order_acq_rel))
+        emitVst3ChainSnapshot();
 
     // Drive the VST3 scan one file at a time on the message thread so
     // the VST3 module is only touched from the right thread.
@@ -623,8 +700,12 @@ void BluePrinterWebViewEditor::transportChanged()
 
 void BluePrinterWebViewEditor::pluginChainChanged()
 {
+    // The chain list may have grown or shrunk; keep the slot-removal
+    // bindings in sync so open plugin windows always close.
+    refreshChainEditorBindings();
+    // No triggerAsyncUpdate: the 30 Hz timerCallback flushes this flag
+    // so bursts of chain mutations coalesce into one snapshot.
     chainUpdatePending.store(true, std::memory_order_release);
-    triggerAsyncUpdate();
 }
 
 void BluePrinterWebViewEditor::emitParameterSnapshotToFrontend()
@@ -679,6 +760,13 @@ juce::var BluePrinterWebViewEditor::makeTransportSnapshot() const
     obj->setProperty ("metronomeEnabled", audioProcessor.getMetronomeEnabled());
     obj->setProperty ("bpm",              audioProcessor.getBpm());
     obj->setProperty ("countInBeats",     audioProcessor.getCountInBeats());
+    obj->setProperty ("dryLevel",         audioProcessor.getDryLevel());
+    obj->setProperty ("clickPitch",        audioProcessor.getClickPitch());
+    obj->setProperty ("clickAccentPitch",  audioProcessor.getClickAccentPitch());
+    obj->setProperty ("clickDecay",        audioProcessor.getClickDecay());
+    obj->setProperty ("clickVolume",       audioProcessor.getClickVolume());
+    obj->setProperty ("clickAccentVolume", audioProcessor.getClickAccentVolume());
+    obj->setProperty ("clickNoise",        audioProcessor.getClickNoise());
     obj->setProperty ("midiClockEnabled", audioProcessor.isMidiClockEnabled());
     obj->setProperty ("midiOutputDevice", audioProcessor.getMidiOutputDeviceName());
     {
@@ -701,6 +789,28 @@ juce::var BluePrinterWebViewEditor::makeTransportSnapshot() const
     obj->setProperty ("audioLoopStart", static_cast<double> (audioProcessor.getAudioLoopStart()));
     obj->setProperty ("audioLoopLength", static_cast<double> (audioProcessor.getAudioLoopLength()));
     obj->setProperty ("audioLoopPosition", static_cast<double> (audioProcessor.getAudioLoopPosition()));
+    {
+        // Per-chain output meters (post-volume, muted chains read 0).
+        // Pushed at 30 Hz alongside the rest of the transport state.
+        juce::Array<juce::var> chainLevels;
+        for (auto& chain : audioProcessor.getChains())
+        {
+            auto* o = new juce::DynamicObject();
+            o->setProperty ("chain", chain->getChainId());
+            o->setProperty ("level", juce::jlimit (0.0f, 1.0f, chain->getOutputLevel()));
+            o->setProperty ("peak",  juce::jlimit (0.0f, 1.0f, chain->getOutputPeak()));
+            chainLevels.add (juce::var (o));
+        }
+        obj->setProperty ("chainLevels", chainLevels);
+    }
+    {
+        const auto& peaks = audioProcessor.getLooperPeaks();
+        juce::Array<juce::var> peakArray;
+        peakArray.ensureStorageAllocated (static_cast<int> (peaks.size()));
+        for (float p : peaks)
+            peakArray.add (juce::var (p));
+        obj->setProperty ("audioLoopPeaks", juce::var (peakArray));
+    }
     return juce::var (obj);
 }
 
@@ -895,12 +1005,18 @@ void BluePrinterWebViewEditor::sendNotification(const juce::String& message, con
     webView.emitEventIfBrowserIsVisible (juce::Identifier (backendNotifyEvent), juce::var (obj));
 }
 
+juce::String BluePrinterWebViewEditor::defaultChainId() const
+{
+    const auto& all = audioProcessor.getChains();
+    return all.empty() ? juce::String() : all.front()->getChainId();
+}
+
 void BluePrinterWebViewEditor::openVst3Editor (const juce::String& chain, int slotIndex)
 {
-    auto& target = (chain == "midiChain")
-        ? audioProcessor.getMidiPluginChain()
-        : audioProcessor.getAudioPluginChain();
-    auto& windowMap = (chain == "midiChain") ? midiEditorWindows : audioEditorWindows;
+    auto* target = audioProcessor.getChainById (chain);
+    if (target == nullptr)
+        return;
+    auto& windowMap = editorWindows[chain];
 
     // If there's already an editor open for this slot, just bring it forward.
     if (windowMap.count (slotIndex) > 0)
@@ -910,7 +1026,7 @@ void BluePrinterWebViewEditor::openVst3Editor (const juce::String& chain, int sl
         return;
     }
 
-    auto* plugin = target.getPlugin (slotIndex);
+    auto* plugin = target->getPlugin (slotIndex);
     if (plugin == nullptr)
         return;
 
@@ -921,7 +1037,8 @@ void BluePrinterWebViewEditor::openVst3Editor (const juce::String& chain, int sl
         return;
     }
 
-    const auto label = (chain == "midiChain") ? "MIDI slot" : "FX slot";
+    const auto chainName = target->getName();
+    const auto label = chainName.isNotEmpty() ? chainName : "chain";
     auto title = plugin->getName() + " (" + label + " " + juce::String (slotIndex + 1) + ")";
     auto window = std::make_unique<Vst3EditorWindow> (title,
                                                       juce::Colours::darkgrey,
@@ -946,7 +1063,10 @@ void BluePrinterWebViewEditor::openVst3Editor (const juce::String& chain, int sl
 void BluePrinterWebViewEditor::closeVst3Editor (const juce::String& chain, int slotIndex, bool deleteAfterClose)
 {
     juce::ignoreUnused (deleteAfterClose);
-    auto& windowMap = (chain == "midiChain") ? midiEditorWindows : audioEditorWindows;
+    const auto chainIt = editorWindows.find (chain);
+    if (chainIt == editorWindows.end())
+        return;
+    auto& windowMap = chainIt->second;
     const auto it = windowMap.find (slotIndex);
     if (it == windowMap.end())
         return;
@@ -965,33 +1085,38 @@ void BluePrinterWebViewEditor::closeVst3Editor (const juce::String& chain, int s
 
 void BluePrinterWebViewEditor::closeAllVst3Editors()
 {
-    midiEditorWindows.clear();
-    audioEditorWindows.clear();
+    editorWindows.clear();
 }
 
 void BluePrinterWebViewEditor::rekeyVst3EditorWindows()
 {
-    // Re-key both editor maps so a slot that was moved stays attached
-    // to its window. The plugin instance survives the move (the move
-    // just shifts the slot index), so the AudioProcessorEditor the
-    // window owns is still valid — we just need to update the map key
-    // so emitVst3ChainSnapshot reports the right openEditors list and
-    // the "Close" button stays on the same row the user dragged.
-    auto rekey = [this](PluginChain& chain,
-                        std::map<int, std::unique_ptr<juce::DialogWindow>>& windowMap)
+    // Re-key every chain's editor map so a slot that was moved stays
+    // attached to its window. The plugin instance survives the move
+    // (the move just shifts the slot index), so the AudioProcessorEditor
+    // the window owns is still valid — we just need to update the map
+    // key so emitVst3ChainSnapshot reports the right openEditors list
+    // and the "Close" button stays on the same row the user dragged.
+    for (auto& chainEntry : editorWindows)
     {
-        if (windowMap.empty())
-            return;
+        auto* chain = audioProcessor.getChainById (chainEntry.first);
+        auto& windowMap = chainEntry.second;
+        if (chain == nullptr || windowMap.empty())
+        {
+            // Chain gone: drop any lingering windows.
+            if (chain == nullptr)
+                windowMap.clear();
+            continue;
+        }
         std::map<int, std::unique_ptr<juce::DialogWindow>> rebuilt;
         for (auto& entry : windowMap)
         {
-            const juce::String oldPath = chain.getSlotPath (entry.first);
+            const juce::String oldPath = chain->getSlotPath (entry.first);
             int newIndex = -1;
             if (oldPath.isNotEmpty())
             {
-                for (int i = 0; i < chain.getNumPlugins(); ++i)
+                for (int i = 0; i < chain->getNumPlugins(); ++i)
                 {
-                    if (chain.getSlotPath (i) == oldPath)
+                    if (chain->getSlotPath (i) == oldPath)
                     {
                         newIndex = i;
                         break;
@@ -1004,10 +1129,7 @@ void BluePrinterWebViewEditor::rekeyVst3EditorWindows()
             // unique_ptr drops here, closing the window.
         }
         windowMap = std::move (rebuilt);
-    };
-
-    rekey (audioProcessor.getMidiPluginChain(),  midiEditorWindows);
-    rekey (audioProcessor.getAudioPluginChain(), audioEditorWindows);
+    }
 }
 
 void BluePrinterWebViewEditor::emitVst3ChainSnapshot()
@@ -1015,13 +1137,19 @@ void BluePrinterWebViewEditor::emitVst3ChainSnapshot()
     auto* obj = new juce::DynamicObject();
     obj->setProperty ("folder", Vst3Library::getDefaultVst3Folder().getFullPathName());
 
-    // Both chains. The UI uses the per-chain "chain" property to
-    // decide which panel (MIDI vs audio) the data belongs in. The
-    // shape of each chain's state is what PluginChain::getChainState
-    // emits — { slots: [{ path, bypassed, name }], ... } — so the
-    // frontend can re-use the same slot-row component for both.
-    obj->setProperty ("midiChain",  audioProcessor.getMidiPluginChain().getChainState());
-    obj->setProperty ("audioChain", audioProcessor.getAudioPluginChain().getChainState());
+    // How many input channels the current bus layout provides — the UI
+    // renders that many per-chain input checkboxes.
+    obj->setProperty ("inputChannels", audioProcessor.getTotalNumInputChannels());
+
+    // Every chain. The shape of each chain's state is what
+    // PluginChain::getChainState emits — { id, name, inputs, wantsMidi,
+    // recordOnCapture, volume, muted, midiChannels, slots: [{ path,
+    // bypassed, name }] } — so the frontend can render an arbitrary
+    // number of panels.
+    juce::Array<juce::var> chainsArray;
+    for (auto& chain : audioProcessor.getChains())
+        chainsArray.add (chain->getChainState());
+    obj->setProperty ("chains", chainsArray);
 
     // The cached scan result is owned by the shared Vst3Library so it
     // survives host save/load. Reading it here means the "Available
@@ -1063,14 +1191,149 @@ void BluePrinterWebViewEditor::emitVst3ChainSnapshot()
                 openEditors.add (juce::var (o));
             }
         };
-        pushOpen ("midiChain",  midiEditorWindows);
-        pushOpen ("audioChain", audioEditorWindows);
+        for (const auto& chainEntry : editorWindows)
+            pushOpen (chainEntry.first, chainEntry.second);
         obj->setProperty ("openEditors", openEditors);
     }
 
     obj->setProperty ("restoreError", audioProcessor.getLastChainRestoreError());
 
     webView.emitEventIfBrowserIsVisible (juce::Identifier (backendVst3ChainEvent), juce::var (obj));
+}
+
+void BluePrinterWebViewEditor::refreshChainEditorBindings()
+{
+    // Wire each chain's slot-removal callback so a removed slot closes
+    // its editor window, and drop window maps for chains that no
+    // longer exist. Also un-wire stale chains' callbacks (they'd fire
+    // after removeChain's clear() otherwise).
+    juce::StringArray liveIds;
+    for (auto& chain : audioProcessor.getChains())
+    {
+        const juce::String chainId = chain->getChainId();
+        liveIds.add (chainId);
+        chain->onSlotRemoved = [this, chainId](int index)
+        {
+            const auto chainIt = editorWindows.find (chainId);
+            if (chainIt != editorWindows.end())
+                chainIt->second.erase (index);
+        };
+    }
+    for (auto it = editorWindows.begin(); it != editorWindows.end();)
+    {
+        if (! liveIds.contains (it->first))
+            it = editorWindows.erase (it);
+        else
+            ++it;
+    }
+}
+
+void BluePrinterWebViewEditor::handleAddChain (const juce::var& data)
+{
+    const auto name = getStringProp (data, "name", {});
+    int mask = ChainInputBoth;
+    if (auto* arr = data["inputs"].getArray())
+    {
+        mask = ChainInputNone;
+        for (const auto& v : *arr)
+        {
+            const int ch = static_cast<int> (v);
+            if (ch >= 0 && ch < 8)
+                mask |= (1 << ch);
+        }
+    }
+    const bool wantsMidi = ! data.hasProperty ("wantsMidi")
+                        || static_cast<bool> (data["wantsMidi"]);
+    const bool record = ! data.hasProperty ("recordOnCapture")
+                     || static_cast<bool> (data["recordOnCapture"]);
+
+    const auto id = audioProcessor.addChain (name, mask, wantsMidi, record);
+    if (id.isEmpty())
+    {
+        sendNotification ("Failed to add chain.", "error");
+        return;
+    }
+    refreshChainEditorBindings();
+    emitVst3ChainSnapshot();
+}
+
+void BluePrinterWebViewEditor::handleRemoveChain (const juce::var& data)
+{
+    const auto chainId = getStringProp (data, "chain", {});
+    if (chainId.isEmpty())
+        return;
+    if (audioProcessor.removeChain (chainId))
+    {
+        refreshChainEditorBindings();
+        emitVst3ChainSnapshot();
+    }
+}
+
+void BluePrinterWebViewEditor::handleRenameChain (const juce::var& data)
+{
+    const auto chainId = getStringProp (data, "chain", {});
+    const auto name = getStringProp (data, "name", {});
+    if (chainId.isEmpty() || name.isEmpty())
+        return;
+    if (audioProcessor.renameChain (chainId, name))
+        emitVst3ChainSnapshot();
+}
+
+void BluePrinterWebViewEditor::handleSetChainInputs (const juce::var& data)
+{
+    const auto chainId = getStringProp (data, "chain", {});
+    int mask = ChainInputNone;
+    if (auto* arr = data["inputs"].getArray())
+    {
+        for (const auto& v : *arr)
+        {
+            const int ch = static_cast<int> (v);
+            if (ch >= 0 && ch < 8)
+                mask |= (1 << ch);
+        }
+    }
+    if (chainId.isNotEmpty())
+        audioProcessor.setChainInputs (chainId, mask);
+}
+
+void BluePrinterWebViewEditor::handleSetChainRecord (const juce::var& data)
+{
+    const auto chainId = getStringProp (data, "chain", {});
+    const bool enabled = static_cast<bool> (data["enabled"]);
+    if (chainId.isNotEmpty())
+        audioProcessor.setChainRecordOnCapture (chainId, enabled);
+}
+
+void BluePrinterWebViewEditor::handleSetChainVolume (const juce::var& data)
+{
+    const auto chainId = getStringProp (data, "chain", {});
+    if (chainId.isNotEmpty())
+        audioProcessor.setChainVolume (chainId, static_cast<float> (data["volume"]));
+}
+
+void BluePrinterWebViewEditor::handleSetChainMute (const juce::var& data)
+{
+    const auto chainId = getStringProp (data, "chain", {});
+    const bool muted = static_cast<bool> (data["muted"]);
+    if (chainId.isNotEmpty())
+        audioProcessor.setChainMute (chainId, muted);
+}
+
+void BluePrinterWebViewEditor::handleSetChainMidiChannels (const juce::var& data)
+{
+    const auto chainId = getStringProp (data, "chain", {});
+    uint16_t mask = 0;
+    if (auto* arr = data["channels"].getArray())
+    {
+        for (const auto& v : *arr)
+        {
+            const int ch = static_cast<int> (v);
+            if (ch >= 1 && ch <= 16)
+                mask = static_cast<uint16_t> (mask | (1u << (ch - 1)));
+        }
+    }
+    if (chainId.isNotEmpty())
+        audioProcessor.setChainMidiChannels (chainId, mask);
 }
 
 void BluePrinterWebViewEditor::scanVst3Folder (const juce::File& folder)
@@ -1208,16 +1471,19 @@ void BluePrinterWebViewEditor::addVst3FromPath (const juce::String& chain, const
         return;
     }
 
-    auto& target = (chain == "midiChain")
-        ? audioProcessor.getMidiPluginChain()
-        : audioProcessor.getAudioPluginChain();
+    auto* target = audioProcessor.getChainById (chain);
+    if (target == nullptr)
+    {
+        sendNotification ("Chain no longer exists.", "error");
+        return;
+    }
 
     // Async load with a 10s timeout. The worker thread runs the
     // VST3 factory call (which can pop up a modal license dialog
     // for expired-license plugins), so the message thread stays
     // responsive and we can bail out if the plugin hangs.
     constexpr int kLoadTimeoutMs = 10000;
-    target.addPluginAsync (
+    target->addPluginAsync (
         vst3File, kLoadTimeoutMs,
         [this, vst3File](int slotIndex,
                          const juce::String& name,
