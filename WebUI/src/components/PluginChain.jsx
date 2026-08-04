@@ -392,21 +392,31 @@ function ChainPanel({
           </button>
           {showAvailable ? (
             <ul className="fx-available-list">
-              {available.map((p, i) => (
-                <li key={`${chain}-${p.path || p.name}-${i}`}>
-                  <button
-                    type="button"
-                    className="fx-available-item"
-                    onClick={() => onAdd(p.path)}
-                    title={p.path || ""}
-                  >
-                    <span className="fx-available-name">{p.name || basename(p.path)}</span>
-                    {p.manufacturer ? (
-                      <span className="fx-available-meta">{p.manufacturer}</span>
-                    ) : null}
-                  </button>
-                </li>
-              ))}
+              {available.map((p, i) => {
+                // A plugin already in this chain is disabled: two
+                // instances of the same .vst3 in one chain crash some
+                // plugins (Neural DSP "X" amp sims). The same plugin is
+                // still addable to other chains.
+                const alreadyInChain = (slots || []).some((s) => s.path === p.path);
+                return (
+                  <li key={`${chain}-${p.path || p.name}-${i}`}>
+                    <button
+                      type="button"
+                      className={`fx-available-item${alreadyInChain ? " is-in-chain" : ""}`}
+                      onClick={() => onAdd(p.path)}
+                      disabled={alreadyInChain}
+                      title={alreadyInChain ? "Already in this chain" : p.path || ""}
+                    >
+                      <span className="fx-available-name">{p.name || basename(p.path)}</span>
+                      {alreadyInChain ? (
+                        <span className="fx-available-meta">in this chain</span>
+                      ) : p.manufacturer ? (
+                        <span className="fx-available-meta">{p.manufacturer}</span>
+                      ) : null}
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           ) : null}
         </div>

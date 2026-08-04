@@ -36,6 +36,8 @@ All frontend events are in `FRONTEND_EVENTS`, backend events in `BACKEND_EVENTS`
 - `updateSnippet`, `deleteSnippet`, `detectSnippetKey`, `saveSnippet`, `saveLoop`, `revealSnippet`
 - `chooseLibraryFolder`, `openLibraryFolder`, `refreshLibrary`, `getSnippets`
 - `setMetronome`, `setBpm`, `setCountInBeats`, `setMidiClock`, `setMidiDevice`
+- `setTakeMidiClock`, `setLooperMidiClock` (`{ enabled }`) — per-section clock toggles in the transport (take) and looper sections; they start/stop the clock with the operation, unlike the free-running global `setMidiClock`
+- `setClickDuringTake` (`{ enabled }`) — false = click only during the count-in, silent through the take
 - `setDryLevel` (`{ level }`, 0–1, the "Dry" knob — applied post-gain to the output and the record mix)
 - `setClickParams` (`{ pitch, accentPitch, decay, volume, accentVolume, noise }`, the click-sound popover in the transport; see `resynthesizeClicks()` in `PluginProcessor.cpp` — two-tone 1000/1500 Hz click, the transport snapshot carries the same fields back)
 - `setSnippetColor` (`{ id, color }` — a named color from `SNIPPET_COLORS` in `utils.js`; persisted in the snippet JSON sidecar as `color`)
@@ -52,8 +54,8 @@ All frontend events are in `FRONTEND_EVENTS`, backend events in `BACKEND_EVENTS`
 **Backend events** (C++ → React):
 - `parameters` — `{ gain: number }`
 - `snippets` — Array of snippet objects OR `{ snippets: [...], libraryFolder, lastSaveError }`
-- `transport` — Full transport state object, including `chainLevels`, plus `dryLevel`, `clickPitch`/`clickAccentPitch`/`clickDecay`/`clickVolume`/`clickAccentVolume`/`clickNoise`, `midiClockEnabled`, `midiOutputDevice`, and `midiOutputDeviceList`
-- The **MIDI clock has its own section**: `MidiClock.jsx` renders between the transport and the looper with a start/stop button, a live status (`midiClockEnabled`, BPM), and the device `<select>` bound to `midiOutputDeviceList` (auto-selects the first device if none is set — the plugin opens its own `MidiOutput`, it does not use the device manager's). `setMidiClock`/`setMidiDevice` are wired from `App.jsx`, not from `Transport.jsx`.
+- `transport` — Full transport state object, including `chainLevels`, plus `dryLevel`, `clickPitch`/`clickAccentPitch`/`clickDecay`/`clickVolume`/`clickAccentVolume`/`clickNoise`, `midiClockEnabled`, `takeMidiClock`, `looperMidiClock`, `clickDuringTake`, `midiOutputDevice`, and `midiOutputDeviceList`
+- The **free-running MIDI clock** has its own section: `MidiClock.jsx` renders between the transport and the looper with a start/stop button, a live status (`midiClockEnabled`, BPM), and the device `<select>` bound to `midiOutputDeviceList` (auto-selects the first device if none is set — the plugin opens its own `MidiOutput`, it does not use the device manager's). `setMidiClock`/`setMidiDevice` are wired from `App.jsx`, not from `Transport.jsx`. The **per-operation** clock toggles (`takeMidiClock` in the transport's record section, `looperMidiClock` in the looper settings) start/stop the clock with a take or a loop instead.
 - `notify` — `{ message: string, level: "info"|"warn"|"error" }`
 - `vst3Chain` — `{ chains: [{id, name, inputs, wantsMidi, midiChannels, recordOnCapture, volume, muted, slots}], openEditors, plugins, folder, inputChannels }`
 - `vst3ScanProgress` — `{ active, current, total, currentFile, folder }`

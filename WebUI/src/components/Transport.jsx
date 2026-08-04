@@ -170,10 +170,14 @@ export function Transport({
   countInBeats,
   dryLevel,
   midiClockEnabled,
+  takeMidiClock,
+  clickDuringTake,
   onMetronomeChange,
   onBpmChange,
   onCountInBeatsChange,
   onDryLevelChange,
+  onTakeMidiClockChange,
+  onClickDuringTakeChange,
 }) {
   const isPreRoll = Boolean(transport?.preRollActive);
   const isRecording = Boolean(transport?.recording) || isPreRoll;
@@ -247,11 +251,42 @@ export function Transport({
             type="button"
             className={`metronome-toggle ${metronomeEnabled ? "is-on" : ""}`}
             onClick={() => onMetronomeChange(!metronomeEnabled)}
-            title={metronomeEnabled ? "Click is on during recording and count-in" : "Click is off"}
+            title={metronomeEnabled
+              ? clickDuringTake
+                ? "Click is on during the count-in and the take"
+                : "Click is on during the count-in only (silent through the take)"
+              : "Click is off"}
             aria-pressed={metronomeEnabled}
           >
             <IconMetronome size={15} />
             <span className="metronome-state">{metronomeEnabled ? "Click on" : "Click off"}</span>
+          </button>
+          <button
+            type="button"
+            className={`metronome-toggle ${!clickDuringTake ? "is-on" : ""}`}
+            onClick={() => onClickDuringTakeChange(!clickDuringTake)}
+            title={clickDuringTake
+              ? "Click plays through the whole take. Turn on for count-in only (click stops when recording starts)."
+              : "Click only during the count-in — silent while the take records."}
+            aria-pressed={!clickDuringTake}
+          >
+            <span className="metronome-state">
+              {clickDuringTake ? "Click: take" : "Click: count-in only"}
+            </span>
+          </button>
+          <button
+            type="button"
+            className={`metronome-toggle ${takeMidiClock ? "is-on" : ""}`}
+            onClick={() => onTakeMidiClockChange(!takeMidiClock)}
+            title={takeMidiClock
+              ? "MIDI clock runs while this take records (and its count-in) and stops when the take stops"
+              : "Send MIDI clock with the take — the drum machine starts at the count-in and stops when the take stops"}
+            aria-pressed={takeMidiClock}
+          >
+            <span className={`clock-live-dot ${takeMidiClock ? "is-live" : ""}`} aria-hidden="true" />
+            <span className="metronome-state">
+              {takeMidiClock ? "Clock w/ take" : "MIDI clock"}
+            </span>
           </button>
           <button
             type="button"

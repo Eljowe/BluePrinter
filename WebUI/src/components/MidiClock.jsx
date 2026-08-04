@@ -4,7 +4,9 @@ import { IconPlay, IconStop } from "./icons";
 // pick the output device. No recording or looping is needed — the
 // clock (and the audible click, subject to the metronome toggle) runs
 // until you stop it, so you can audition drum machine patterns before
-// recording.
+// recording. The transport and looper sections have their own "MIDI
+// clock" toggles that start/stop the clock with a take or a loop
+// instead; this free-running toggle is independent of both.
 export function MidiClock({ enabled, device, deviceList, bpm, onStartStop, onDeviceChange }) {
   const running = Boolean(enabled);
   const devices = Array.isArray(deviceList) ? deviceList : [];
@@ -14,10 +16,12 @@ export function MidiClock({ enabled, device, deviceList, bpm, onStartStop, onDev
     <section className="midi-clock-section">
       <header className="section-header">
         <div className="section-title">
-          <h2>MIDI clock</h2>
+          <h2>MIDI clock <span className="midi-clock-subtitle">free-run</span></h2>
           <p className="midi-clock-hint">
             Runs free — start it to send Start + 24 ppqn pulses to your drum machine
             without recording, and the click plays along so you can test beats first.
+            To have the clock follow a take or a loop instead, use the MIDI clock
+            toggles in the transport and looper sections.
           </p>
         </div>
       </header>

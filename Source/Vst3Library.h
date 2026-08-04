@@ -39,6 +39,16 @@ public:
     void setAvailablePlugins (const juce::var& plugins);
     juce::var getAvailablePlugins() const;
 
+    // === Self-healing state restore ===
+    // When set, setChainState still instantiates every plugin but skips
+    // restoring its saved state blob (the plugin comes up with defaults).
+    // Set by the processor when the previous launch crashed mid-restore,
+    // so a state blob that crashes a plugin can never brick the app.
+    // Shared via this object because every chain holds a reference to
+    // the same library.
+    void setSkipStateRestore (bool skip) { skipStateRestore.store (skip, std::memory_order_release); }
+    bool getSkipStateRestore() const { return skipStateRestore.load (std::memory_order_acquire); }
+
     // === Folder scanning ===
     // Walk a directory for .vst3 files and return a description for
     // every plugin type found. Blocklisted plugins are filtered out of
@@ -79,6 +89,8 @@ private:
 
     juce::var availablePlugins;
     mutable juce::CriticalSection availableLock;
+
+    std::atomic<bool> skipStateRestore { false };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Vst3Library)
 };

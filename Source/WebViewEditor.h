@@ -52,6 +52,9 @@ public:
     static constexpr const char* frontendSetClickParamsEvent   = "frontendSetClickParams";
     static constexpr const char* frontendSetMidiClockEvent     = "frontendSetMidiClock";
     static constexpr const char* frontendSetMidiDeviceEvent    = "frontendSetMidiDevice";
+    static constexpr const char* frontendSetTakeMidiClockEvent    = "frontendSetTakeMidiClock";
+    static constexpr const char* frontendSetLooperMidiClockEvent  = "frontendSetLooperMidiClock";
+    static constexpr const char* frontendSetClickDuringTakeEvent  = "frontendSetClickDuringTake";
     static constexpr const char* frontendSetLooperRecordingEvent = "frontendSetLooperRecording";
     static constexpr const char* frontendSetLooperPlayingEvent   = "frontendSetLooperPlaying";
     static constexpr const char* frontendSetLooperLoopingEvent   = "frontendSetLooperLooping";

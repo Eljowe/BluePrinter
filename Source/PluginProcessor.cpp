@@ -14,6 +14,103 @@
 #include <thread>
 
 //==============================================================================
+// Crash diagnostics (Windows only). Records the chain-restore step that is
+// currently running in a fixed buffer (safe to read from a crash handler —
+// no heap, no locks). The unhandled-exception filter below writes it out
+// together with a module-offset backtrace so a crash inside a hosted VST3
+// DLL can be attributed to the exact step that triggered it.
+namespace
+{
+    char crashOpBuffer[1024] = "no chain operation in progress";
+}
+
+void BluePrinterAudioProcessor::setCrashOp (const char* op, const char* detail)
+{
+    snprintf (crashOpBuffer, sizeof (crashOpBuffer), "%s%s%s",
+              op != nullptr ? op : "?",
+              detail != nullptr && detail[0] != 0 ? " " : "",
+              detail != nullptr ? detail : "");
+}
+
+const char* BluePrinterAudioProcessor::getCrashOp()
+{
+    return crashOpBuffer;
+}
+
+#ifdef JUCE_WINDOWS
+#include <windows.h>
+static LONG WINAPI bluePrinterCrashHandler (PEXCEPTION_POINTERS info)
+{
+    // Only kernel32 calls (no CRT, no heap) so this is safe even on a
+    // corrupted heap. Returns CONTINUE_SEARCH so WER still collects its
+    // usual crash report on top of ours.
+    char appData[MAX_PATH] = { 0 };
+    GetEnvironmentVariableA ("APPDATA", appData, sizeof (appData));
+
+    char path[MAX_PATH] = { 0 };
+    wsprintfA (path, "%s\\Retrokielto\\crash-info.txt", appData);
+
+    char text[4096] = { 0 };
+    int len = wsprintfA (text,
+                         "BluePrinter crash diagnostics\n"
+                         "Operation: %s\n",
+                         BluePrinterAudioProcessor::getCrashOp());
+
+    const auto* addr = static_cast<const unsigned char*> (info->ExceptionRecord->ExceptionAddress);
+    HMODULE mod = nullptr;
+    char moduleName[MAX_PATH] = { 0 };
+    if (GetModuleHandleExA (GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+                            reinterpret_cast<LPCSTR> (addr), &mod) != 0 && mod != nullptr)
+    {
+        GetModuleFileNameA (mod, moduleName, sizeof (moduleName));
+        len += wsprintfA (text + len,
+                          "Faulting module: %s\nFault offset: 0x%I64x\n",
+                          moduleName,
+                          static_cast<unsigned long long> (addr - reinterpret_cast<const unsigned char*> (mod)));
+    }
+    else
+    {
+        len += wsprintfA (text + len,
+                          "Faulting address: 0x%I64x\n",
+                          reinterpret_cast<unsigned long long> (addr));
+    }
+
+    len += wsprintfA (text + len, "Backtrace (module, offset):\n");
+    void* frames[16] = { nullptr };
+    const int frameCount = static_cast<int> (CaptureStackBackTrace (0, 16, frames, nullptr));
+    for (int i = 0; i < frameCount; ++i)
+    {
+        const auto* faddr = static_cast<const unsigned char*> (frames[i]);
+        HMODULE fmod = nullptr;
+        if (GetModuleHandleExA (GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+                                reinterpret_cast<LPCSTR> (faddr), &fmod) != 0 && fmod != nullptr)
+        {
+            char fname[MAX_PATH] = { 0 };
+            GetModuleFileNameA (fmod, fname, sizeof (fname));
+            len += wsprintfA (text + len, "  [%02d] %s + 0x%I64x\n",
+                              i, fname,
+                              static_cast<unsigned long long> (faddr - reinterpret_cast<const unsigned char*> (fmod)));
+        }
+        else
+        {
+            len += wsprintfA (text + len, "  [%02d] 0x%I64x\n", i, reinterpret_cast<unsigned long long> (faddr));
+        }
+    }
+
+    HANDLE f = CreateFileA (path, GENERIC_WRITE, FILE_SHARE_READ, nullptr,
+                            CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (f != INVALID_HANDLE_VALUE)
+    {
+        DWORD written = 0;
+        WriteFile (f, text, static_cast<DWORD> (len), &written, nullptr);
+        CloseHandle (f);
+    }
+
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+#endif
+
+//==============================================================================
 BluePrinterAudioProcessor::BluePrinterAudioProcessor()
 #ifndef JucePlugin_PreferredChannelConfigurations
      : AudioProcessor (BusesProperties()
@@ -26,6 +123,10 @@ BluePrinterAudioProcessor::BluePrinterAudioProcessor()
                        )
 #endif
 {
+#ifdef JUCE_WINDOWS
+    SetUnhandledExceptionFilter (bluePrinterCrashHandler);
+#endif
+
     // Restore the library folder at startup. VST3 chain restoration is
     // intentionally deferred until the editor requests it; constructing a
     // third-party plugin in the processor constructor can crash the
@@ -691,9 +792,12 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             looperCaptureArmed.store (true, std::memory_order_release);
             audioLoopRecording.store (true, std::memory_order_release);
             audioLoopLength.store (0, std::memory_order_release);
-            // Capture is starting: fire MIDI Start so external gear syncs
-            // on the first bar, like the take recorder does.
-            if (midiClockEnabled.load (std::memory_order_acquire))
+            // Capture is starting: re-sync external gear when the clock
+            // is already running from another source (the global toggle).
+            // The looper's own toggle already started the clock when the
+            // count-in began.
+            if (clockRunning.load (std::memory_order_acquire)
+                && ! looperMidiClockEnabled.load (std::memory_order_acquire))
                 midiStartPending.store (true, std::memory_order_release);
         }
         metronomePosition.store (newPos, std::memory_order_release);
@@ -741,11 +845,13 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     //    beats land at evenly-spaced positions regardless of when the
     //    recording was started. The clock keeps advancing even when
     //    the metronome is muted, so toggling the metronome back on
-    //    doesn't shift the beat grid.
+    //    doesn't shift the beat grid. clickDuringTake off = the click
+    //    only plays during the count-in, never through the take.
     if (recordingRequested.load (std::memory_order_acquire))
     {
         const int64_t startPos = metronomePosition.load (std::memory_order_acquire);
-        if (metronomeEnabled.load (std::memory_order_acquire))
+        if (metronomeEnabled.load (std::memory_order_acquire)
+            && clickDuringTake.load (std::memory_order_acquire))
             renderMetronomeInBlock (buffer, startPos, numSamples);
 
         const int64_t newPos = startPos + numSamples;
@@ -770,14 +876,18 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     // 12. MIDI clock output. Clock pulses (0xF8) are generated at
     //    24 ppqn from the continuous metronomePosition so they align
     //    with the audible metronome and run through count-in into the
-    //    recording. When nothing is recording or looping, the clock
-    //    still advances the position itself so it runs free — the user
-    //    can drive a drum machine's presets without recording, and the
-    //    audible click plays along so the beats can be heard (subject
-    //    to the metronome toggle). Queued MIDI Start / Stop are flushed
-    //    here so the receiver gets them at a block boundary.
+    //    recording. The clock runs when the global toggle is on or a
+    //    per-section toggle's operation is active. When the global
+    //    toggle alone keeps it alive, the clock advances the position
+    //    itself so it runs free — the user can drive a drum machine's
+    //    presets without recording, and the audible click plays along
+    //    so the beats can be heard (subject to the metronome toggle).
+    //    Queued MIDI Start / Stop are flushed here so the receiver
+    //    gets them at a block boundary.
     {
-        const bool clockEnabled = midiClockEnabled.load (std::memory_order_acquire);
+        refreshClockRunning();
+
+        const bool clockEnabled = clockRunning.load (std::memory_order_acquire);
         const bool clockFreeRan = clockEnabled
             && metronomePosition.load (std::memory_order_acquire) == blockStartMetronomePos;
 
@@ -787,8 +897,12 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                                      std::memory_order_release);
 
             // Sound the click for the free-running clock so the beats
-            // are audible without recording or looping.
-            if (metronomeEnabled.load (std::memory_order_acquire))
+            // are audible without recording or looping. Only the global
+            // toggle free-runs: the per-section toggles run while their
+            // operation is active, and those operations decide their own
+            // click (take click toggle, looper click toggle).
+            if (midiClockEnabled.load (std::memory_order_acquire)
+                && metronomeEnabled.load (std::memory_order_acquire))
                 renderMetronomeInBlock (buffer, blockStartMetronomePos, numSamples);
         }
 
@@ -893,7 +1007,7 @@ void BluePrinterAudioProcessor::renderMidiClockInBlock (juce::MidiBuffer& midiMe
                                                         int64_t metronomePos,
                                                         int numSamples)
 {
-    if (! midiClockEnabled.load (std::memory_order_acquire))
+    if (! clockRunning.load (std::memory_order_acquire))
         return;
 
     const double bpmValue = bpm.load (std::memory_order_acquire);
@@ -1096,6 +1210,11 @@ void BluePrinterAudioProcessor::startRecording()
         beginActualRecording();
     }
 
+    // The take may drive the MIDI clock: start it now so external gear
+    // syncs from the first count-in beat (or from recording start when
+    // there is no count-in).
+    updateClockRunState();
+
     listeners.call ([](Listener& l) { l.transportChanged(); });
 }
 
@@ -1136,7 +1255,12 @@ void BluePrinterAudioProcessor::setLooperRecording (bool enabled)
         {
             looperCaptureArmed.store (true, std::memory_order_release);
             audioLoopRecording.store (true, std::memory_order_release);
-            if (midiClockEnabled.load (std::memory_order_acquire))
+            // Capture is starting without a count-in: re-sync external
+            // gear if the clock is already running from another source
+            // (the free-running global toggle). The looper's own toggle
+            // starts the clock via updateClockRunState below.
+            if (clockRunning.load (std::memory_order_acquire)
+                && ! looperMidiClockEnabled.load (std::memory_order_acquire))
                 midiStartPending.store (true, std::memory_order_release);
         }
     }
@@ -1145,10 +1269,15 @@ void BluePrinterAudioProcessor::setLooperRecording (bool enabled)
         looperPreRollActive.store (false, std::memory_order_release);
         looperCaptureArmed.store (false, std::memory_order_release);
         audioLoopRecording.store (false, std::memory_order_release);
-        if (midiClockEnabled.load (std::memory_order_acquire))
-            midiStopPending.store (true, std::memory_order_release);
         trimLooperToMusicalGrid();
     }
+
+    // The looper may drive the MIDI clock: start it when capture begins
+    // (with or without count-in — the pre-roll starts the clock so the
+    // drum machine is synced by the first capture beat) and stop it when
+    // capture ends.
+    updateClockRunState();
+
     listeners.call ([](Listener& l) { l.transportChanged(); });
 }
 
@@ -1229,10 +1358,7 @@ void BluePrinterAudioProcessor::setLooperPlaying (bool enabled)
     audioLoopPosition.store (0, std::memory_order_release);
     audioLoopPlaying.store (enabled && audioLoopLength.load (std::memory_order_acquire) > 0,
                             std::memory_order_release);
-    if (enabled && midiClockEnabled.load (std::memory_order_acquire))
-        midiStartPending.store (true, std::memory_order_release);
-    if (! enabled && midiClockEnabled.load (std::memory_order_acquire))
-        midiStopPending.store (true, std::memory_order_release);
+    updateClockRunState();
     listeners.call ([](Listener& l) { l.transportChanged(); });
 }
 
@@ -1298,6 +1424,7 @@ void BluePrinterAudioProcessor::clearLoop()
     looperCropStartBars = 0;
     looperCropEndBars = 0;
     looperPeaks.clear();
+    updateClockRunState();
     listeners.call ([](Listener& l) { l.transportChanged(); });
 }
 
@@ -1313,10 +1440,14 @@ void BluePrinterAudioProcessor::beginActualRecording()
     recordingRequested.store (true, std::memory_order_release);
     transportPosition.store (0, std::memory_order_release);
 
-    // Fire MIDI Start when actual recording begins — after the
-    // count-in so the drum machine starts on beat 1 of the first
-    // full bar, not during the preparatory clicks.
-    if (midiClockEnabled.load (std::memory_order_acquire))
+    // Re-sync external gear when the clock is already running from a
+    // source other than the take itself (e.g. the free-running global
+    // toggle): fire Start again so the drum machine restarts its pattern
+    // on the take's first beat. When the take itself drives the clock
+    // (takeMidiClockEnabled), the machine was already started at the
+    // count-in and stays in sync — no restart mid-count-in.
+    if (clockRunning.load (std::memory_order_acquire)
+        && ! takeMidiClockEnabled.load (std::memory_order_acquire))
     {
         midiStartPending.store (true, std::memory_order_release);
         sendDirectMidiStart (midiOutput, midiOutputLock);
@@ -1330,12 +1461,7 @@ void BluePrinterAudioProcessor::stopRecording()
     {
         preRollActive.store (false, std::memory_order_release);
         transportPosition.store (0, std::memory_order_release);
-
-        if (midiClockEnabled.load (std::memory_order_acquire))
-        {
-            midiStopPending.store (true, std::memory_order_release);
-            sendDirectMidiStop (midiOutput, midiOutputLock);
-        }
+        updateClockRunState();
 
         if (recordingState.load() != RecordingState::Idle)
         {
@@ -1361,11 +1487,9 @@ void BluePrinterAudioProcessor::stopRecording()
     transportPosition.store (0, std::memory_order_release);
     recordingFinalizePending.store (true, std::memory_order_release);
 
-    if (midiClockEnabled.load (std::memory_order_acquire))
-    {
-        midiStopPending.store (true, std::memory_order_release);
-        sendDirectMidiStop (midiOutput, midiOutputLock);
-    }
+    // The take no longer drives the clock: Stop unless another source
+    // (global toggle, looper) keeps it running.
+    updateClockRunState();
 
     // The message thread is finalising as fast as possible so the snippet
     // appears without waiting for the next transport-timer tick.
@@ -1692,22 +1816,100 @@ void BluePrinterAudioProcessor::setMidiClockEnabled (bool enabled)
     if (enabled == prev)
         return;
 
-    if (enabled)
+    // Recompute the clock state from all sources: the global toggle
+    // alone can free-run the clock, or the take / looper toggles can
+    // drive it while their operation is active.
+    updateClockRunState();
+
+    listeners.call ([](Listener& l) { l.transportChanged(); });
+}
+
+// The clock runs when the global toggle is on, or when a per-section
+// toggle is on and its operation is active (take: count-in or recording;
+// looper: count-in, capture or playback). Edges send Start / Stop
+// directly to the hardware and queue them for the host buffer.
+void BluePrinterAudioProcessor::updateClockRunState()
+{
+    const bool takeActive = preRollActive.load (std::memory_order_acquire)
+                         || recordingRequested.load (std::memory_order_acquire);
+    const bool looperActive = looperPreRollActive.load (std::memory_order_acquire)
+                           || looperCaptureArmed.load (std::memory_order_acquire)
+                           || audioLoopPlaying.load (std::memory_order_acquire);
+
+    const bool wantRun = midiClockEnabled.load (std::memory_order_acquire)
+                      || (takeMidiClockEnabled.load (std::memory_order_acquire) && takeActive)
+                      || (looperMidiClockEnabled.load (std::memory_order_acquire) && looperActive);
+
+    const bool wasRunning = clockRunning.exchange (wantRun, std::memory_order_acq_rel);
+
+    if (wantRun && ! wasRunning)
     {
+        // Rising edge: make sure the output device is open (message
+        // thread only) and fire Start so external gear syncs.
         openMidiOutputDevice();
         midiStartPending.store (true, std::memory_order_release);
-        // Standalone: the host MIDI buffer is never forwarded to the
-        // hardware device, so punch Start straight out — without this
-        // a drum machine sits silent until a recording starts.
+        sendDirectMidiStart (midiOutput, midiOutputLock);
+    }
+    else if (! wantRun && wasRunning)
+    {
+        midiStopPending.store (true, std::memory_order_release);
+        sendDirectMidiStop (midiOutput, midiOutputLock);
+        // Only close the device once no source can request the clock
+        // anymore — the global toggle is the only persistent source.
+        if (! midiClockEnabled.load (std::memory_order_acquire))
+            closeMidiOutputDevice();
+    }
+}
+
+void BluePrinterAudioProcessor::refreshClockRunning()
+{
+    const bool takeActive = preRollActive.load (std::memory_order_acquire)
+                         || recordingRequested.load (std::memory_order_acquire);
+    const bool looperActive = looperPreRollActive.load (std::memory_order_acquire)
+                           || looperCaptureArmed.load (std::memory_order_acquire)
+                           || audioLoopPlaying.load (std::memory_order_acquire);
+
+    const bool wantRun = midiClockEnabled.load (std::memory_order_acquire)
+                      || (takeMidiClockEnabled.load (std::memory_order_acquire) && takeActive)
+                      || (looperMidiClockEnabled.load (std::memory_order_acquire) && looperActive);
+
+    const bool wasRunning = clockRunning.exchange (wantRun, std::memory_order_acq_rel);
+    if (wantRun == wasRunning)
+        return;
+
+    // Edge detected on the audio thread (e.g. a one-shot loop finished or
+    // the max-length recording buffer filled). Device open/close stays on
+    // the message thread; just command the transport here so the drum
+    // machine stops in time.
+    if (wantRun)
+    {
+        midiStartPending.store (true, std::memory_order_release);
         sendDirectMidiStart (midiOutput, midiOutputLock);
     }
     else
     {
         midiStopPending.store (true, std::memory_order_release);
         sendDirectMidiStop (midiOutput, midiOutputLock);
-        closeMidiOutputDevice();
     }
+}
 
+void BluePrinterAudioProcessor::setTakeMidiClockEnabled (bool enabled)
+{
+    takeMidiClockEnabled.store (enabled, std::memory_order_release);
+    updateClockRunState(); // applies immediately if a take is in progress
+    listeners.call ([](Listener& l) { l.transportChanged(); });
+}
+
+void BluePrinterAudioProcessor::setLooperMidiClockEnabled (bool enabled)
+{
+    looperMidiClockEnabled.store (enabled, std::memory_order_release);
+    updateClockRunState(); // applies immediately if the looper is active
+    listeners.call ([](Listener& l) { l.transportChanged(); });
+}
+
+void BluePrinterAudioProcessor::setClickDuringTake (bool enabled)
+{
+    clickDuringTake.store (enabled, std::memory_order_release);
     listeners.call ([](Listener& l) { l.transportChanged(); });
 }
 
@@ -1727,7 +1929,7 @@ void BluePrinterAudioProcessor::setMidiOutputDeviceName (const juce::String& nam
     }
 
     closeMidiOutputDevice();
-    if (midiClockEnabled.load (std::memory_order_acquire))
+    if (clockRunning.load (std::memory_order_acquire))
         openMidiOutputDevice();
 }
 
@@ -1885,6 +2087,30 @@ void BluePrinterAudioProcessor::applyChainState (const juce::var& state, juce::S
     if (obj == nullptr)
         return;
 
+    // Self-healing restore. If the previous launch crashed mid-restore
+    // (see the chainRestoreCrashed marker below), every plugin loads
+    // with its defaults and the saved state blobs are skipped — a state
+    // blob that crashes a plugin can never brick the app. The marker is
+    // read before the restore starts and cleared only after the whole
+    // restore has completed, so a crash at any point leaves it set.
+    bool restoreStateBlobs = true;
+    if (auto* props = getUserState())
+    {
+        restoreStateBlobs = ! props->getBoolValue ("chainRestoreCrashed", false);
+        props->setValue ("chainRestoreCrashed", true);
+        props->saveIfNeeded();
+    }
+    // Shared by all chains (setChainState reads it via the library), so
+    // chains created later in this restore inherit the setting.
+    vst3Library.setSkipStateRestore (! restoreStateBlobs);
+
+    // Keep the deferred-restore driver (timerCallback) paused while a
+    // restore is in progress: clearChains() below would destroy a chain
+    // whose async load is still in flight. In the standalone both
+    // restores complete before the message loop starts pumping, so the
+    // driver only ever sees the settled state.
+    restoreActive = true;
+
     // Suppress persistence for the whole restore. clearChains() and the
     // per-chain setChainState() fire onChanged, which would otherwise
     // echo the mid-restore (partial/empty) state back into the
@@ -2000,6 +2226,16 @@ void BluePrinterAudioProcessor::applyChainState (const juce::var& state, juce::S
         nextChainId = juce::jmax (nextChainId, static_cast<int> (obj->getProperty ("nextChainId")));
     ensureUniqueChainIds();
 
+    // The whole restore completed without crashing — clear the crash
+    // marker so the next launch restores saved plugin states again.
+    if (auto* props = getUserState())
+    {
+        props->setValue ("chainRestoreCrashed", false);
+        props->saveIfNeeded();
+    }
+
+    restoreActive = false;
+
     persistingPluginChain = wasPersisting;
 }
 
@@ -2015,6 +2251,72 @@ void BluePrinterAudioProcessor::timerCallback()
     if (chainPersistPending && juce::Time::currentTimeMillis() >= chainPersistDeadline)
         flushPendingChainPersist();
 
+    // Deferred chain restore. Saved plugin slots are queued as pending
+    // slots by setChainState and loaded here, ONE per timer tick (i.e.
+    // one per message-loop turn). Loading them synchronously inside the
+    // restore kept the message thread inside plugin code for hundreds
+    // of ms; a window message the plugins queue during their own setup
+    // (their windows are created at instantiation) then got dispatched
+    // reentrantly and crashed some plugins — Neural DSP "X" amp sims
+    // died with a heap fault in the first instance's window proc. One
+    // slot per loop turn gives every plugin an idle gap for its pending
+    // messages to fire safely before the next plugin is created.
+    if (pendingPluginLoads.load (std::memory_order_acquire) == 0 && ! restoreActive)
+    {
+        PluginChain* target = nullptr;
+        for (auto& chain : chains)
+        {
+            if (chain->hasPendingSlots())
+            {
+                target = chain.get();
+                break;
+            }
+        }
+
+        if (target != nullptr)
+        {
+            auto slot = target->popPendingSlot();
+            if (slot.file.existsAsFile())
+            {
+                pendingPluginLoads.store (1, std::memory_order_release);
+                const auto chainId = target->getChainId();
+                target->addPluginAsync (slot.file, 10000,
+                    [this, chainId, slot = std::move (slot)] (int slotIndex,
+                                                              const juce::String&,
+                                                              const juce::String&,
+                                                              bool) mutable
+                    {
+                        pendingPluginLoads.store (0, std::memory_order_release);
+                        auto* chain = getChainById (chainId);
+                        if (chain == nullptr || slotIndex < 0)
+                            return;
+
+                        chain->setBypass (slotIndex, slot.bypassed);
+
+                        // Apply the saved state blob. Bypassed slots and
+                        // self-healing mode (a previous launch crashed
+                        // mid-restore) skip it.
+                        if (! slot.bypassed && slot.stateBase64.isNotEmpty()
+                            && ! vst3Library.getSkipStateRestore())
+                        {
+                            juce::MemoryBlock stateData;
+                            if (stateData.fromBase64Encoding (slot.stateBase64))
+                            {
+                                if (auto* plugin = chain->getPlugin (slotIndex))
+                                {
+                                    BluePrinterAudioProcessor::setCrashOp ("restoring plugin state (setStateInformation)", slot.file.getFileName().toRawUTF8());
+                                    plugin->setStateInformation (stateData.getData(),
+                                                                 static_cast<int> (stateData.getSize()));
+                                }
+                            }
+                        }
+
+                        listeners.call ([](Listener& l) { l.pluginChainChanged(); });
+                    });
+            }
+        }
+    }
+
     if (recordingFinalizePending.exchange (false, std::memory_order_acq_rel))
         finalizeRecordingOnMessageThread();
 
@@ -2028,6 +2330,10 @@ void BluePrinterAudioProcessor::timerCallback()
 
 void BluePrinterAudioProcessor::finalizeRecordingOnMessageThread()
 {
+    // The take ended (possibly by filling the max-length buffer on the
+    // audio thread): release the clock if no other source wants it.
+    updateClockRunState();
+
     if (recordBuffer == nullptr)
         return;
 
@@ -2105,6 +2411,9 @@ void BluePrinterAudioProcessor::getStateInformation (juce::MemoryBlock& destData
     state.setProperty ("countInBeats",     countInBeats.load(),     nullptr);
     state.setProperty ("dryLevel",         dryLevel.load(),         nullptr);
     state.setProperty ("midiClockEnabled", midiClockEnabled.load(), nullptr);
+    state.setProperty ("takeMidiClock",    takeMidiClockEnabled.load(), nullptr);
+    state.setProperty ("looperMidiClock",  looperMidiClockEnabled.load(), nullptr);
+    state.setProperty ("clickDuringTake",  clickDuringTake.load(), nullptr);
     state.setProperty ("midiDeviceName",   midiOutputDeviceName,    nullptr);
     // Click sound tuning.
     state.setProperty ("clickPitch",        clickPitch,        nullptr);
@@ -2138,6 +2447,9 @@ void BluePrinterAudioProcessor::setStateInformation (const void* data, int sizeI
             countInBeats.store     (static_cast<int>   (state.getProperty ("countInBeats",     4)));
             dryLevel.store         (static_cast<float> (state.getProperty ("dryLevel",         1.0f)));
             midiClockEnabled.store (static_cast<bool>  (state.getProperty ("midiClockEnabled", false)));
+            takeMidiClockEnabled.store (static_cast<bool> (state.getProperty ("takeMidiClock",   false)));
+            looperMidiClockEnabled.store (static_cast<bool> (state.getProperty ("looperMidiClock", false)));
+            clickDuringTake.store (static_cast<bool> (state.getProperty ("clickDuringTake", true)));
             midiOutputDeviceName  = state.getProperty ("midiDeviceName", juce::String()).toString();
 
             // Click sound tuning (defaults match resynthesizeClicks).
@@ -2164,7 +2476,7 @@ void BluePrinterAudioProcessor::setStateInformation (const void* data, int sizeI
                 {
                     // Stash for the UI to display when it opens.
                     lastChainRestoreError = error;
-            }
+                }
         }
 
         // If MIDI clock was enabled in a previous session, re-open the

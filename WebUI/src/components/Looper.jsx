@@ -26,6 +26,7 @@ export function Looper({ transport }) {
   const playing = Boolean(transport?.looperPlaying);
   const looping = transport?.looperLooping !== false;
   const clickEnabled = transport?.looperClickEnabled !== false;
+  const looperMidiClock = Boolean(transport?.looperMidiClock);
   const countInBeats = Number(transport?.looperCountInBeats ?? 0);
   const cropStartBars = Number(transport?.looperCropStartBars ?? 0);
   const cropEndBars = Number(transport?.looperCropEndBars ?? 0);
@@ -110,6 +111,15 @@ export function Looper({ transport }) {
             <input type="checkbox" checked={clickEnabled} onChange={(e) => emit(FRONTEND_EVENTS.setLooperClick, { enabled: e.target.checked })} />
             <IconMetronome size={14} />
             <span>Click {clickEnabled ? "on" : "off"}</span>
+          </label>
+
+          <label className={`looper-click-toggle ${looperMidiClock ? "is-on" : ""}`} title="Send MIDI clock with the looper — the drum machine starts when the count-in/capture/loop starts and stops when it ends">
+            <input
+              type="checkbox"
+              checked={looperMidiClock}
+              onChange={(e) => emit(FRONTEND_EVENTS.setLooperMidiClock, { enabled: e.target.checked })}
+            />
+            <span>MIDI clock {looperMidiClock ? "on" : "off"}</span>
           </label>
 
           <Stepper

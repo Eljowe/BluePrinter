@@ -36,16 +36,23 @@ BluePrinter uses JUCE for audio processing, VST3 hosting, and WebView2 UI integr
    into capture when the configured beats elapse
 9. Take-recorder pre-roll: same flow, flips into actual recording
 10. Click during take recording + advance the continuous beat clock
+    (click gated on metronomeEnabled AND clickDuringTake — the latter
+    defaults on; when off the click only plays during the count-in)
 11. Click during looper capture + advance the same beat clock
 12. MIDI clock output (24 ppqn from metronomePosition) + flush pending
-    MIDI Start / Stop. When the clock is enabled and no transport step
-    advanced the position, the clock free-runs (advances `metronomePosition`
-    itself) and renders the audible click, so a drum machine + click can run
-    without recording. Toggling the clock also sends Start/Stop directly to
-    the hardware output device (`sendDirectMidiStart`/`sendDirectMidiStop` +
-    `midiOutputLock`) — the standalone never forwards the host MIDI buffer
-    to hardware, so without the direct send the drum machine stays silent
-    until a recording starts.
+    MIDI Start / Stop. The clock runs while ANY source wants it
+    (`clockRunning`, maintained by `refreshClockRunning()` here and
+    `updateClockRunState()` on the message thread): the global toggle
+    (free-runs — advances `metronomePosition` itself and renders the
+    audible click), or the per-section `takeMidiClock` / `looperMidiClock`
+    toggles (run while the take/looper operation is active, no free-run).
+    Edges send Start/Stop directly to the hardware output device
+    (`sendDirectMidiStart`/`sendDirectMidiStop` + `midiOutputLock`) — the
+    standalone never forwards the host MIDI buffer to hardware, so without
+    the direct send the drum machine stays silent until a recording
+    starts. A take/looper running from another source re-syncs at
+    actual-recording/capture time via `midiStartPending` (skipped for the
+    clock's own source, so a take-driven clock never restarts mid-count-in).
 ```
 
 The take recorder and the audio looper share `recordBuffer`; `startRecording`
