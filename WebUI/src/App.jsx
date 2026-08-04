@@ -284,6 +284,16 @@ export default function App() {
     emit(FRONTEND_EVENTS.setMidiDevice, { device });
   };
 
+  const handleTakeMidiClockChange = (enabled) => {
+    setTransport((prev) => ({ ...prev, takeMidiClock: enabled }));
+    emit(FRONTEND_EVENTS.setTakeMidiClock, { enabled });
+  };
+
+  const handleClickDuringTakeChange = (enabled) => {
+    setTransport((prev) => ({ ...prev, clickDuringTake: enabled }));
+    emit(FRONTEND_EVENTS.setClickDuringTake, { enabled });
+  };
+
   const playingSnippet = transport.playingSnippetId >= 0 ? snippets.find((s) => s.id === transport.playingSnippetId) : null;
   const playPositionSeconds = playingSnippet && playingSnippet.sampleRate > 0
     ? transport.playingPosition / playingSnippet.sampleRate
@@ -312,10 +322,14 @@ export default function App() {
         countInBeats={transport.countInBeats}
         dryLevel={transport.dryLevel}
         midiClockEnabled={transport.midiClockEnabled}
+        takeMidiClock={transport.takeMidiClock}
+        clickDuringTake={transport.clickDuringTake !== false}
         onMetronomeChange={handleMetronomeChange}
         onBpmChange={handleBpmChange}
         onCountInBeatsChange={handleCountInBeatsChange}
         onDryLevelChange={handleDryLevelChange}
+        onTakeMidiClockChange={handleTakeMidiClockChange}
+        onClickDuringTakeChange={handleClickDuringTakeChange}
       />
 
       <MidiClock

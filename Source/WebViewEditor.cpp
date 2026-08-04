@@ -338,6 +338,21 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
             if (auto* obj = data.getDynamicObject())
                 processor.setMidiOutputDeviceName (obj->getProperty ("device").toString());
          })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetTakeMidiClockEvent, [&processor](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+                processor.setTakeMidiClockEnabled (static_cast<bool> (obj->getProperty ("enabled")));
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetLooperMidiClockEvent, [&processor](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+                processor.setLooperMidiClockEnabled (static_cast<bool> (obj->getProperty ("enabled")));
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetClickDuringTakeEvent, [&processor](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+                processor.setClickDuringTake (static_cast<bool> (obj->getProperty ("enabled")));
+        })
         .withEventListener(BluePrinterWebViewEditor::frontendSetLooperRecordingEvent, [&processor](juce::var data)
         { if (auto* obj = data.getDynamicObject()) processor.setLooperRecording (static_cast<bool> (obj->getProperty ("enabled"))); })
         .withEventListener(BluePrinterWebViewEditor::frontendSetLooperPlayingEvent, [&processor](juce::var data)
@@ -768,6 +783,9 @@ juce::var BluePrinterWebViewEditor::makeTransportSnapshot() const
     obj->setProperty ("clickAccentVolume", audioProcessor.getClickAccentVolume());
     obj->setProperty ("clickNoise",        audioProcessor.getClickNoise());
     obj->setProperty ("midiClockEnabled", audioProcessor.isMidiClockEnabled());
+    obj->setProperty ("takeMidiClock",    audioProcessor.getTakeMidiClockEnabled());
+    obj->setProperty ("looperMidiClock",  audioProcessor.getLooperMidiClockEnabled());
+    obj->setProperty ("clickDuringTake",  audioProcessor.getClickDuringTake());
     obj->setProperty ("midiOutputDevice", audioProcessor.getMidiOutputDeviceName());
     {
         auto names = audioProcessor.getAvailableMidiOutputDevices();
@@ -1475,6 +1493,17 @@ void BluePrinterWebViewEditor::addVst3FromPath (const juce::String& chain, const
     if (target == nullptr)
     {
         sendNotification ("Chain no longer exists.", "error");
+        return;
+    }
+
+    // Same-chain duplicates are rejected up front: two instances of the
+    // same .vst3 in one chain crash some plugins (Neural DSP "X" amp
+    // sims — heap fault in the first instance's window proc when the
+    // second one is prepared). Duplicates across different chains are
+    // fine and stay allowed.
+    if (target->hasPluginFile (vst3File))
+    {
+        sendNotification (vst3File.getFileName() + " is already in this chain.", "error");
         return;
     }
 

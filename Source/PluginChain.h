@@ -122,6 +122,14 @@ public:
     // in the library's blocklist.
     int addPlugin (const juce::File& vst3File, juce::String& outError);
 
+    // True when a slot in THIS chain already references the same .vst3
+    // file. Used to reject same-chain duplicates: Neural DSP "X" plugins
+    // crash (window-message heap fault) when two instances of the same
+    // file are instantiated into one chain. Duplicates across different
+    // chains are fine — each chain's slots are a separate processing
+    // path — so the check is intentionally per-chain, not global.
+    bool hasPluginFile (const juce::File& file) const;
+
     // Async variant of addPlugin. Runs findAllTypesForFile +
     // createPluginInstance on a worker thread so a misbehaving plugin
     // (one that pops up a modal license dialog, hangs in initialize(),
@@ -197,10 +205,32 @@ public:
     juce::var getChainState() const;
 
     // Restore this chain's slots from a previously-saved state. Skips
-    // slots whose .vst3 file can't be loaded; partial restore is
-    // allowed. Failed paths are reported via outError and also stashed
-    // internally so the UI can display them via getLastRestoreError().
+    // slots whose .vst3 file can't be loaded or that duplicate an
+    // earlier slot in this chain; the remaining slots are DEFERRED —
+    // they are queued as pending slots, not instantiated here (see
+    // PendingSlot below). Failed paths are reported via outError and
+    // also stashed internally so the UI can display them via
+    // getLastRestoreError().
     void setChainState (const juce::var& state, juce::String& outError);
+
+    // A plugin slot restored from saved state but not yet instantiated.
+    // The processor's restore driver (timerCallback) loads pending
+    // slots one per message-loop turn. Instantiating several plugins
+    // synchronously in a row keeps the message thread inside plugin
+    // code for hundreds of ms; window messages the plugins queue during
+    // their own setup then get dispatched reentrantly and crash some
+    // plugins (Neural DSP "X" amp sims — heap fault in the window proc
+    // of the first instance). Loading one slot per loop turn gives
+    // every plugin's pending messages an idle moment to fire safely.
+    struct PendingSlot
+    {
+        juce::File file;
+        juce::String name;
+        bool bypassed = false;
+        juce::String stateBase64;
+    };
+    bool hasPendingSlots() const;
+    PendingSlot popPendingSlot();
 
     // Error from the last setChainState call, if any plugins were
     // skipped. Cleared on each call. Returns an empty string when
@@ -217,6 +247,7 @@ public:
 private:
     Vst3Library& library;
     std::vector<std::unique_ptr<ChainSlot>> slots;
+    std::vector<PendingSlot> pendingSlots;
     juce::AudioPluginFormatManager formatManager;
     double currentSampleRate = 44100.0;
     int    currentBlockSize  = 512;

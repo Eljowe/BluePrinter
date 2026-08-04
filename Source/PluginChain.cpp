@@ -1,4 +1,5 @@
 #include "PluginChain.h"
+#include "PluginProcessor.h"
 
 #include <future>
 #include <thread>
@@ -73,6 +74,7 @@ juce::AudioPluginInstance* PluginChain::createInstance (const juce::File& file,
                                                         juce::String& outError)
 {
     juce::OwnedArray<juce::PluginDescription> types;
+    BluePrinterAudioProcessor::setCrashOp ("scanning VST3 descriptions (findAllTypesForFile)", file.getFileName().toRawUTF8());
     for (int i = 0; i < formatManager.getNumFormats(); ++i)
     {
         if (auto* format = formatManager.getFormat (i))
@@ -86,6 +88,7 @@ juce::AudioPluginInstance* PluginChain::createInstance (const juce::File& file,
     }
 
     auto* desc = types.getFirst();
+    BluePrinterAudioProcessor::setCrashOp ("instantiating plugin (createPluginInstance)", file.getFileName().toRawUTF8());
     auto instance = formatManager.createPluginInstance (*desc,
                                                         currentSampleRate,
                                                         currentBlockSize,
@@ -109,11 +112,18 @@ int PluginChain::addPlugin (const juce::File& vst3File, juce::String& outError)
         return -1;
     }
 
+    if (hasPluginFile (vst3File))
+    {
+        outError = "Plugin is already in this chain: " + vst3File.getFileName();
+        return -1;
+    }
+
     juce::String pluginName;
     auto* instance = createInstance (vst3File, pluginName, outError);
     if (instance == nullptr)
         return -1;
 
+    BluePrinterAudioProcessor::setCrashOp ("preparing plugin (prepareToPlay)", vst3File.getFileName().toRawUTF8());
     instance->prepareToPlay (currentSampleRate, currentBlockSize);
 
     auto slot = std::make_unique<ChainSlot>();
@@ -131,6 +141,16 @@ int PluginChain::addPlugin (const juce::File& vst3File, juce::String& outError)
     return getNumPlugins() - 1;
 }
 
+bool PluginChain::hasPluginFile (const juce::File& file) const
+{
+    const juce::ScopedLock sl (lock);
+    const auto canonical = file.getFullPathName();
+    for (const auto& slot : slots)
+        if (slot->path == canonical)
+            return true;
+    return false;
+}
+
 int PluginChain::finalizeAsyncLoad (std::unique_ptr<juce::AudioPluginInstance> instance,
                                     const juce::String& name,
                                     const juce::File& file)
@@ -139,6 +159,10 @@ int PluginChain::finalizeAsyncLoad (std::unique_ptr<juce::AudioPluginInstance> i
     // safe to call here; the chain's prepareToPlay will be called by
     // the host later with the actual sample rate, but we want the
     // plugin ready in case the host queries state before then.
+    if (hasPluginFile (file))
+        return -1;
+
+    BluePrinterAudioProcessor::setCrashOp ("preparing plugin (finalizeAsyncLoad)", file.getFileName().toRawUTF8());
     instance->prepareToPlay (currentSampleRate, currentBlockSize);
 
     auto slot = std::make_unique<ChainSlot>();
@@ -171,6 +195,12 @@ bool PluginChain::addPluginAsync (const juce::File& vst3File,
     if (library.isBlocked (vst3File))
     {
         if (callback) callback (-1, {}, "Plugin is blocked: " + vst3File.getFileName(), false);
+        return false;
+    }
+
+    if (hasPluginFile (vst3File))
+    {
+        if (callback) callback (-1, {}, "Plugin is already in this chain: " + vst3File.getFileName(), false);
         return false;
     }
 
@@ -354,6 +384,7 @@ void PluginChain::clear()
             removedIndices.push_back (static_cast<int> (i));
         }
         slots.clear();
+        pendingSlots.clear();
     }
     if (onSlotRemoved)
     {
@@ -541,32 +572,35 @@ void PluginChain::setChainState (const juce::var& state, juce::String& outError)
             continue;
         }
 
-        juce::String addError;
-        const int index = addPlugin (file, addError);
-        if (index < 0)
+        // Same-chain duplicate (see hasPluginFile). Two instances of the
+        // same .vst3 in one chain crash some plugins (Neural DSP "X"
+        // amp sims), so the second one is skipped here too — restoring
+        // an older saved state with a duplicate slot must never take the
+        // whole app down at startup.
+        if (hasPluginFile (file))
         {
             failedPaths.add (path);
-            failedReasons.add (addError);
+            failedReasons.add ("duplicate of an earlier plugin in this chain");
             continue;
         }
 
-        setBypass (index, static_cast<bool> (slotObj->getProperty ("bypassed")));
-
-        const juce::String stateBase64 = slotObj->getProperty ("state").toString();
-        if (stateBase64.isNotEmpty())
-        {
-            juce::MemoryBlock stateData;
-            if (stateData.fromBase64Encoding (stateBase64))
-            {
-                const juce::ScopedLock sl (lock);
-                if (index >= 0 && index < static_cast<int> (slots.size())
-                    && slots[static_cast<size_t> (index)]->plugin != nullptr)
-                {
-                    slots[static_cast<size_t> (index)]->plugin->setStateInformation (
-                        stateData.getData(), static_cast<int> (stateData.getSize()));
-                }
-            }
-        }
+        // DEFERRED LOAD. The slot is queued, not instantiated: the
+        // processor's restore driver (timerCallback) loads pending
+        // slots one per message-loop turn. Synchronously instantiating
+        // several plugins in a row keeps the message thread inside
+        // plugin code for hundreds of ms; a window message the plugins
+        // queue during their own setup then gets dispatched reentrantly
+        // and crashes some plugins (Neural DSP "X" amp sims — heap fault
+        // in the first instance's window proc). One slot per loop turn
+        // gives every plugin's pending messages an idle moment to fire.
+        // The bypass flag and the saved state blob travel with the slot
+        // and are applied by the driver after the instance is ready.
+        PendingSlot pending;
+        pending.file = file;
+        pending.name = slotObj->getProperty ("name").toString();
+        pending.bypassed = static_cast<bool> (slotObj->getProperty ("bypassed"));
+        pending.stateBase64 = slotObj->getProperty ("state").toString();
+        pendingSlots.push_back (std::move (pending));
     }
 
     if (! failedPaths.isEmpty())
@@ -584,6 +618,24 @@ void PluginChain::setChainState (const juce::var& state, juce::String& outError)
         const juce::ScopedLock sl (restoreErrorLock);
         lastRestoreError = outError;
     }
+}
+
+bool PluginChain::hasPendingSlots() const
+{
+    const juce::ScopedLock sl (lock);
+    return ! pendingSlots.empty();
+}
+
+PluginChain::PendingSlot PluginChain::popPendingSlot()
+{
+    const juce::ScopedLock sl (lock);
+    PendingSlot slot;
+    if (! pendingSlots.empty())
+    {
+        slot = std::move (pendingSlots.front());
+        pendingSlots.erase (pendingSlots.begin());
+    }
+    return slot;
 }
 
 juce::String PluginChain::getLastRestoreError() const

@@ -40,6 +40,14 @@ export const FRONTEND_EVENTS = {
   setClickParams: "frontendSetClickParams",
   setMidiClock: "frontendSetMidiClock",
   setMidiDevice: "frontendSetMidiDevice",
+  // Per-section MIDI clock toggles: { enabled }. The take recorder and
+  // the looper each start/stop the clock with their own operation,
+  // independent of the free-running global setMidiClock toggle.
+  setTakeMidiClock: "frontendSetTakeMidiClock",
+  setLooperMidiClock: "frontendSetLooperMidiClock",
+  // { enabled } — false = click only during the count-in, silent
+  // through the take itself.
+  setClickDuringTake: "frontendSetClickDuringTake",
   setLooperRecording: "frontendSetLooperRecording",
   setLooperPlaying: "frontendSetLooperPlaying",
   setLooperLooping: "frontendSetLooperLooping",

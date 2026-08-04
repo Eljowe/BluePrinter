@@ -218,7 +218,29 @@ public:
     void    setMidiOutputDeviceName (const juce::String& name);
     juce::StringArray getAvailableMidiOutputDevices() const;
 
+    // Per-section MIDI clock toggles: the take recorder and the looper can
+    // each drive the clock (Start when the operation starts — count-in or
+    // capture — Stop when it ends) independently of the free-running global
+    // clock toggle. The clock runs while any source wants it.
+    bool    getTakeMidiClockEnabled()   const { return takeMidiClockEnabled.load (std::memory_order_acquire); }
+    bool    getLooperMidiClockEnabled() const { return looperMidiClockEnabled.load (std::memory_order_acquire); }
+    void    setTakeMidiClockEnabled (bool enabled);
+    void    setLooperMidiClockEnabled (bool enabled);
+    // When false the click only plays during the count-in, never through
+    // the take itself. The count-in click itself still plays (pre-roll is
+    // independent of this toggle).
+    bool    getClickDuringTake() const { return clickDuringTake.load (std::memory_order_acquire); }
+    void    setClickDuringTake (bool enabled);
+
     juce::String getLastSaveError() const;
+
+    // Crash diagnostics (Windows only): the chain-restore step currently
+    // running, recorded so the unhandled-exception filter can attribute a
+    // crash (e.g. one inside a hosted VST3 DLL) to the exact step. The op
+    // is copied into a fixed internal buffer immediately, so any char*
+    // passed in may be a temporary.
+    static void setCrashOp (const char* op, const char* detail = "");
+    static const char* getCrashOp();
 
     // Set by setStateInformation when the saved VST3 chain couldn't be
     // fully restored (e.g. a plugin's license expired). Read by the UI
@@ -270,6 +292,14 @@ private:
                             std::atomic<float>& peakAtomic,
                             float gain);
     void renderMetronomeInBlock (juce::AudioBuffer<float>& buffer, int64_t startPos, int numSamples);
+    // Recomputes whether any source wants the MIDI clock running and
+    // sends Start/Stop on the edges. Message thread only (may open/close
+    // the output device). refreshClockRunning is the audio-thread-safe
+    // version: it only updates the running flag and commands the
+    // transport when an operation it owns ends on the audio thread
+    // (one-shot loop finished, max-length recording filled).
+    void updateClockRunState();
+    void refreshClockRunning();
 
     juce::ListenerList<Listener> listeners;
 
@@ -327,6 +357,7 @@ private:
     // Metronome / count-in. Settings are user-tweakable and persisted; the
     // preRoll* / transportPosition fields are audio-thread runtime state.
     std::atomic<bool>    metronomeEnabled { true };
+    std::atomic<bool>    clickDuringTake  { true };
     std::atomic<float>   bpm              { 120.0f };
     std::atomic<int>     countInBeats     { 4 };
     std::atomic<float>   dryLevel         { 1.0f };
@@ -385,10 +416,17 @@ private:
     // MIDI clock output. Clock pulses (0xF8, 24 ppqn) are generated in
     // processBlock alongside the audible metronome. MIDI Start / Stop
     // are queued from the message thread and flushed at the start of
-    // the next audio block.
-    std::atomic<bool>    midiClockEnabled      { false };
-    std::atomic<bool>    midiStartPending      { false };
-    std::atomic<bool>    midiStopPending       { false };
+    // the next audio block. The clock runs whenever any source wants it:
+    // the free-running global toggle (midiClockEnabled), the take
+    // recorder (takeMidiClockEnabled while a take or its count-in is
+    // active), or the looper (looperMidiClockEnabled while pre-rolling,
+    // capturing or playing).
+    std::atomic<bool>    midiClockEnabled       { false };
+    std::atomic<bool>    takeMidiClockEnabled   { false };
+    std::atomic<bool>    looperMidiClockEnabled { false };
+    std::atomic<bool>    clockRunning           { false };
+    std::atomic<bool>    midiStartPending       { false };
+    std::atomic<bool>    midiStopPending        { false };
     juce::CriticalSection midiOutputLock;
     juce::String         midiOutputDeviceName;
     std::unique_ptr<juce::MidiOutput> midiOutput;
@@ -447,6 +485,13 @@ private:
     bool pluginChainsRestored = false;
     bool chainPersistPending = false;
     int64_t chainPersistDeadline = 0;
+    // One async plugin load in flight from the deferred restore driver
+    // (timerCallback); message-thread only.
+    std::atomic<int> pendingPluginLoads { 0 };
+    // Set while applyChainState is running; the driver must not start a
+    // load during a restore (clearChains would destroy the chain that a
+    // worker thread is about to finalize into).
+    bool restoreActive = false;
 
     // Build the combined plugin-chain bundle (all chains + library
     // metadata) for persistence. See PluginProcessor.cpp for the
