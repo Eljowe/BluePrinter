@@ -1,9 +1,54 @@
 #include "Vst3Library.h"
 
 #include <future>
+#include <functional>
 #include <thread>
 
 Vst3Library::Vst3Library() = default;
+
+juce::Array<juce::File> Vst3Library::findVst3Files (const juce::File& folder, int maxDepth)
+{
+    juce::Array<juce::File> result;
+    if (! folder.isDirectory())
+        return result;
+
+    // Recursive walk. A directory named *.vst3 is a VST3 bundle: it is
+    // added as a candidate (VST3PluginFormat can load a bundle by its
+    // directory path) and NOT descended into — its actual binary lives
+    // under Contents/x86_64-win/, and reporting both would duplicate
+    // the plugin. Loose *.vst3 binary files are collected at any depth
+    // (plugins are often tucked into company-named subfolders).
+    std::function<void (const juce::File&, int)> walk =
+        [&walk, &result, maxDepth] (const juce::File& dir, int depth)
+        {
+            if (depth > maxDepth)
+                return;
+
+            juce::DirectoryIterator it (dir, false, "*",
+                                        juce::File::findFilesAndDirectories
+                                            | juce::File::ignoreHiddenFiles);
+            while (it.next())
+            {
+                const auto f = it.getFile();
+                if (f.isDirectory())
+                {
+                    if (f.getFileName().endsWithIgnoreCase (".vst3"))
+                    {
+                        result.addIfNotAlreadyThere (f);
+                        continue;
+                    }
+                    walk (f, depth + 1);
+                }
+                else if (f.getFileName().endsWithIgnoreCase (".vst3"))
+                {
+                    result.addIfNotAlreadyThere (f);
+                }
+            }
+        };
+
+    walk (folder, 0);
+    return result;
+}
 
 juce::var Vst3Library::scanFolder (const juce::File& folder, juce::String& outError)
 {
@@ -19,7 +64,7 @@ juce::var Vst3Library::scanFolder (const juce::File& folder, juce::String& outEr
         return juce::var (result);
     }
 
-    auto files = folder.findChildFiles (juce::File::findFiles, false, "*.vst3");
+    auto files = findVst3Files (folder);
 
     for (const auto& file : files)
     {

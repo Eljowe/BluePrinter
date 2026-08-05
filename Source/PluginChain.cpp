@@ -1,4 +1,7 @@
 #include "PluginChain.h"
+
+#include <future>
+#include <thread>
 #include "PluginProcessor.h"
 
 #include <future>
@@ -100,7 +103,9 @@ juce::AudioPluginInstance* PluginChain::createInstance (const juce::File& file,
 
 int PluginChain::addPlugin (const juce::File& vst3File, juce::String& outError)
 {
-    if (! vst3File.existsAsFile())
+    // exists() (not existsAsFile()): the path may be a .vst3 bundle
+    // directory rather than a loose binary file.
+    if (! vst3File.exists())
     {
         outError = "File not found: " + vst3File.getFullPathName();
         return -1;
@@ -186,7 +191,9 @@ bool PluginChain::addPluginAsync (const juce::File& vst3File,
                                   int timeoutMs,
                                   LoadCallback callback)
 {
-    if (! vst3File.existsAsFile())
+    // exists() (not existsAsFile()): the path may be a .vst3 bundle
+    // directory rather than a loose binary file.
+    if (! vst3File.exists())
     {
         if (callback) callback (-1, {}, "File not found: " + vst3File.getFullPathName(), false);
         return false;
@@ -478,6 +485,7 @@ juce::var PluginChain::getChainState() const
         slotArray.add (juce::var (slotObj));
     }
     obj->setProperty ("slots", slotArray);
+    obj->setProperty ("pending", static_cast<int> (pendingSlots.size()));
     obj->setProperty ("wantsMidi", wantsMidi.load (std::memory_order_acquire));
     return juce::var (obj);
 }

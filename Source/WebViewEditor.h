@@ -23,6 +23,9 @@ public:
     static constexpr const char* frontendSetParameterEvent     = "frontendSetParameter";
     static constexpr const char* frontendStartRecordingEvent   = "frontendStartRecording";
     static constexpr const char* frontendStopRecordingEvent    = "frontendStopRecording";
+    static constexpr const char* frontendSetTakePlaybackEvent  = "frontendSetTakePlayback";
+    static constexpr const char* frontendSaveTakeEvent         = "frontendSaveTake";
+    static constexpr const char* frontendDiscardTakeEvent      = "frontendDiscardTake";
     static constexpr const char* frontendStartPlaybackEvent    = "frontendStartPlayback";
     static constexpr const char* frontendStopPlaybackEvent     = "frontendStopPlayback";
     static constexpr const char* frontendUpdateSnippetEvent    = "frontendUpdateSnippetMeta";
@@ -60,6 +63,7 @@ public:
     static constexpr const char* frontendSetLooperLoopingEvent   = "frontendSetLooperLooping";
     static constexpr const char* frontendSetLooperClickEvent     = "frontendSetLooperClick";
     static constexpr const char* frontendSetLooperCountInEvent   = "frontendSetLooperCountIn";
+    static constexpr const char* frontendSetLooperClickDuringCaptureEvent = "frontendSetLooperClickDuringCapture";
     static constexpr const char* frontendSetLoopCropEvent        = "frontendSetLoopCrop";
     static constexpr const char* frontendClearLoopEvent          = "frontendClearLoop";
     static constexpr const char* frontendAddVst3Event          = "frontendAddVst3";

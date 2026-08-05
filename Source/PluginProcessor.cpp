@@ -147,16 +147,10 @@ BluePrinterAudioProcessor::BluePrinterAudioProcessor()
     // chain that doesn't. A saved state replaces these via
     // applyChainState. Restoring the just-loaded state back over the
     // file is prevented by the persistingPluginChain guard in
-    // persistPluginChain.
+    // persistPluginChain. (createChain wires the persistence callback
+    // on every chain, defaults included.)
     createChain ("MIDI Chain", ChainInputBoth, true, true);
     createChain ("Audio FX Chain", ChainInputBoth, false, true);
-
-    // Wire the chain persistence AFTER the default chains are seeded so
-    // the startup write only happens if the user actually mutates a
-    // chain. Every chain shares one persistence callback because the
-    // save format is a single bundle containing all of them.
-    for (auto& chain : chains)
-        chain->onChanged = [this] { persistPluginChain(); };
 }
 
 void BluePrinterAudioProcessor::setChainWantsMidi (const juce::String& chainId, bool enabled)
@@ -312,6 +306,11 @@ PluginChain* BluePrinterAudioProcessor::createChain (const juce::String& name,
         const juce::ScopedLock sl (chainLock);
         chains.push_back (std::move (chain));
     }
+    // Every chain (default, UI-created, or restore-created) must run
+    // the persistence callback on change. Wiring it here — rather than
+    // only on the constructor's default chains — is what makes slot
+    // mutations (add/remove/bypass) on restored chains persist.
+    raw->onChanged = [this] { persistPluginChain(); };
     return raw;
 }
 
@@ -764,6 +763,13 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     if (playbackActive.load (std::memory_order_acquire))
         renderPlayback (buffer, numSamples);
 
+    // 7b. Take-review playback. Rendered the same way (overwrites the
+    //    output) so the user hears exactly the take that was captured.
+    //    Mutually exclusive with snippet/looper playback — the entry
+    //    points stop each other.
+    if (takePlaybackActive.load (std::memory_order_acquire))
+        renderTakePlayback (buffer, numSamples);
+
     // 8. Looper count-in: play the click, advance the beat clock, and flip
     //    into capture once the configured beats have elapsed. Mirrors the
     //    take-recorder pre-roll below but drives the looper's own capture
@@ -862,10 +868,13 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     // 11. Click during looper capture. Same beat clock, so the looper's
     //    count-in flows straight into capture with evenly spaced beats.
     //    Mixed after the capture tap so the click never lands in the loop.
+    //    looperClickDuringCapture off = the click only plays during the
+    //    count-in, never through the capture itself.
     if (looperCaptureArmed.load (std::memory_order_acquire))
     {
         const int64_t startPos = metronomePosition.load (std::memory_order_acquire);
-        if (looperMetronomeEnabled.load (std::memory_order_acquire))
+        if (looperMetronomeEnabled.load (std::memory_order_acquire)
+            && looperClickDuringCapture.load (std::memory_order_acquire))
             renderMetronomeInBlock (buffer, startPos, numSamples);
 
         const int64_t newPos = startPos + numSamples;
@@ -1128,6 +1137,54 @@ void BluePrinterAudioProcessor::renderPlayback (juce::AudioBuffer<float>& destin
     }
 }
 
+void BluePrinterAudioProcessor::renderTakePlayback (juce::AudioBuffer<float>& destination, int numSamples)
+{
+    // Review playback of the pending take: a one-shot read of
+    // recordBuffer [0, takeLength), rendered like snippet playback
+    // (overwrites the output, applies the playback volume).
+    const auto length = takeLength.load (std::memory_order_acquire);
+    if (recordBuffer == nullptr || length <= 0)
+    {
+        takePlaybackActive.store (false, std::memory_order_release);
+        takePlaybackPos.store (0, std::memory_order_release);
+        return;
+    }
+
+    auto readPos = static_cast<int> (takePlaybackPos.load (std::memory_order_acquire));
+    if (readPos >= length)
+    {
+        takePlaybackActive.store (false, std::memory_order_release);
+        takePlaybackPos.store (0, std::memory_order_release);
+        return;
+    }
+
+    const int channels = juce::jmin (destination.getNumChannels(), recordBuffer->getNumChannels());
+    const int toCopy   = juce::jmin (numSamples, static_cast<int> (length - readPos));
+
+    for (int ch = 0; ch < channels; ++ch)
+        destination.copyFrom (ch, 0, *recordBuffer, ch, readPos, toCopy);
+
+    const auto playbackVol = apvts.getRawParameterValue ("PlaybackVolume")->load();
+    for (int ch = 0; ch < channels; ++ch)
+        destination.applyGain (ch, 0, toCopy, playbackVol);
+
+    // Fill the rest of the buffer with silence if playback ends mid-block.
+    if (toCopy < numSamples)
+    {
+        for (int ch = 0; ch < destination.getNumChannels(); ++ch)
+            destination.clear (ch, toCopy, numSamples - toCopy);
+    }
+
+    readPos += toCopy;
+    takePlaybackPos.store (readPos, std::memory_order_release);
+
+    if (readPos >= length)
+    {
+        takePlaybackActive.store (false, std::memory_order_release);
+        takePlaybackPos.store (0, std::memory_order_release);
+    }
+}
+
 void BluePrinterAudioProcessor::computeLevelsInto (const juce::AudioBuffer<float>& source,
                                                    int numSamples,
                                                    std::atomic<float>& levelAtomic,
@@ -1231,6 +1288,10 @@ void BluePrinterAudioProcessor::setLooperRecording (bool enabled)
         if (recordBuffer == nullptr || maxRecordSamples <= 0)
             return;
 
+        // Loop capture overwrites recordBuffer from sample 0, so any
+        // pending (unsaved) take is invalidated.
+        clearPendingTake();
+
         looperPreRollActive.store (false, std::memory_order_release);
         looperCaptureArmed.store (false, std::memory_order_release);
         audioLoopRecording.store (false, std::memory_order_release);
@@ -1238,8 +1299,8 @@ void BluePrinterAudioProcessor::setLooperRecording (bool enabled)
         audioLoopStart.store (0, std::memory_order_release);
         audioLoopLength.store (0, std::memory_order_release);
         audioLoopPosition.store (0, std::memory_order_release);
-        looperCropStartBars = 0;
-        looperCropEndBars = 0;
+        looperCropStartBeats = 0;
+        looperCropEndBeats = 0;
         looperPeaks.clear();
 
         if (looperMetronomeEnabled.load (std::memory_order_acquire)
@@ -1315,12 +1376,12 @@ void BluePrinterAudioProcessor::trimLooperToMusicalGrid()
     target = juce::jlimit<int64_t> (1, captured, target);
     audioLoopStart.store (0, std::memory_order_release);
     audioLoopLength.store (target, std::memory_order_release);
-    looperCropStartBars = 0;
-    looperCropEndBars = 0;
+    looperCropStartBeats = 0;
+    looperCropEndBeats = 0;
     refreshLooperPeaks();
 }
 
-int BluePrinterAudioProcessor::addLoopSnippet()
+int BluePrinterAudioProcessor::saveLoopSnippet()
 {
     const auto start = audioLoopStart.load (std::memory_order_acquire);
     const auto captured = audioLoopLength.load (std::memory_order_acquire);
@@ -1350,11 +1411,39 @@ int BluePrinterAudioProcessor::addLoopSnippet()
         return -1;
 
     listeners.call ([](Listener& l) { l.libraryChanged(); });
+
+    // One-click save to the library folder, like the take recorder. No
+    // folder set = the snippet stays in the in-memory library only.
+    juce::File folder;
+    {
+        juce::ScopedLock lock (libraryFolderLock);
+        folder = libraryFolder;
+    }
+    if (folder.isDirectory())
+    {
+        juce::String outPath, outError;
+        if (library.saveSnippetToFolder (*snippet, folder, outPath, outError))
+            library.markSaved (snippet->id, outPath);
+        else
+        {
+            juce::ScopedLock lock (libraryFolderLock);
+            lastSaveError = outError;
+            listeners.call ([](Listener& l) { l.libraryChanged(); });
+        }
+    }
+
     return snippet->id;
 }
 
 void BluePrinterAudioProcessor::setLooperPlaying (bool enabled)
 {
+    // Loop playback supersedes take-review playback.
+    if (enabled && takePlaybackActive.load (std::memory_order_acquire))
+    {
+        takePlaybackActive.store (false, std::memory_order_release);
+        takePlaybackPos.store (0, std::memory_order_release);
+    }
+
     audioLoopPosition.store (0, std::memory_order_release);
     audioLoopPlaying.store (enabled && audioLoopLength.load (std::memory_order_acquire) > 0,
                             std::memory_order_release);
@@ -1380,23 +1469,28 @@ void BluePrinterAudioProcessor::setLooperCountInBeats (int beats)
     listeners.call ([](Listener& l) { l.transportChanged(); });
 }
 
-void BluePrinterAudioProcessor::setLoopCrop (int startBars, int endBars)
+void BluePrinterAudioProcessor::setLooperClickDuringCapture (bool enabled)
+{
+    looperClickDuringCapture.store (enabled, std::memory_order_release);
+    listeners.call ([](Listener& l) { l.transportChanged(); });
+}
+
+void BluePrinterAudioProcessor::setLoopCrop (int startBeats, int endBeats)
 {
     const auto length = audioLoopLength.load (std::memory_order_acquire);
     if (length <= 0 || currentSampleRate <= 0.0)
         return;
 
     const auto beat = 60.0 * currentSampleRate / juce::jmax (1.0f, bpm.load());
-    const auto bar = beat * 4.0;
-    const auto loopBars = juce::jmax (1, static_cast<int> (std::llround (static_cast<double> (length) / bar)));
+    const auto loopBeats = juce::jmax (1, static_cast<int> (std::llround (static_cast<double> (length) / beat)));
 
-    startBars = juce::jlimit (0, loopBars - 1, startBars);
-    endBars = juce::jlimit (0, loopBars - 1 - startBars, endBars);
-    looperCropStartBars = startBars;
-    looperCropEndBars = endBars;
+    startBeats = juce::jlimit (0, loopBeats - 1, startBeats);
+    endBeats = juce::jlimit (0, loopBeats - 1 - startBeats, endBeats);
+    looperCropStartBeats = startBeats;
+    looperCropEndBeats = endBeats;
 
-    const auto trimStart = static_cast<int64_t> (startBars * bar);
-    const auto trimEnd = static_cast<int64_t> (endBars * bar);
+    const auto trimStart = static_cast<int64_t> (startBeats * beat);
+    const auto trimEnd = static_cast<int64_t> (endBeats * beat);
     audioLoopStart.store (trimStart, std::memory_order_release);
     audioLoopLength.store (length - trimStart - trimEnd, std::memory_order_release);
 
@@ -1421,8 +1515,8 @@ void BluePrinterAudioProcessor::clearLoop()
     audioLoopStart.store (0, std::memory_order_release);
     audioLoopLength.store (0, std::memory_order_release);
     audioLoopPosition.store (0, std::memory_order_release);
-    looperCropStartBars = 0;
-    looperCropEndBars = 0;
+    looperCropStartBeats = 0;
+    looperCropEndBeats = 0;
     looperPeaks.clear();
     updateClockRunState();
     listeners.call ([](Listener& l) { l.transportChanged(); });
@@ -1430,6 +1524,14 @@ void BluePrinterAudioProcessor::clearLoop()
 
 void BluePrinterAudioProcessor::beginActualRecording()
 {
+    // A new take wipes recordBuffer, so any pending (unsaved) take is
+    // invalidated. Audio-thread safe: atomics only — takePeaks stays
+    // stale until the next finalize rebuilds it.
+    takePending.store (false, std::memory_order_release);
+    takePlaybackActive.store (false, std::memory_order_release);
+    takePlaybackPos.store (0, std::memory_order_release);
+    takeLength.store (0, std::memory_order_release);
+
     {
         const juce::ScopedLock sl (recordLock);
         recordBuffer->clear();
@@ -1505,6 +1607,13 @@ void BluePrinterAudioProcessor::startPlayback (int snippetId)
 
     if (recordingRequested.load (std::memory_order_acquire))
         stopRecording();
+
+    // Snippet playback supersedes take-review playback.
+    if (takePlaybackActive.load (std::memory_order_acquire))
+    {
+        takePlaybackActive.store (false, std::memory_order_release);
+        takePlaybackPos.store (0, std::memory_order_release);
+    }
 
     if (library.indexOfId (snippetId) < 0)
         return;
@@ -2276,11 +2385,24 @@ void BluePrinterAudioProcessor::timerCallback()
         if (target != nullptr)
         {
             auto slot = target->popPendingSlot();
-            if (slot.file.existsAsFile())
+            // exists() (not existsAsFile()): a saved slot may reference
+            // a .vst3 bundle directory (its binary lives under
+            // Contents/x86_64-win/) rather than a loose binary file.
+            if (slot.file.exists())
             {
                 pendingPluginLoads.store (1, std::memory_order_release);
                 const auto chainId = target->getChainId();
-                target->addPluginAsync (slot.file, 10000,
+                // Copy the file BEFORE the lambda capture below moves
+                // the slot: argument evaluation order on MSVC makes the
+                // capture-init (std::move (slot)) run before the
+                // slot.file argument, so passing slot.file directly
+                // here handed the loader a moved-from (empty) path and
+                // the deferred restore silently loaded nothing.
+                const auto slotFile = slot.file;
+                // 30 s per slot: heavy amp sims (Neural DSP "X" etc.)
+                // can take a long time to instantiate on a cold start,
+                // and a timeout here silently drops the plugin.
+                target->addPluginAsync (slotFile, 30000,
                     [this, chainId, slot = std::move (slot)] (int slotIndex,
                                                               const juce::String&,
                                                               const juce::String&,
@@ -2337,28 +2459,112 @@ void BluePrinterAudioProcessor::finalizeRecordingOnMessageThread()
     if (recordBuffer == nullptr)
         return;
 
+    // The take is not saved automatically anymore — it becomes a pending
+    // take the user reviews, replays, then explicitly saves to the
+    // library or discards. The audio stays in recordBuffer (the shared
+    // capture buffer) until a new capture invalidates it.
+    int captured = 0;
+    {
+        const juce::ScopedLock sl (recordLock);
+        captured = static_cast<int> (recordWritePos.load (std::memory_order_acquire));
+        recordWritePos.store (0, std::memory_order_release);
+        if (captured <= 0)
+            return;
+    }
+
+    takePlaybackActive.store (false, std::memory_order_release);
+    takePlaybackPos.store (0, std::memory_order_release);
+    takeLength.store (captured, std::memory_order_release);
+    takePending.store (true, std::memory_order_release);
+    refreshTakePeaks();
+
+    listeners.call ([](Listener& l) { l.transportChanged(); });
+}
+
+void BluePrinterAudioProcessor::refreshTakePeaks()
+{
+    takePeaks.clear();
+
+    const auto length = takeLength.load (std::memory_order_acquire);
+    if (recordBuffer == nullptr || length <= 0)
+        return;
+
+    // Copy the take region out under the lock (guards against a new
+    // capture writing concurrently) and downsample for the UI.
+    juce::AudioBuffer<float> region (recordBuffer->getNumChannels(), static_cast<int> (length));
+    {
+        const juce::ScopedLock sl (recordLock);
+        for (int ch = 0; ch < region.getNumChannels(); ++ch)
+            region.copyFrom (ch, 0, *recordBuffer, ch, 0, static_cast<int> (length));
+    }
+    takePeaks = SnippetLibrary::computePeaks (region, 256);
+}
+
+void BluePrinterAudioProcessor::clearPendingTake()
+{
+    takePending.store (false, std::memory_order_release);
+    takePlaybackActive.store (false, std::memory_order_release);
+    takePlaybackPos.store (0, std::memory_order_release);
+    takeLength.store (0, std::memory_order_release);
+    takePeaks.clear();
+}
+
+void BluePrinterAudioProcessor::setTakePlayback (bool enabled)
+{
+    if (enabled)
+    {
+        if (! takePending.load (std::memory_order_acquire)
+            || takeLength.load (std::memory_order_acquire) <= 0)
+            return;
+
+        // One reviewer at a time: stop snippet playback and the looper
+        // so the take review is the only thing playing.
+        stopPlayback();
+        if (audioLoopPlaying.load (std::memory_order_acquire))
+            setLooperPlaying (false);
+
+        takePlaybackPos.store (0, std::memory_order_release);
+        takePlaybackActive.store (true, std::memory_order_release);
+    }
+    else
+    {
+        takePlaybackActive.store (false, std::memory_order_release);
+        takePlaybackPos.store (0, std::memory_order_release);
+    }
+
+    listeners.call ([](Listener& l) { l.transportChanged(); });
+}
+
+void BluePrinterAudioProcessor::savePendingTake()
+{
+    if (! takePending.load (std::memory_order_acquire))
+        return;
+
+    const auto captured = takeLength.load (std::memory_order_acquire);
+    if (recordBuffer == nullptr || captured <= 0)
+    {
+        clearPendingTake();
+        listeners.call ([](Listener& l) { l.transportChanged(); });
+        return;
+    }
+
+    takePlaybackActive.store (false, std::memory_order_release);
+    takePlaybackPos.store (0, std::memory_order_release);
+
     std::shared_ptr<Snippet> snippet;
 
     {
         const juce::ScopedLock sl (recordLock);
-        const int captured = static_cast<int> (recordWritePos.load (std::memory_order_acquire));
-        if (captured <= 0)
-        {
-            recordWritePos.store (0, std::memory_order_release);
-            return;
-        }
-
         const int channels = recordBuffer->getNumChannels();
-        auto snippetBuffer = std::make_shared<juce::AudioBuffer<float>> (channels, captured);
+        auto snippetBuffer = std::make_shared<juce::AudioBuffer<float>> (channels, static_cast<int> (captured));
         for (int ch = 0; ch < channels; ++ch)
-            snippetBuffer->copyFrom (ch, 0, *recordBuffer, ch, 0, captured);
-
-        recordWritePos.store (0, std::memory_order_release);
+            snippetBuffer->copyFrom (ch, 0, *recordBuffer, ch, 0, static_cast<int> (captured));
 
         auto defaultName = "Snippet " + juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H:%M:%S");
         snippet = library.addSnippet (snippetBuffer, getSampleRate(), defaultName);
     }
 
+    clearPendingTake();
     listeners.call ([](Listener& l) { l.libraryChanged(); l.transportChanged(); });
 
     if (snippet != nullptr)
@@ -2381,6 +2587,15 @@ void BluePrinterAudioProcessor::finalizeRecordingOnMessageThread()
             }
         }
     }
+}
+
+void BluePrinterAudioProcessor::discardPendingTake()
+{
+    if (! takePending.load (std::memory_order_acquire))
+        return;
+
+    clearPendingTake();
+    listeners.call ([](Listener& l) { l.transportChanged(); });
 }
 
 //==============================================================================
@@ -2414,6 +2629,7 @@ void BluePrinterAudioProcessor::getStateInformation (juce::MemoryBlock& destData
     state.setProperty ("takeMidiClock",    takeMidiClockEnabled.load(), nullptr);
     state.setProperty ("looperMidiClock",  looperMidiClockEnabled.load(), nullptr);
     state.setProperty ("clickDuringTake",  clickDuringTake.load(), nullptr);
+    state.setProperty ("looperClickDuringCapture", looperClickDuringCapture.load(), nullptr);
     state.setProperty ("midiDeviceName",   midiOutputDeviceName,    nullptr);
     // Click sound tuning.
     state.setProperty ("clickPitch",        clickPitch,        nullptr);
@@ -2426,7 +2642,15 @@ void BluePrinterAudioProcessor::getStateInformation (juce::MemoryBlock& destData
     // both the MIDI and the audio chain, plus the folder-wide
     // blocklist and cached scan result. Stored as a JSON string so
     // ValueTree can carry an arbitrary blob.
-    state.setProperty ("pluginChains", juce::JSON::toString (makeChainState(), true), nullptr);
+    // SKIPPED while the deferred restore is still loading: the
+    // standalone writes this blob to its settings file on every exit,
+    // so quitting mid-restore would save the partial (empty) chain
+    // bundle, and the next launch would restore that instead of the
+    // last good state. Omitting the property makes the next launch
+    // fall back to the properties file, which still holds the good
+    // chains.
+    if (! isChainRestoreInProgress())
+        state.setProperty ("pluginChains", juce::JSON::toString (makeChainState(), true), nullptr);
     std::unique_ptr<juce::XmlElement> xml (state.createXml());
     copyXmlToBinary (*xml, destData);
 }
@@ -2450,6 +2674,7 @@ void BluePrinterAudioProcessor::setStateInformation (const void* data, int sizeI
             takeMidiClockEnabled.store (static_cast<bool> (state.getProperty ("takeMidiClock",   false)));
             looperMidiClockEnabled.store (static_cast<bool> (state.getProperty ("looperMidiClock", false)));
             clickDuringTake.store (static_cast<bool> (state.getProperty ("clickDuringTake", true)));
+            looperClickDuringCapture.store (static_cast<bool> (state.getProperty ("looperClickDuringCapture", true)));
             midiOutputDeviceName  = state.getProperty ("midiDeviceName", juce::String()).toString();
 
             // Click sound tuning (defaults match resynthesizeClicks).
@@ -2582,42 +2807,18 @@ juce::var BluePrinterAudioProcessor::loadSavedChainState()
     const auto newVar = parse (newJson);
     const auto oldVar = parse (oldJson);
 
-    // Count how many plugin slots a saved bundle actually holds, across
-    // every format (new "chains" array, legacy midiChain/audioChain
-    // split, and the pre-split single "slots" array).
-    auto countSlots = [](const juce::var& v) -> int
-    {
-        if (! v.isObject())
-            return 0;
-        auto* obj = v.getDynamicObject();
-
-        int slots = 0;
-        if (auto* chainsArr = obj->getProperty ("chains").getArray())
-        {
-            for (const auto& c : *chainsArr)
-                if (auto* co = c.getDynamicObject())
-                    if (auto* s = co->getProperty ("slots").getArray())
-                        slots += s->size();
-            return slots;
-        }
-        for (const char* key : { "midiChain", "audioChain" })
-            if (auto* co = obj->getProperty (key).getDynamicObject())
-                if (auto* s = co->getProperty ("slots").getArray())
-                    slots += s->size();
-        if (auto* s = obj->getProperty ("slots").getArray())
-            slots += s->size();
-        return slots;
-    };
-
-    // Prefer whichever key actually holds chain content. A newer
-    // pluginChains that is empty or stale (e.g. the "chains": [] echo a
-    // pre-fix restore wrote) must not shadow the older, valid
-    // pluginChain. Ties favour the new format.
-    if (countSlots (newVar) > 0)
+    // The current-format key is authoritative whenever it parses to a
+    // valid bundle object at all: a pluginChains written by this build
+    // (even one holding empty chains — the user removed the plugins)
+    // always wins over the legacy pre-split key, which belongs to an
+    // older save and can contain same-chain duplicates. The old key
+    // only serves as a fallback for states that never saw the new
+    // format. Persistence is suppressed while a restore runs
+    // (persistPluginChain + isChainRestoreInProgress), so a mid-restore
+    // echo can no longer produce a stale empty pluginChains either.
+    if (newVar.isObject())
         return newVar;
-    if (countSlots (oldVar) > 0)
-        return oldVar;
-    return newVar.isObject() ? newVar : oldVar;
+    return oldVar;
 }
 
 void BluePrinterAudioProcessor::restoreUserState()
@@ -2695,13 +2896,32 @@ void BluePrinterAudioProcessor::persistLibraryFolder()
     }
 }
 
+bool BluePrinterAudioProcessor::isChainRestoreInProgress() const
+{
+    if (restoreActive)
+        return true;
+    if (pendingPluginLoads.load (std::memory_order_acquire) != 0)
+        return true;
+    const juce::ScopedLock sl (chainLock);
+    for (const auto& chain : chains)
+        if (chain->hasPendingSlots())
+            return true;
+    return false;
+}
+
 void BluePrinterAudioProcessor::persistPluginChain()
 {
     if (persistingPluginChain)
         return; // restore in progress, don't echo back
     // Debounced: the actual save (serializing every plugin's state and
     // writing the file) happens once, 500 ms after the last mutation —
-    // see flushPendingChainPersist and timerCallback.
+    // see flushPendingChainPersist and timerCallback. Arming is safe
+    // even while the deferred restore is still loading: the flush
+    // itself refuses to write until the restore has fully completed,
+    // and keeps the arm pending so a mutation made mid-restore (e.g.
+    // the user adds a plugin while the saved ones are still loading)
+    // is persisted as soon as the restore finishes instead of being
+    // silently dropped.
     chainPersistPending = true;
     chainPersistDeadline = juce::Time::currentTimeMillis() + 500;
 }
@@ -2709,6 +2929,14 @@ void BluePrinterAudioProcessor::persistPluginChain()
 void BluePrinterAudioProcessor::flushPendingChainPersist()
 {
     if (! chainPersistPending)
+        return;
+    // While the deferred restore is still loading saved slots, the
+    // in-memory chains are partial (or empty); writing now would
+    // replace the good state on disk with the partial one. Keep the
+    // arm pending instead of dropping it — the timer retries every
+    // tick, so once the restore completes the pending save writes the
+    // complete state (including any mid-restore user mutations).
+    if (isChainRestoreInProgress())
         return;
     chainPersistPending = false;
     if (auto* props = getUserState())

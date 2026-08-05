@@ -197,6 +197,20 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
         {
             processor.stopRecording();
         })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetTakePlaybackEvent, [&processor](juce::var data)
+        {
+            const bool enabled = data.getDynamicObject() != nullptr
+                && (bool) data.getDynamicObject()->getProperty("enabled");
+            processor.setTakePlayback (enabled);
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendSaveTakeEvent, [&processor](juce::var)
+        {
+            processor.savePendingTake();
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendDiscardTakeEvent, [&processor](juce::var)
+        {
+            processor.discardPendingTake();
+        })
         .withEventListener(BluePrinterWebViewEditor::frontendStartPlaybackEvent, [&processor](juce::var data)
         {
             if (auto* obj = data.getDynamicObject())
@@ -363,8 +377,10 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
         { if (auto* obj = data.getDynamicObject()) processor.setLooperClickEnabled (static_cast<bool> (obj->getProperty ("enabled"))); })
         .withEventListener(BluePrinterWebViewEditor::frontendSetLooperCountInEvent, [&processor](juce::var data)
         { if (auto* obj = data.getDynamicObject()) processor.setLooperCountInBeats (static_cast<int> (obj->getProperty ("beats"))); })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetLooperClickDuringCaptureEvent, [&processor](juce::var data)
+        { if (auto* obj = data.getDynamicObject()) processor.setLooperClickDuringCapture (static_cast<bool> (obj->getProperty ("enabled"))); })
         .withEventListener(BluePrinterWebViewEditor::frontendSetLoopCropEvent, [&processor](juce::var data)
-        { if (auto* obj = data.getDynamicObject()) processor.setLoopCrop (static_cast<int> (obj->getProperty ("startBars")), static_cast<int> (obj->getProperty ("endBars"))); })
+        { if (auto* obj = data.getDynamicObject()) processor.setLoopCrop (static_cast<int> (obj->getProperty ("startBeats")), static_cast<int> (obj->getProperty ("endBeats"))); })
         .withEventListener(BluePrinterWebViewEditor::frontendClearLoopEvent, [&processor](juce::var)
         { processor.clearLoop(); })
         .withEventListener(BluePrinterWebViewEditor::frontendAddVst3Event, [owner](juce::var data)
@@ -519,6 +535,7 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
                 if (path.isNotEmpty())
                 {
                     processor.getVst3Library().addToBlocklist (juce::File (path));
+                    processor.persistPluginChain();
                     if (owner != nullptr)
                         owner->emitVst3ChainSnapshot();
                 }
@@ -532,6 +549,7 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
                 if (path.isNotEmpty())
                 {
                     processor.getVst3Library().removeFromBlocklist (juce::File (path));
+                    processor.persistPluginChain();
                     if (owner != nullptr)
                         owner->emitVst3ChainSnapshot();
                 }
@@ -796,14 +814,27 @@ juce::var BluePrinterWebViewEditor::makeTransportSnapshot() const
     }
     obj->setProperty ("preRollActive",    audioProcessor.isPreRollActive());
     obj->setProperty ("transportPosition", static_cast<double> (audioProcessor.getTransportPosition()));
+    obj->setProperty ("takePending",  audioProcessor.isTakePending());
+    obj->setProperty ("takeLength",   static_cast<double> (audioProcessor.getTakeLength()));
+    obj->setProperty ("takePlaying",  audioProcessor.isTakePlaying());
+    obj->setProperty ("takePosition", static_cast<double> (audioProcessor.getTakePlaybackPos()));
+    {
+        const auto& peaks = audioProcessor.getTakePeaks();
+        juce::Array<juce::var> peakArray;
+        peakArray.ensureStorageAllocated (static_cast<int> (peaks.size()));
+        for (float p : peaks)
+            peakArray.add (juce::var (p));
+        obj->setProperty ("takePeaks", juce::var (peakArray));
+    }
     obj->setProperty ("looperRecording", audioProcessor.isLooperRecording());
     obj->setProperty ("looperPreRoll", audioProcessor.isLooperPreRolling());
     obj->setProperty ("looperPlaying", audioProcessor.isLooperPlaying());
     obj->setProperty ("looperLooping", audioProcessor.isLooperLooping());
     obj->setProperty ("looperClickEnabled", audioProcessor.isLooperClickEnabled());
+    obj->setProperty ("looperClickDuringCapture", audioProcessor.getLooperClickDuringCapture());
     obj->setProperty ("looperCountInBeats", audioProcessor.getLooperCountInBeats());
-    obj->setProperty ("looperCropStartBars", audioProcessor.getLooperCropStartBars());
-    obj->setProperty ("looperCropEndBars", audioProcessor.getLooperCropEndBars());
+    obj->setProperty ("looperCropStartBeats", audioProcessor.getLooperCropStartBeats());
+    obj->setProperty ("looperCropEndBeats", audioProcessor.getLooperCropEndBeats());
     obj->setProperty ("audioLoopStart", static_cast<double> (audioProcessor.getAudioLoopStart()));
     obj->setProperty ("audioLoopLength", static_cast<double> (audioProcessor.getAudioLoopLength()));
     obj->setProperty ("audioLoopPosition", static_cast<double> (audioProcessor.getAudioLoopPosition()));
@@ -851,18 +882,12 @@ void BluePrinterWebViewEditor::handleSaveSnippet(const juce::var& data)
 
 void BluePrinterWebViewEditor::handleSaveLoop()
 {
-    const int id = audioProcessor.addLoopSnippet();
+    // One-click save to the library folder, mirroring the take recorder:
+    // the loop becomes a snippet and is written to the folder when one is
+    // set (lastSaveError is surfaced in the library row on failure).
+    const int id = audioProcessor.saveLoopSnippet();
     if (id < 0)
-    {
         sendNotification ("There is no captured loop to save.", "error");
-        return;
-    }
-
-    juce::File folder (audioProcessor.getLibraryFolder());
-    if (folder.isDirectory())
-        saveSnippetWithDialog (id, folder);
-    else
-        pickLibraryFolderThenSave (id);
 }
 
 void BluePrinterWebViewEditor::handleRevealSnippet(const juce::var& data)
@@ -1215,6 +1240,7 @@ void BluePrinterWebViewEditor::emitVst3ChainSnapshot()
     }
 
     obj->setProperty ("restoreError", audioProcessor.getLastChainRestoreError());
+    obj->setProperty ("restoring", audioProcessor.isChainRestoreInProgress());
 
     webView.emitEventIfBrowserIsVisible (juce::Identifier (backendVst3ChainEvent), juce::var (obj));
 }
@@ -1369,7 +1395,7 @@ void BluePrinterWebViewEditor::scanVst3Folder (const juce::File& folder)
 
     auto state = std::make_unique<Vst3ScanState>();
     state->folder = folder;
-    state->files  = folder.findChildFiles (juce::File::findFiles, false, "*.vst3");
+    state->files  = Vst3Library::findVst3Files (folder);
     activeScan = std::move (state);
 
     // Push an empty chain snapshot so the UI can show the folder path
@@ -1411,7 +1437,11 @@ void BluePrinterWebViewEditor::runScanStep()
     {
         // Commit the accumulated plugin list to the Vst3Library (which
         // persists it in the host state) and push the final snapshot.
+        // The scan result rides in the same persisted bundle as the
+        // chains, so arm the debounced save or the list would vanish
+        // on the next launch.
         audioProcessor.getVst3Library().setAvailablePlugins (juce::var (activeScan->pluginArray));
+        audioProcessor.persistPluginChain();
         {
             auto* result = new juce::DynamicObject();
             result->setProperty ("folder", activeScan->folder.getFullPathName());
@@ -1483,7 +1513,11 @@ void BluePrinterWebViewEditor::emitScanProgress (bool active, int current, int t
 
 void BluePrinterWebViewEditor::addVst3FromPath (const juce::String& chain, const juce::File& vst3File)
 {
-    if (! vst3File.existsAsFile())
+    // The path may be a loose .vst3 binary OR a .vst3 bundle directory
+    // (e.g. ...\Axxess.vst3, whose real binary lives inside
+    // Contents/x86_64-win/). exists() covers both; existsAsFile() would
+    // reject bundle directories.
+    if (! vst3File.exists())
     {
         sendNotification ("Plugin file not found: " + vst3File.getFullPathName(), "error");
         return;

@@ -77,6 +77,21 @@ public:
     void stopPlayback();
     bool isPlaybackActive() const { return playbackActive.load (std::memory_order_acquire); }
 
+    // Pending-take review. After a take stops it is NOT saved
+    // automatically — the audio stays in recordBuffer as a pending take
+    // so it can be replayed, then explicitly saved to the library or
+    // discarded. Any new capture (take or loop) invalidates it.
+    bool    isTakePending() const { return takePending.load (std::memory_order_acquire); }
+    int64_t getTakeLength() const { return takeLength.load (std::memory_order_acquire); }
+    bool    isTakePlaying() const { return takePlaybackActive.load (std::memory_order_acquire); }
+    int64_t getTakePlaybackPos() const { return takePlaybackPos.load (std::memory_order_acquire); }
+    // Downsampled waveform of the pending take, rebuilt on the message
+    // thread when the take finalizes.
+    const std::vector<float>& getTakePeaks() const { return takePeaks; }
+    void setTakePlayback (bool enabled);
+    void savePendingTake();
+    void discardPendingTake();
+
     bool deleteSnippet (int id);
     bool updateSnippetMeta (int id, const juce::String& name, const juce::String& comments);
 
@@ -187,10 +202,15 @@ public:
     bool    isLooperLooping() const { return looperLooping.load(); }
     bool    isLooperClickEnabled() const { return looperMetronomeEnabled.load(); }
     int     getLooperCountInBeats() const { return looperCountInBeats.load(); }
-    // Bars trimmed off the start/end of the captured loop (message-thread
-    // crop settings, applied to audioLoopStart/audioLoopLength).
-    int     getLooperCropStartBars() const { return looperCropStartBars; }
-    int     getLooperCropEndBars() const { return looperCropEndBars; }
+    // When false the click only plays during the loop count-in, never
+    // through the capture itself. Mirrors clickDuringTake for the take
+    // recorder.
+    bool    getLooperClickDuringCapture() const { return looperClickDuringCapture.load (std::memory_order_acquire); }
+    // Beats trimmed off the start/end of the captured loop (message-thread
+    // crop settings, applied to audioLoopStart/audioLoopLength). Beat
+    // granularity — finer than the bar-aligned capture trim.
+    int     getLooperCropStartBeats() const { return looperCropStartBeats; }
+    int     getLooperCropEndBeats() const { return looperCropEndBeats; }
     bool    hasAudioLoop() const { return audioLoopLength.load() > 0; }
     int64_t getAudioLoopPosition() const { return audioLoopPosition.load(); }
     int64_t getAudioLoopLength() const { return audioLoopLength.load(); }
@@ -203,12 +223,17 @@ public:
     void    setLooperLooping (bool enabled);
     void    setLooperClickEnabled (bool enabled);
     void    setLooperCountInBeats (int beats);
-    void    setLoopCrop (int startBars, int endBars);
+    void    setLooperClickDuringCapture (bool enabled);
+    // Trim start/end of the loop in whole beats (4 per bar at the current
+    // BPM), clamped so the window never fully collapses.
+    void    setLoopCrop (int startBeats, int endBeats);
     void    clearLoop();
-    // Converts the captured (cropped) loop into a library snippet, exactly
-    // like the recording block does. Message thread only. Returns the new
-    // snippet id, or -1 if there is no captured loop.
-    int addLoopSnippet();
+    // Converts the captured (cropped) loop into a library snippet and
+    // writes WAV + JSON to the library folder when one is set — mirrors
+    // the take recorder's save (one click, no dialog). Message thread
+    // only. Returns the new snippet id, or -1 if there is no captured
+    // loop.
+    int saveLoopSnippet();
 
     // MIDI clock output for syncing external hardware (analog drum
     // machines, sequencers). Enabled via the transport UI.
@@ -249,6 +274,18 @@ public:
     void clearLastChainRestoreError();
     void restoreSavedPluginChains();
 
+    // Arm the debounced plugin-chain bundle save (all chains + the
+    // blocklist + the cached scan result). Also wired into every
+    // chain's onChanged. Public so the editor can persist non-chain
+    // mutations that the bundle carries (e.g. a completed VST3 scan
+    // updating availablePlugins, or a blocklist edit).
+    void persistPluginChain();
+
+    // True while the deferred chain restore still has work queued
+    // (restoreActive, a load in flight, or pending slots on any chain).
+    // Message-thread only.
+    bool isChainRestoreInProgress() const;
+
     // Meter values updated by the audio thread (peak + RMS over the last block).
     float getCurrentInputLevel() const { return inputLevel.load (std::memory_order_acquire); }
     float getCurrentInputPeak() const  { return inputPeak.load  (std::memory_order_acquire); }
@@ -282,6 +319,7 @@ private:
 
     void writeRecording (const juce::AudioBuffer<float>& source, int numSamples);
     void renderPlayback (juce::AudioBuffer<float>& destination, int numSamples);
+    void renderTakePlayback (juce::AudioBuffer<float>& destination, int numSamples);
     void computeLevels  (const juce::AudioBuffer<float>& source, int numSamples);
     // Level-metering core, shared by the main input meter and the
     // per-chain meters. gain scales the meter to reflect the chain's
@@ -350,6 +388,23 @@ private:
     std::atomic<bool> recordingFinalizePending { false };
     std::atomic<int64_t> recordWritePos { 0 };
 
+    // Pending-take review state. After a take stops, its audio stays in
+    // recordBuffer until the user saves it to the library or discards
+    // it. takePending/takeLength are set on the message thread when the
+    // take finalizes; takePlaybackActive/Pos drive the review playback
+    // on the audio thread. takePeaks is message-thread only.
+    std::atomic<bool>    takePending        { false };
+    std::atomic<int64_t> takeLength         { 0 };
+    std::atomic<bool>    takePlaybackActive { false };
+    std::atomic<int64_t> takePlaybackPos    { 0 };
+    std::vector<float>   takePeaks;
+
+    void refreshTakePeaks();
+    // Clears the pending-take state. Message thread only (touches the
+    // takePeaks vector). Audio-thread invalidation (beginActualRecording)
+    // clears just the atomics.
+    void clearPendingTake();
+
     std::atomic<bool> playbackActive { false };
     std::atomic<int> playingSnippetId { -1 };
     std::atomic<int64_t> playbackReadPos { 0 };
@@ -370,6 +425,7 @@ private:
     // samples at playback/save time. All audio-thread reads go through
     // the atomics; the crop bar counts are message-thread only.
     std::atomic<bool>    looperMetronomeEnabled { true };
+    std::atomic<bool>    looperClickDuringCapture { true };
     std::atomic<int>     looperCountInBeats     { 4 };
     std::atomic<bool>    looperPreRollActive    { false };
     std::atomic<bool>    looperCaptureArmed     { false };
@@ -379,8 +435,8 @@ private:
     std::atomic<int64_t> audioLoopPosition { 0 };
     std::atomic<bool> audioLoopRecording { false };
     std::atomic<bool> audioLoopPlaying   { false };
-    int looperCropStartBars = 0;
-    int looperCropEndBars   = 0;
+    int looperCropStartBeats = 0;
+    int looperCropEndBeats   = 0;
     int loopCrossfadeSamples = 0;
     // Message-thread only: downsampled waveform of the cropped loop,
     // rebuilt by refreshLooperPeaks() after capture/trim/crop.
@@ -479,7 +535,6 @@ private:
     // stalling the message thread. flushPendingChainPersist runs the
     // pending save immediately (also called on release/destruction so
     // the final state is never lost).
-    void persistPluginChain();
     void flushPendingChainPersist();
     bool persistingPluginChain = false;
     bool pluginChainsRestored = false;
