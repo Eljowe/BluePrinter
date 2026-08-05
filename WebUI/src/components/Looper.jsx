@@ -1,6 +1,49 @@
+import { useCallback, useEffect, useRef, useState } from "react";
 import { FRONTEND_EVENTS, emit } from "../bridge";
 import { IconMetronome, IconPlay, IconSave, IconStop, IconTrash } from "./icons";
 import { Waveform } from "./Waveform";
+
+// Shared with the transport: count-in field with a "beats" suffix.
+function NumberInput({ value, min, max, step, className, onChange, suffix, title }) {
+  const [text, setText] = useState(String(value));
+  const committedRef = useRef(value);
+
+  useEffect(() => {
+    if (value !== committedRef.current) {
+      setText(String(value));
+      committedRef.current = value;
+    }
+  }, [value]);
+
+  const flush = useCallback((raw) => {
+    const parsed = parseInt(raw, 10);
+    if (!Number.isNaN(parsed)) {
+      const clamped = Math.max(min, Math.min(max, parsed));
+      committedRef.current = clamped;
+      onChange(clamped);
+      setText(String(clamped));
+    } else {
+      setText(String(committedRef.current));
+    }
+  }, [min, max, onChange]);
+
+  return (
+    <div className={className}>
+      <input
+        type="number"
+        min={min}
+        max={max}
+        step={step}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={(e) => flush(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+        title={title}
+      />
+      {suffix ? <span className="count-in-suffix">{suffix}</span> : null}
+    </div>
+  );
+}
 
 function Stepper({ label, value, min, max, onChange, title }) {
   const step = (delta) => {
@@ -19,6 +62,17 @@ function Stepper({ label, value, min, max, onChange, title }) {
   );
 }
 
+// Formats a beat count for captions: whole bars when possible, beats
+// otherwise (crop is beat-granular).
+function formatBeats(beats) {
+  if (beats <= 0) return "0 beats";
+  if (beats % 4 === 0) {
+    const bars = beats / 4;
+    return `${bars} bar${bars === 1 ? "" : "s"}`;
+  }
+  return `${beats} beats`;
+}
+
 export function Looper({ transport }) {
   const recording = Boolean(transport?.looperRecording);
   const preRoll = Boolean(transport?.looperPreRoll);
@@ -26,33 +80,34 @@ export function Looper({ transport }) {
   const playing = Boolean(transport?.looperPlaying);
   const looping = transport?.looperLooping !== false;
   const clickEnabled = transport?.looperClickEnabled !== false;
+  const clickDuringCapture = transport?.looperClickDuringCapture !== false;
   const looperMidiClock = Boolean(transport?.looperMidiClock);
   const countInBeats = Number(transport?.looperCountInBeats ?? 0);
-  const cropStartBars = Number(transport?.looperCropStartBars ?? 0);
-  const cropEndBars = Number(transport?.looperCropEndBars ?? 0);
+  const cropStartBeats = Number(transport?.looperCropStartBeats ?? 0);
+  const cropEndBeats = Number(transport?.looperCropEndBeats ?? 0);
 
   const loopLength = Number(transport?.audioLoopLength ?? 0);
   const hasLoop = loopLength > 0;
 
-  // The captured loop is trimmed to whole bars, so the bar count can be
+  // The captured loop is trimmed to whole bars, so the beat count can be
   // derived from the current BPM/sample rate.
-  const barSamples = Number(transport?.bpm ?? 120) > 0 && Number(transport?.recordingSampleRate ?? 0) > 0
-    ? (60.0 / Number(transport.bpm)) * Number(transport.recordingSampleRate) * 4.0
+  const beatSamples = Number(transport?.bpm ?? 120) > 0 && Number(transport?.recordingSampleRate ?? 0) > 0
+    ? (60.0 / Number(transport.bpm)) * Number(transport.recordingSampleRate)
     : 0;
-  const totalBars = barSamples > 0 && loopLength > 0
-    ? Math.max(1, Math.round(loopLength / barSamples))
+  const totalBeats = beatSamples > 0 && loopLength > 0
+    ? Math.max(1, Math.round(loopLength / beatSamples))
     : 0;
-  const croppedBars = totalBars > 0 ? Math.max(1, totalBars - cropStartBars - cropEndBars) : 0;
+  const croppedBeats = totalBeats > 0 ? Math.max(0, totalBeats - cropStartBeats - cropEndBeats) : 0;
 
   const loopProgress = loopLength > 0
     ? Math.min(100, Math.max(0, (Number(transport.audioLoopPosition ?? 0) / loopLength) * 100))
     : 0;
-  const cropStartPct = totalBars > 0 ? (cropStartBars / totalBars) * 100 : 0;
-  const cropEndPct = totalBars > 0 ? (cropEndBars / totalBars) * 100 : 0;
+  const cropStartPct = totalBeats > 0 ? (cropStartBeats / totalBeats) * 100 : 0;
+  const cropEndPct = totalBeats > 0 ? (cropEndBeats / totalBeats) * 100 : 0;
 
   const setRecording = (enabled) => emit(FRONTEND_EVENTS.setLooperRecording, { enabled });
   const setPlaying = (enabled) => emit(FRONTEND_EVENTS.setLooperPlaying, { enabled });
-  const emitCrop = (startBars, endBars) => emit(FRONTEND_EVENTS.setLoopCrop, { startBars, endBars });
+  const emitCrop = (startBeats, endBeats) => emit(FRONTEND_EVENTS.setLoopCrop, { startBeats, endBeats });
 
   return (
     <section className={`looper ${isRecording ? "is-recording" : ""} ${playing ? "is-playing" : ""}`}>
@@ -64,11 +119,11 @@ export function Looper({ transport }) {
         </div>
         <div className="looper-state" aria-live="polite">
           <span className="looper-state-dot" />
-          {preRoll ? `Count-in ${countInBeats}` : recording ? "Recording" : playing ? "Loop playing" : hasLoop ? `${croppedBars} bar loop ready` : "Empty"}
+          {preRoll ? `Count-in ${countInBeats}` : recording ? "Recording" : playing ? "Loop playing" : hasLoop ? `${formatBeats(croppedBeats)} loop ready` : "Empty"}
         </div>
       </div>
 
-      <div className="looper-timeline" aria-label={`${croppedBars} bar loop`}>
+      <div className="looper-timeline" aria-label={`${formatBeats(croppedBeats)} loop`}>
         <div className="looper-grid-lines"><i /><i /><i /><i /><i /><i /><i /><i /></div>
         {hasLoop ? (
           <div className="looper-waveform">
@@ -79,15 +134,22 @@ export function Looper({ transport }) {
         {hasLoop ? <div className="looper-crop-right" style={{ width: `${cropEndPct}%` }} /> : null}
         {hasLoop ? <div className="looper-playhead" style={{ left: `${loopProgress}%` }} /> : null}
         <div className="looper-timeline-caption">
-          <span>{hasLoop ? `${croppedBars} bar${croppedBars === 1 ? "" : "s"}` : "No loop captured yet"}</span>
+          <span>{hasLoop ? formatBeats(croppedBeats) : "No loop captured yet"}</span>
           <span>{looping ? "LOOP" : "ONE SHOT"}</span>
         </div>
       </div>
 
       <div className="looper-controls">
         <div className="looper-primary-controls">
-          <button type="button" className={`looper-record-button ${isRecording ? "is-active" : ""}`} onClick={() => setRecording(!isRecording)}>
-            <span className="looper-record-dot" /> {isRecording ? "Stop recording" : "Record loop"}
+          <button
+            type="button"
+            className={`looper-record-button ${isRecording ? "is-active" : ""}`}
+            onClick={() => setRecording(!isRecording)}
+            title={isRecording ? "Stop loop recording" : "Record loop"}
+            aria-pressed={isRecording}
+            aria-label={isRecording ? "Stop loop recording" : "Record loop"}
+          >
+            <span className="looper-record-dot" aria-hidden="true" />
           </button>
           <button type="button" className="btn btn-primary btn-sm" disabled={!hasLoop} onClick={() => setPlaying(!playing)}>
             {playing ? <IconStop size={13} /> : <IconPlay size={13} />} {playing ? "Stop loop" : "Play loop"}
@@ -96,57 +158,87 @@ export function Looper({ transport }) {
             <IconTrash size={13} /> Clear
           </button>
           <button type="button" className="btn btn-ghost btn-sm" disabled={!hasLoop} onClick={() => emit(FRONTEND_EVENTS.saveLoop)}>
-            <IconSave size={13} /> Save loop
+            <IconSave size={13} /> Save to library
           </button>
         </div>
 
         <div className="looper-settings">
+          <button
+            type="button"
+            className={`metronome-toggle ${clickEnabled ? "is-on" : ""}`}
+            onClick={() => emit(FRONTEND_EVENTS.setLooperClick, { enabled: !clickEnabled })}
+            title={clickEnabled ? "Click is on during the loop count-in and capture" : "Click is off"}
+            aria-pressed={clickEnabled}
+          >
+            <IconMetronome size={15} />
+            <span className="metronome-state">{clickEnabled ? "Click on" : "Click off"}</span>
+          </button>
+
+          <button
+            type="button"
+            className={`metronome-toggle ${!clickDuringCapture ? "is-on" : ""}`}
+            onClick={() => emit(FRONTEND_EVENTS.setLooperClickDuringCapture, { enabled: !clickDuringCapture })}
+            title={clickDuringCapture
+              ? "Click plays through the whole loop capture. Turn on for count-in only (click stops when capture starts)."
+              : "Click only during the count-in — silent while the loop captures."}
+            aria-pressed={!clickDuringCapture}
+          >
+            <span className="metronome-state">
+              {clickDuringCapture ? "Click: loop" : "Click: count-in only"}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            className={`metronome-toggle ${looperMidiClock ? "is-on" : ""}`}
+            onClick={() => emit(FRONTEND_EVENTS.setLooperMidiClock, { enabled: !looperMidiClock })}
+            title={looperMidiClock
+              ? "MIDI clock runs while the loop captures (and its count-in) and stops when the capture ends"
+              : "Send MIDI clock with the looper — the drum machine starts at the count-in and stops when the capture ends"}
+            aria-pressed={looperMidiClock}
+          >
+            <span className={`clock-live-dot ${looperMidiClock ? "is-live" : ""}`} aria-hidden="true" />
+            <span className="metronome-state">
+              {looperMidiClock ? "Clock w/ loop" : "MIDI clock"}
+            </span>
+          </button>
+
+          <label className="count-in-control">
+            <span className="count-in-label">Count-in</span>
+            <NumberInput
+              className="count-in-field"
+              min={0}
+              max={8}
+              step={1}
+              value={countInBeats}
+              onChange={(beats) => emit(FRONTEND_EVENTS.setLooperCountIn, { beats })}
+              suffix="beats"
+              title="Beats of click before the loop capture starts (0 = off)"
+            />
+          </label>
+
           <label className="looper-loop-switch">
             <input type="checkbox" checked={looping} onChange={(e) => emit(FRONTEND_EVENTS.setLooperLooping, { enabled: e.target.checked })} />
             <span className="looper-switch" />
             <span>{looping ? "Loop" : "One shot"}</span>
           </label>
 
-          <label className={`looper-click-toggle ${clickEnabled ? "is-on" : ""}`}>
-            <input type="checkbox" checked={clickEnabled} onChange={(e) => emit(FRONTEND_EVENTS.setLooperClick, { enabled: e.target.checked })} />
-            <IconMetronome size={14} />
-            <span>Click {clickEnabled ? "on" : "off"}</span>
-          </label>
-
-          <label className={`looper-click-toggle ${looperMidiClock ? "is-on" : ""}`} title="Send MIDI clock with the looper — the drum machine starts when the count-in/capture/loop starts and stops when it ends">
-            <input
-              type="checkbox"
-              checked={looperMidiClock}
-              onChange={(e) => emit(FRONTEND_EVENTS.setLooperMidiClock, { enabled: e.target.checked })}
-            />
-            <span>MIDI clock {looperMidiClock ? "on" : "off"}</span>
-          </label>
-
-          <Stepper
-            label="Count-in"
-            value={countInBeats}
-            min={0}
-            max={8}
-            onChange={(beats) => emit(FRONTEND_EVENTS.setLooperCountIn, { beats })}
-            title="Beats of click before the loop capture starts (0 = off)"
-          />
-
           <Stepper
             label="Crop start"
-            value={cropStartBars}
+            value={cropStartBeats}
             min={0}
-            max={!recording && totalBars > 0 ? Math.max(0, totalBars - 1 - cropEndBars) : 0}
-            onChange={(bars) => emitCrop(bars, cropEndBars)}
-            title="Bars to trim off the start of the loop"
+            max={!recording && totalBeats > 0 ? Math.max(0, totalBeats - 1 - cropEndBeats) : 0}
+            onChange={(beats) => emitCrop(beats, cropEndBeats)}
+            title="Beats to trim off the start of the loop (4 beats per bar)"
           />
 
           <Stepper
             label="Crop end"
-            value={cropEndBars}
+            value={cropEndBeats}
             min={0}
-            max={!recording && totalBars > 0 ? Math.max(0, totalBars - 1 - cropStartBars) : 0}
-            onChange={(bars) => emitCrop(cropStartBars, bars)}
-            title="Bars to trim off the end of the loop"
+            max={!recording && totalBeats > 0 ? Math.max(0, totalBeats - 1 - cropStartBeats) : 0}
+            onChange={(beats) => emitCrop(cropStartBeats, beats)}
+            title="Beats to trim off the end of the loop (4 beats per bar)"
           />
         </div>
       </div>

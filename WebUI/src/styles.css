@@ -241,6 +241,53 @@ button {
   font-size: 0.78rem;
 }
 
+/* Global monitoring + click controls on the right of the header:
+   Dry / Gain / Play Vol knobs and the Click sound popover. */
+.app-header-controls {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.header-knobs {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.header-click-sound {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.header-click-sound .click-sound-toggle {
+  height: 30px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-3);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.header-click-sound .click-sound-toggle:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+/* Anchor the popover to the right edge so it stays inside the header. */
+.header-click-sound .click-popover {
+  left: auto;
+  right: 0;
+}
+
 .app-footer {
   margin-top: auto;
   text-align: center;
@@ -306,7 +353,7 @@ button {
 
 .transport {
   display: grid;
-  grid-template-columns: auto minmax(100px, 1fr) auto auto;
+  grid-template-columns: auto minmax(100px, 1fr) auto;
   align-items: center;
   gap: 20px;
   padding: 16px 22px;
@@ -806,12 +853,18 @@ button {
   border-radius: var(--radius);
 }
 
-.looper-header,
-.looper-controls {
+.looper-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 18px;
+}
+
+.looper-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
 }
 
 .looper-header h2 {
@@ -887,12 +940,43 @@ button {
 .looper-playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--warn); box-shadow: 0 0 12px var(--warn); transition: left 0.08s linear; z-index: 2; }
 .looper-timeline-caption { position: absolute; right: 11px; bottom: 7px; left: 11px; display: flex; justify-content: space-between; color: var(--text-3); font-family: var(--mono); font-size: 0.63rem; letter-spacing: 0.06em; text-transform: uppercase; z-index: 3; }
 
-.looper-primary-controls { display: flex; flex-wrap: wrap; gap: 8px; }
-.looper-record-button { display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font: inherit; font-size: 0.74rem; font-weight: 650; cursor: pointer; }
-.looper-record-button:hover { border-color: var(--rec); color: var(--rec); }
-.looper-record-button.is-active { border-color: var(--rec); background: var(--rec); color: #fff; }
-.looper-record-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--rec); }
-.looper-record-button.is-active .looper-record-dot { background: #fff; }
+.looper-primary-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.looper-record-button {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  background: var(--inset);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+.looper-record-button:hover {
+  border-color: rgba(220, 38, 38, 0.50);
+  box-shadow: 0 0 0 4px rgba(220, 38, 38, 0.06);
+}
+.looper-record-button:active { transform: scale(0.96); }
+.looper-record-button.is-active {
+  background: var(--rec);
+  border-color: var(--rec);
+  animation: rec-pulse 1.5s ease-in-out infinite;
+}
+.looper-record-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--rec);
+  transition: border-radius 0.12s ease, background 0.12s ease, width 0.12s ease, height 0.12s ease;
+}
+.looper-record-button.is-active .looper-record-dot {
+  background: #fff;
+  border-radius: 3px;
+  width: 10px;
+  height: 10px;
+}
 
 .looper-settings { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 14px; }
 
@@ -903,11 +987,7 @@ button {
 .looper-loop-switch input:checked + .looper-switch { background: var(--accent); }
 .looper-loop-switch input:checked + .looper-switch::after { transform: translateX(13px); background: #fff; }
 
-.looper-click-toggle { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px; border-radius: var(--radius-pill); border: 1px solid var(--border); background: transparent; color: var(--text-3); font-size: 0.74rem; font-weight: 600; cursor: pointer; white-space: nowrap; transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease; }
-.looper-click-toggle input { position: absolute; opacity: 0; pointer-events: none; }
-.looper-click-toggle:hover { color: var(--text); border-color: var(--border-strong); }
-.looper-click-toggle.is-on { background: var(--accent-dim); border-color: var(--accent-border); color: var(--accent); }
-.looper-click-toggle span { text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.68rem; }
+.looper-settings { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 16px; }
 
 .looper-stepper { display: inline-flex; flex-direction: column; gap: 4px; }
 .looper-stepper-label { font-size: 0.64rem; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.12em; font-weight: 600; }
@@ -916,6 +996,113 @@ button {
 .looper-stepper-btn:hover:not(:disabled) { border-color: var(--accent-border); color: var(--accent); }
 .looper-stepper-btn:disabled { opacity: 0.35; cursor: default; }
 .looper-stepper-value { min-width: 26px; text-align: center; font-family: var(--mono); font-size: 0.8rem; color: var(--text); font-variant-numeric: tabular-nums; }
+
+/* ============================================================
+   Take review (pending take)
+   ============================================================ */
+
+.take-review {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px 22px;
+  background: linear-gradient(135deg, var(--panel), var(--inset));
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius);
+}
+
+.take-review-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.take-review-header h2 {
+  margin: 5px 0 4px;
+  color: var(--text);
+  font-size: 1.05rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.take-review-header p {
+  margin: 0;
+  color: var(--text-3);
+  font-size: 0.78rem;
+}
+
+.take-review-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-3);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.take-review-state-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+
+.take-review.is-playing .take-review-state { color: var(--accent); }
+.take-review.is-playing .take-review-state-dot { background: var(--accent); }
+
+.take-review-timeline {
+  position: relative;
+  height: 76px;
+  overflow: hidden;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--inset);
+}
+
+.take-review-timeline .waveform {
+  position: absolute;
+  inset: 0;
+  padding: 10px 12px 20px;
+}
+
+.take-review-timeline .waveform-trace { stroke: var(--accent); opacity: 0.9; }
+.take-review-timeline .waveform-baseline { display: none; }
+
+.take-review-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--warn);
+  box-shadow: 0 0 12px var(--warn);
+  transition: left 0.08s linear;
+  z-index: 2;
+}
+
+.take-review-timeline-caption {
+  position: absolute;
+  right: 11px;
+  bottom: 6px;
+  left: 11px;
+  display: flex;
+  justify-content: space-between;
+  color: var(--text-3);
+  font-family: var(--mono);
+  font-size: 0.63rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  z-index: 3;
+}
+
+.take-review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
 
 /* ============================================================
    Level meter
@@ -2027,6 +2214,15 @@ button {
    ============================================================ */
 
 @media (max-width: 920px) {
+  .app-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .app-header-controls {
+    align-self: flex-end;
+  }
+
   .transport {
     grid-template-columns: 1fr 1fr;
     row-gap: 18px;
@@ -2037,8 +2233,12 @@ button {
     padding-left: 0;
   }
 
-  .looper-header,
-  .looper-controls {
+  .looper-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .take-review-header {
     align-items: flex-start;
     flex-direction: column;
   }

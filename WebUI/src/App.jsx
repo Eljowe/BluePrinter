@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Transport } from "./components/Transport";
+import { HeaderControls } from "./components/HeaderControls";
+import { TakeReview } from "./components/TakeReview";
 import { LibraryFolderRow } from "./components/LibraryFolderRow";
 import { SnippetList } from "./components/SnippetList";
 import { Notification } from "./components/Notification";
@@ -42,7 +44,8 @@ function readInitialTransport() {
     clickPitch: 1000, clickAccentPitch: 1500, clickDecay: 90, clickVolume: 0.35, clickAccentVolume: 0.5, clickNoise: 0.1,
     midiClockEnabled: false, midiOutputDevice: "", midiOutputDeviceList: [],
      preRollActive: false, transportPosition: 0,
-     looperRecording: false, looperPreRoll: false, looperPlaying: false, looperLooping: true, looperClickEnabled: true, looperCountInBeats: 4, looperCropStartBars: 0, looperCropEndBars: 0, audioLoopStart: 0, audioLoopPosition: 0, audioLoopLength: 0, audioLoopPeaks: [], chainLevels: [],
+     takePending: false, takeLength: 0, takePlaying: false, takePosition: 0, takePeaks: [],
+     looperRecording: false, looperPreRoll: false, looperPlaying: false, looperLooping: true, looperClickEnabled: true, looperClickDuringCapture: true, looperCountInBeats: 4, looperCropStartBeats: 0, looperCropEndBeats: 0, audioLoopStart: 0, audioLoopPosition: 0, audioLoopLength: 0, audioLoopPeaks: [], chainLevels: [],
   };
   return {
     ...raw,
@@ -68,7 +71,12 @@ function readInitialTransport() {
     midiOutputDeviceList: Array.isArray(raw.midiOutputDeviceList) ? raw.midiOutputDeviceList : [],
      preRollActive: Boolean(raw.preRollActive),
      transportPosition: Number(raw.transportPosition ?? 0),
-     looperRecording: Boolean(raw.looperRecording), looperPreRoll: Boolean(raw.looperPreRoll), looperPlaying: Boolean(raw.looperPlaying), looperLooping: raw.looperLooping !== false, looperClickEnabled: raw.looperClickEnabled !== false, looperCountInBeats: Number(raw.looperCountInBeats ?? 4), looperCropStartBars: Number(raw.looperCropStartBars ?? 0), looperCropEndBars: Number(raw.looperCropEndBars ?? 0), audioLoopStart: Number(raw.audioLoopStart ?? 0), audioLoopPosition: Number(raw.audioLoopPosition ?? 0), audioLoopLength: Number(raw.audioLoopLength ?? 0), audioLoopPeaks: Array.isArray(raw.audioLoopPeaks) ? raw.audioLoopPeaks : [], chainLevels: Array.isArray(raw.chainLevels) ? raw.chainLevels : [],
+     takePending: Boolean(raw.takePending),
+     takeLength: Number(raw.takeLength ?? 0),
+     takePlaying: Boolean(raw.takePlaying),
+     takePosition: Number(raw.takePosition ?? 0),
+     takePeaks: Array.isArray(raw.takePeaks) ? raw.takePeaks : [],
+     looperRecording: Boolean(raw.looperRecording), looperPreRoll: Boolean(raw.looperPreRoll), looperPlaying: Boolean(raw.looperPlaying), looperLooping: raw.looperLooping !== false, looperClickEnabled: raw.looperClickEnabled !== false, looperClickDuringCapture: raw.looperClickDuringCapture !== false, looperCountInBeats: Number(raw.looperCountInBeats ?? 4), looperCropStartBeats: Number(raw.looperCropStartBeats ?? 0), looperCropEndBeats: Number(raw.looperCropEndBeats ?? 0), audioLoopStart: Number(raw.audioLoopStart ?? 0), audioLoopPosition: Number(raw.audioLoopPosition ?? 0), audioLoopLength: Number(raw.audioLoopLength ?? 0), audioLoopPeaks: Array.isArray(raw.audioLoopPeaks) ? raw.audioLoopPeaks : [], chainLevels: Array.isArray(raw.chainLevels) ? raw.chainLevels : [],
   };
 }
 
@@ -155,14 +163,20 @@ export default function App() {
         midiOutputDeviceList: Array.isArray(payload.midiOutputDeviceList) ? payload.midiOutputDeviceList : prev.midiOutputDeviceList,
         preRollActive:    Boolean(payload.preRollActive),
          transportPosition: Number(payload.transportPosition ?? 0),
+         takePending: payload.takePending !== undefined ? Boolean(payload.takePending) : prev.takePending,
+         takeLength: payload.takeLength !== undefined ? Number(payload.takeLength) : prev.takeLength,
+         takePlaying: payload.takePlaying !== undefined ? Boolean(payload.takePlaying) : prev.takePlaying,
+         takePosition: Number(payload.takePosition ?? prev.takePosition ?? 0),
+         takePeaks: Array.isArray(payload.takePeaks) ? payload.takePeaks : (prev.takePeaks ?? []),
          looperRecording: payload.looperRecording !== undefined ? Boolean(payload.looperRecording) : prev.looperRecording,
          looperPreRoll: payload.looperPreRoll !== undefined ? Boolean(payload.looperPreRoll) : prev.looperPreRoll,
          looperPlaying: payload.looperPlaying !== undefined ? Boolean(payload.looperPlaying) : prev.looperPlaying,
          looperLooping: payload.looperLooping !== undefined ? Boolean(payload.looperLooping) : prev.looperLooping,
          looperClickEnabled: payload.looperClickEnabled !== undefined ? Boolean(payload.looperClickEnabled) : prev.looperClickEnabled,
+         looperClickDuringCapture: payload.looperClickDuringCapture !== undefined ? Boolean(payload.looperClickDuringCapture) : prev.looperClickDuringCapture,
          looperCountInBeats: payload.looperCountInBeats !== undefined ? Number(payload.looperCountInBeats) : prev.looperCountInBeats,
-         looperCropStartBars: payload.looperCropStartBars !== undefined ? Number(payload.looperCropStartBars) : prev.looperCropStartBars,
-         looperCropEndBars: payload.looperCropEndBars !== undefined ? Number(payload.looperCropEndBars) : prev.looperCropEndBars,
+         looperCropStartBeats: payload.looperCropStartBeats !== undefined ? Number(payload.looperCropStartBeats) : prev.looperCropStartBeats,
+         looperCropEndBeats: payload.looperCropEndBeats !== undefined ? Number(payload.looperCropEndBeats) : prev.looperCropEndBeats,
          audioLoopStart: Number(payload.audioLoopStart ?? prev.audioLoopStart ?? 0),
          audioLoopPosition: Number(payload.audioLoopPosition ?? prev.audioLoopPosition ?? 0),
          audioLoopLength: Number(payload.audioLoopLength ?? prev.audioLoopLength ?? 0),
@@ -309,25 +323,28 @@ export default function App() {
             <p>Record a take, name it, note what to work on.</p>
           </div>
         </div>
+        <HeaderControls
+          gain={gain}
+          onGainChange={handleGainChange}
+          playbackVolume={playbackVolume}
+          onPlaybackVolumeChange={handlePlaybackVolumeChange}
+          dryLevel={transport.dryLevel}
+          onDryLevelChange={handleDryLevelChange}
+          clickParams={transport}
+        />
       </header>
 
       <Transport
         transport={transport}
-        gain={gain}
-        onGainChange={handleGainChange}
-        playbackVolume={playbackVolume}
-        onPlaybackVolumeChange={handlePlaybackVolumeChange}
         metronomeEnabled={transport.metronomeEnabled}
         bpm={transport.bpm}
         countInBeats={transport.countInBeats}
-        dryLevel={transport.dryLevel}
         midiClockEnabled={transport.midiClockEnabled}
         takeMidiClock={transport.takeMidiClock}
         clickDuringTake={transport.clickDuringTake !== false}
         onMetronomeChange={handleMetronomeChange}
         onBpmChange={handleBpmChange}
         onCountInBeatsChange={handleCountInBeatsChange}
-        onDryLevelChange={handleDryLevelChange}
         onTakeMidiClockChange={handleTakeMidiClockChange}
         onClickDuringTakeChange={handleClickDuringTakeChange}
       />
@@ -340,6 +357,8 @@ export default function App() {
         onStartStop={() => handleMidiClockChange(!transport.midiClockEnabled)}
         onDeviceChange={handleMidiDeviceChange}
       />
+
+      <TakeReview transport={transport} />
 
       <Looper transport={transport} />
 
@@ -376,7 +395,7 @@ export default function App() {
       />
 
       <footer className="app-footer">
-        Recordings stay in memory until you save them — pick a library folder for one-click auto-save.
+        Takes stay in memory until you save or discard them — pick a library folder so saves have a destination.
       </footer>
     </main>
   );

@@ -17,10 +17,11 @@ to disk (WAV + sidecar JSON).
   field (up to 2000 chars). Edits are committed on blur.
 - **Playback** through the plugin's output bus. Overrides monitoring while
   playing.
-- **Save to disk** — choose a library folder, then per-take "Save" writes a
-  16-bit WAV plus a JSON sidecar (name, comments, sample rate, channel count,
-  duration, creation time). If the library folder is set, every new take is
-  auto-saved there.
+- **Save to disk** — after stopping, the take stays in memory as a pending
+  take you can replay; then save it to the library (16-bit WAV plus a JSON
+  sidecar: name, comments, sample rate, channel count, duration, creation
+  time) or discard it. If a library folder is set, "Save to library" writes
+  the WAV + sidecar there.
 - **Reveal in Explorer** — opens the saved WAV in Windows Explorer.
 - **Live level meter** on the transport, with peak hold.
 - **Snippet list** with per-take waveform thumbnail (downsampled peaks).
@@ -41,11 +42,12 @@ to disk (WAV + sidecar JSON).
   A synth chain can sit next to a guitar chain without either clobbering
   the other's signal — chains never hear each other.
 - **Audio looper** — capture a loop of the record mix (dry input +
-  selected chains — guitar, synth sounds, FX — all baked in), with its
-  own click + count-in, bar-stepped start/end cropping, and loop/one-shot
-  playback. Saving a loop converts it into a library snippet using the
-  same WAV + JSON flow as the take recorder. Audio-only: there is no MIDI
-  event sequencing or `.mid` export.
+  selected chains — guitar, synth sounds, FX — all baked in), with the
+  same click + count-in + MIDI-clock controls as the take recorder,
+  beat-stepped start/end cropping, and loop/one-shot playback. Saving a
+  loop converts it into a library snippet using the same one-click flow
+  as the take recorder. Audio-only: there is no MIDI event sequencing or
+  `.mid` export.
 
 The existing `Gain` parameter is kept and wired through the APVTS so you can
 trim monitoring level while recording.
@@ -170,6 +172,7 @@ Events flow through `window.__JUCE__.backend`:
 | --------------------------------------------------------- | -------------------------------------------------- |
 | `frontendSetParameter`                                    | Update an APVTS parameter (`Gain`, `PlaybackVolume`) |
 | `frontendStartRecording` / `frontendStopRecording`        | Transport: record toggle                           |
+| `frontendSetTakePlayback` / `frontendSaveTake` / `frontendDiscardTake` | Pending-take review: play the take / save it to the library / discard it |
 | `frontendStartPlayback` / `frontendStopPlayback`          | Transport: play a snippet id / stop                |
 | `frontendUpdateSnippetMeta` / `frontendDeleteSnippet`     | Edit name + comments / remove a snippet            |
 | `frontendDetectSnippetKey`                                | Run key detection on a snippet                     |
@@ -181,8 +184,8 @@ Events flow through `window.__JUCE__.backend`:
 | `frontendSetMetronome` / `frontendSetBpm` / `frontendSetCountInBeats` | Metronome + count-in settings        |
 | `frontendSetMidiClock` / `frontendSetMidiDevice`          | MIDI clock output on/off + output device           |
 | `frontendSetLooperRecording` / `...Playing` / `...Looping` | Looper: record / play / loop toggle              |
-| `frontendSetLooperClick` / `frontendSetLooperCountIn`     | Looper: click + count-in beats                     |
-| `frontendSetLoopCrop` / `frontendClearLoop` / `frontendSaveLoop` | Looper: crop start/end bars / clear / save as snippet |
+| `frontendSetLooperClick` / `frontendSetLooperCountIn` / `frontendSetLooperClickDuringCapture` | Looper: click + count-in beats + click-through-capture gate |
+| `frontendSetLoopCrop` / `frontendClearLoop` / `frontendSaveLoop` | Looper: crop start/end **beats** / clear / save as snippet to the library folder |
 | `frontendAddVst3` / `frontendRemoveVst3` / `frontendMoveVst3` | VST3 chain: add / remove / reorder slots       |
 | `frontendSetVst3Bypass` / `frontendOpenVst3Editor` / `frontendCloseVst3Editor` | Chain slot bypass + native editor |
 | `frontendSetVst3MidiPass`                               | Per-chain MIDI pass-through toggle (default: FX chain off) |
@@ -209,10 +212,12 @@ through `withInitialisationData("parameters" | "snippets" | "transport", ...)`.
   pre-allocated in `prepareToPlay`. Recording writes into it with a lock
   (the message thread acquires the same lock only to copy the final take
   into a new buffer).
-- After the user clicks stop, the message thread finalises: it allocates a
-  buffer sized to the actual take, copies the data, computes 256-point
-  peak data for the waveform thumbnail, and adds the snippet to the
-  library.
+- After the user clicks stop, the message thread finalises: the take is **not
+  saved automatically** — it becomes a pending take (waveform peaks computed,
+  length stored) that the UI offers for replay, then an explicit
+  **Save to library** (copies the audio into a new snippet and writes WAV +
+  sidecar when a library folder is set) or **Discard**. Any new take or loop
+  capture invalidates the pending take.
 - Playback stores the snippet pointer as a `shared_ptr` on the audio
   thread, so deleting a snippet from the library can't dangle an
   in-flight playback.
@@ -227,21 +232,27 @@ produce, so the loop sounds exactly like what you heard while recording:
   pre-allocated `recordBuffer`, so synth sounds and FX from the selected
   chains are baked in and deselected chains are left out.
 - Its own **click + count-in** run off the same metronome clock; the click is
-  mixed after the capture tap so it never ends up in the loop.
+  mixed after the capture tap so it never ends up in the loop. The looper has
+  the same click controls as the take recorder — click on/off, **Click: loop /
+  count-in only** (click silent through the capture), a count-in field, and
+  the **Clock w/ loop** MIDI clock toggle — plus the global **Click sound**
+  tuning (pitch/snap/volume) in the plugin header, which the take and the
+  looper share.
 - On stop, the captured length is trimmed to the nearest full 4/4 bar
-  (beat-length fallback). **Crop start / end** steppers trim whole bars off
-  either side — the audible window is `[audioLoopStart, audioLoopStart +
-  audioLoopLength)`. The timeline shows a live waveform of the cropped
-  loop, with the trimmed regions shaded.
+  (beat-length fallback). **Crop start / end** steppers trim in **whole
+  beats** (4 per bar at the current BPM) off either side — the audible window
+  is `[audioLoopStart, audioLoopStart + audioLoopLength)`. The timeline shows
+  a live waveform of the cropped loop, with the trimmed regions shaded.
 - Playback mixes the loop over the live input, post-chain (the loop audio is
   already processed, so it isn't re-run through the chains), with a
   precomputed crossfade at the wrap point. Loop/one-shot is toggleable.
-- **Save loop** converts the cropped loop into a library snippet
-  (`BluePrinterAudioProcessor::addLoopSnippet()`, message thread only) and
-  opens the same WAV + JSON save dialog as the take recorder. The library
-  snippet is the only persistence story — there is no MIDI `.mid` export,
-  and MIDI event recording/quantization was removed from the looper
-  entirely (MIDI-listening chains still play instruments live).
+- **Save to library** converts the cropped loop into a library snippet
+  (`BluePrinterAudioProcessor::saveLoopSnippet()`, message thread only) and —
+  exactly like the take recorder — writes WAV + JSON to the library folder
+  when one is set (no dialog). The library snippet is the only persistence
+  story — there is no MIDI `.mid` export, and MIDI event
+  recording/quantization was removed from the looper entirely
+  (MIDI-listening chains still play instruments live).
 - The looper and the take recorder share `recordBuffer` and preempt each
   other, so they never capture simultaneously.
 
@@ -264,10 +275,10 @@ Update these together:
 
 This repository has no CTest tests configured. Run the standalone, hit
 **RECORD**, play something into the input (the standalone hosts a virtual
-input that you can route from your DAW or any source), and verify the take
-appears in the snippet list with editable name and comments. Then click
-**Save** and confirm the WAV + JSON are written to your chosen library
-folder.
+input that you can route from your DAW or any source), stop, then verify the
+take-review panel lets you replay the take and either **Save** it (it appears
+in the snippet list with editable name and comments, and the WAV + JSON are
+written to the library folder when one is set) or **Discard** it.
 
 ## VS Code tasks
 

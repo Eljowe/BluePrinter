@@ -11,6 +11,11 @@ export const FRONTEND_EVENTS = {
   setParameter: "frontendSetParameter",
   startRecording: "frontendStartRecording",
   stopRecording: "frontendStopRecording",
+  // Pending-take review: { enabled } toggles take playback; saveTake /
+  // discardTake finalise the recorded take after review.
+  setTakePlayback: "frontendSetTakePlayback",
+  saveTake: "frontendSaveTake",
+  discardTake: "frontendDiscardTake",
   startPlayback: "frontendStartPlayback",
   stopPlayback: "frontendStopPlayback",
   updateSnippet: "frontendUpdateSnippetMeta",
@@ -53,6 +58,11 @@ export const FRONTEND_EVENTS = {
   setLooperLooping: "frontendSetLooperLooping",
   setLooperClick: "frontendSetLooperClick",
   setLooperCountIn: "frontendSetLooperCountIn",
+  // { enabled } — false = click only during the loop count-in, silent
+  // through the capture itself (mirrors setClickDuringTake).
+  setLooperClickDuringCapture: "frontendSetLooperClickDuringCapture",
+  // Crop the captured loop: { startBeats, endBeats } in whole beats
+  // (4 per bar at the current BPM).
   setLoopCrop: "frontendSetLoopCrop",
   clearLoop: "frontendClearLoop",
   addVst3: "frontendAddVst3",

@@ -139,6 +139,7 @@ function ChainPanel({
   muted,
   midiChannels,
   slots,
+  pending,
   available,
   openEditors,
   scanning,
@@ -223,7 +224,11 @@ function ChainPanel({
     : midiCount >= 16 ? "all MIDI"
     : midiCount === 0 ? "MIDI none"
     : `MIDI ${sortedNumbers(midiChannels).join(",")}`;
-  const pluginLabel = slots.length === 0 ? "no plugins" : `${slots.length} plugin${slots.length === 1 ? "" : "s"}`;
+  const totalPlugins = slots.length + pending;
+  const pluginLabel = pending > 0
+    ? `${totalPlugins} plugin${totalPlugins === 1 ? "" : "s"} restoring…`
+    : slots.length === 0 ? "no plugins"
+    : `${slots.length} plugin${slots.length === 1 ? "" : "s"}`;
   return (
     <div className="fx-chain-panel" data-chain={chain}>
       <header className="fx-chain-header">
@@ -564,6 +569,7 @@ export function PluginChain({ chainState, inputChannels, chainLevels, availableP
               muted={Boolean(chain.muted)}
               midiChannels={Array.isArray(chain.midiChannels) ? chain.midiChannels : ALL_MIDI_CHANNELS}
               slots={Array.isArray(chain.slots) ? chain.slots : []}
+              pending={Number(chain.pending) || 0}
               available={available}
               openEditors={openEditors}
               scanning={scanning}

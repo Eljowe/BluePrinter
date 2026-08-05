@@ -50,6 +50,16 @@ public:
     bool getSkipStateRestore() const { return skipStateRestore.load (std::memory_order_acquire); }
 
     // === Folder scanning ===
+    // Recursively collect every VST3 plugin under a folder, mixing the
+    // two installation layouts: loose single-file .vst3 binaries and
+    // .vst3 bundle directories (whose real binary lives under
+    // Contents/x86_64-win/). Bundle directories are returned as-is and
+    // never descended into (that would double-report their inner
+    // binary). Depth-limited so a pathological tree can't stall the
+    // scan, and deduplicated. Returns an empty array if the folder
+    // doesn't exist.
+    static juce::Array<juce::File> findVst3Files (const juce::File& folder, int maxDepth = 8);
+
     // Walk a directory for .vst3 files and return a description for
     // every plugin type found. Blocklisted plugins are filtered out of
     // the result.
