@@ -2453,11 +2453,17 @@ button {
  * states: starting · restoring · done · error · leaving · reduced-motion
  * contrast: pass (paper/ink 15:1 · text-2 ~7:1 · accent ~4.6:1)
  * pre-emit critique: P5 H5 E5 S4 R5 V4 */
+/* While the splash is up, the document must not scroll — the app
+   underneath is rendered and would otherwise show a scrollbar. */
+html:has(.bp-splash) {
+  overflow: hidden;
+}
+
 .bp-splash {
   position: fixed;
   inset: 0;
   z-index: 1000;
-  overflow-x: clip;
+  overflow: hidden;
   background:
     radial-gradient(900px 480px at 10% -10%, var(--accent-dim), transparent 60%),
     var(--bg);
@@ -2489,8 +2495,6 @@ button {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding-bottom: 14px;
-  border-bottom: 1px solid var(--border);
 }
 
 .bp-splash__emblem {

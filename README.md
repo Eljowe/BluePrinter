@@ -7,6 +7,43 @@ This fork of the template turns the plugin into a **guitar take recorder**:
 hit record, play, stop, name the take, write down what to work on, then save
 to disk (WAV + sidecar JSON).
 
+## Install (no source code needed)
+
+Windows 10/11 only. Grab the latest installer from the
+[Releases page](../../releases):
+
+```
+BluePrinterSetup-1.0.0.exe
+SHA256SUMS.txt
+```
+
+Run the installer — it needs admin rights once (SmartScreen may warn
+"Windows protected your PC" because the installer is not code-signed; use
+"More info → Run anyway" for now). It installs:
+
+- **BluePrinter.vst3** → `C:\Program Files\Common Files\VST3\` (every DAW
+  scans this folder, so it appears after a plugin rescan — no registry
+  fiddling)
+- **BluePrinter.exe** (standalone app) → `C:\Program Files\BluePrinter\`,
+  with a Start Menu shortcut
+
+The installer also checks for the **Microsoft VC++ redistributable** and
+the **WebView2 Runtime** and downloads + installs them silently only when
+they are missing (WebView2 ships with Windows 11, so it is usually skipped).
+
+Uninstalling via Settings → Apps → Installed apps → BluePrinter removes the
+program files and shortcuts but **keeps your settings and snippet library**.
+
+Verify the download before running (optional):
+
+```powershell
+Get-FileHash .\BluePrinterSetup-1.0.0.exe -Algorithm SHA256
+# compare against SHA256SUMS.txt
+```
+
+If you build from source instead, the release bundle can be regenerated with
+the **Build Release Bundle** VS Code task (`installer/build-release.ps1`).
+
 ## What it does
 
 - **Live recording** of the audio flowing through the plugin into an in-memory
