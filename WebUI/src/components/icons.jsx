@@ -179,6 +179,24 @@ export function IconMetronome(props) {
   );
 }
 
+export function IconSearch(props) {
+  return (
+    <Svg {...props}>
+      <circle cx="11" cy="11" r="7" />
+      <path d="m20 20-3.8-3.8" />
+    </Svg>
+  );
+}
+
+export function IconTag(props) {
+  return (
+    <Svg {...props}>
+      <path d="M3 11V4a1 1 0 0 1 1-1h7l10 10-8 8z" />
+      <circle cx="7.5" cy="7.5" r="1.4" fill="currentColor" stroke="none" />
+    </Svg>
+  );
+}
+
 export function IconScan(props) {
   return (
     <Svg {...props}>

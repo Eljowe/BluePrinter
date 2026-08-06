@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FRONTEND_EVENTS, emit } from "../bridge";
-import { IconMetronome, IconPlay, IconSave, IconStop, IconTrash } from "./icons";
+import { IconPlay, IconSave, IconStop, IconTrash } from "./icons";
 import { Waveform } from "./Waveform";
 
 // Shared with the transport: count-in field with a "beats" suffix.
@@ -79,9 +79,6 @@ export function Looper({ transport }) {
   const isRecording = recording || preRoll;
   const playing = Boolean(transport?.looperPlaying);
   const looping = transport?.looperLooping !== false;
-  const clickEnabled = transport?.looperClickEnabled !== false;
-  const clickDuringCapture = transport?.looperClickDuringCapture !== false;
-  const looperMidiClock = Boolean(transport?.looperMidiClock);
   const countInBeats = Number(transport?.looperCountInBeats ?? 0);
   const cropStartBeats = Number(transport?.looperCropStartBeats ?? 0);
   const cropEndBeats = Number(transport?.looperCropEndBeats ?? 0);
@@ -163,46 +160,6 @@ export function Looper({ transport }) {
         </div>
 
         <div className="looper-settings">
-          <button
-            type="button"
-            className={`metronome-toggle ${clickEnabled ? "is-on" : ""}`}
-            onClick={() => emit(FRONTEND_EVENTS.setLooperClick, { enabled: !clickEnabled })}
-            title={clickEnabled ? "Click is on during the loop count-in and capture" : "Click is off"}
-            aria-pressed={clickEnabled}
-          >
-            <IconMetronome size={15} />
-            <span className="metronome-state">{clickEnabled ? "Click on" : "Click off"}</span>
-          </button>
-
-          <button
-            type="button"
-            className={`metronome-toggle ${!clickDuringCapture ? "is-on" : ""}`}
-            onClick={() => emit(FRONTEND_EVENTS.setLooperClickDuringCapture, { enabled: !clickDuringCapture })}
-            title={clickDuringCapture
-              ? "Click plays through the whole loop capture. Turn on for count-in only (click stops when capture starts)."
-              : "Click only during the count-in — silent while the loop captures."}
-            aria-pressed={!clickDuringCapture}
-          >
-            <span className="metronome-state">
-              {clickDuringCapture ? "Click: loop" : "Click: count-in only"}
-            </span>
-          </button>
-
-          <button
-            type="button"
-            className={`metronome-toggle ${looperMidiClock ? "is-on" : ""}`}
-            onClick={() => emit(FRONTEND_EVENTS.setLooperMidiClock, { enabled: !looperMidiClock })}
-            title={looperMidiClock
-              ? "MIDI clock runs while the loop captures (and its count-in) and stops when the capture ends"
-              : "Send MIDI clock with the looper — the drum machine starts at the count-in and stops when the capture ends"}
-            aria-pressed={looperMidiClock}
-          >
-            <span className={`clock-live-dot ${looperMidiClock ? "is-live" : ""}`} aria-hidden="true" />
-            <span className="metronome-state">
-              {looperMidiClock ? "Clock w/ loop" : "MIDI clock"}
-            </span>
-          </button>
-
           <label className="count-in-control">
             <span className="count-in-label">Count-in</span>
             <NumberInput

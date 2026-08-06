@@ -35,6 +35,10 @@ export const FRONTEND_EVENTS = {
   // disk in the processor's constructor arrive before the editor
   // listener is registered, so the notification is lost.
   getSnippets: "frontendGetSnippets",
+  // { color, name } — a user name for a snippet colour tag (empty
+  // name resets to the built-in label). Persisted in the properties
+  // file, shipped back with every library snapshot as `tagNames`.
+  renameTag: "frontendRenameTag",
   setMetronome: "frontendSetMetronome",
   setBpm: "frontendSetBpm",
   setCountInBeats: "frontendSetCountInBeats",
@@ -45,22 +49,14 @@ export const FRONTEND_EVENTS = {
   setClickParams: "frontendSetClickParams",
   setMidiClock: "frontendSetMidiClock",
   setMidiDevice: "frontendSetMidiDevice",
-  // Per-section MIDI clock toggles: { enabled }. The take recorder and
-  // the looper each start/stop the clock with their own operation,
-  // independent of the free-running global setMidiClock toggle.
-  setTakeMidiClock: "frontendSetTakeMidiClock",
-  setLooperMidiClock: "frontendSetLooperMidiClock",
-  // { enabled } — false = click only during the count-in, silent
-  // through the take itself.
-  setClickDuringTake: "frontendSetClickDuringTake",
+  // Header-level click-during-capture gate: { enabled } — false = the
+  // click only plays during count-ins, silent through takes and loop
+  // captures. Shared by the take recorder and the looper.
+  setClickDuringCapture: "frontendSetClickDuringCapture",
   setLooperRecording: "frontendSetLooperRecording",
   setLooperPlaying: "frontendSetLooperPlaying",
   setLooperLooping: "frontendSetLooperLooping",
-  setLooperClick: "frontendSetLooperClick",
   setLooperCountIn: "frontendSetLooperCountIn",
-  // { enabled } — false = click only during the loop count-in, silent
-  // through the capture itself (mirrors setClickDuringTake).
-  setLooperClickDuringCapture: "frontendSetLooperClickDuringCapture",
   // Crop the captured loop: { startBeats, endBeats } in whole beats
   // (4 per bar at the current BPM).
   setLoopCrop: "frontendSetLoopCrop",

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Transport } from "./components/Transport";
 import { HeaderControls } from "./components/HeaderControls";
 import { TakeReview } from "./components/TakeReview";
@@ -7,7 +7,7 @@ import { SnippetList } from "./components/SnippetList";
 import { Notification } from "./components/Notification";
 import { PluginChain } from "./components/PluginChain";
 import { Looper } from "./components/Looper";
-import { MidiClock } from "./components/MidiClock";
+import { SplashScreen } from "./components/SplashScreen";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { BACKEND_EVENTS, FRONTEND_EVENTS, emit, getInitialData, subscribe } from "./bridge";
 import iconUrl from "./icon.svg";
@@ -16,6 +16,11 @@ const PARAM_IDS = {
   gain: "Gain",
   playbackVolume: "PlaybackVolume",
 };
+
+// Splash timings: hold the branded splash for at least this long so a fast
+// (chain-less) startup still feels intentional, then fade out over this.
+const SPLASH_MIN_MS = 900;
+const SPLASH_FADE_MS = 400;
 
 function readInitialParameters() {
   const first = getInitialData().parameters?.[0];
@@ -33,6 +38,12 @@ function readInitialSnippets() {
   return [];
 }
 
+function readInitialTagNames() {
+  const raw = getInitialData().tagNames;
+  if (raw && typeof raw === "object") return raw;
+  return {};
+}
+
 function readInitialTransport() {
   const raw = getInitialData().transport;
   if (!raw) return {
@@ -40,12 +51,12 @@ function readInitialTransport() {
     playingSnippetId: -1, playingPosition: 0,
     inputLevel: 0, inputPeak: 0,
     libraryFolder: "", lastSaveError: "",
-    metronomeEnabled: true, bpm: 120, countInBeats: 4, dryLevel: 1,
+    metronomeEnabled: true, bpm: 120, countInBeats: 4, dryLevel: 1, clickDuringCapture: true,
     clickPitch: 1000, clickAccentPitch: 1500, clickDecay: 90, clickVolume: 0.35, clickAccentVolume: 0.5, clickNoise: 0.1,
     midiClockEnabled: false, midiOutputDevice: "", midiOutputDeviceList: [],
      preRollActive: false, transportPosition: 0,
      takePending: false, takeLength: 0, takePlaying: false, takePosition: 0, takePeaks: [],
-     looperRecording: false, looperPreRoll: false, looperPlaying: false, looperLooping: true, looperClickEnabled: true, looperClickDuringCapture: true, looperCountInBeats: 4, looperCropStartBeats: 0, looperCropEndBeats: 0, audioLoopStart: 0, audioLoopPosition: 0, audioLoopLength: 0, audioLoopPeaks: [], chainLevels: [],
+     looperRecording: false, looperPreRoll: false, looperPlaying: false, looperLooping: true, looperCountInBeats: 4, looperCropStartBeats: 0, looperCropEndBeats: 0, audioLoopStart: 0, audioLoopPosition: 0, audioLoopLength: 0, audioLoopPeaks: [], chainLevels: [],
   };
   return {
     ...raw,
@@ -60,6 +71,7 @@ function readInitialTransport() {
     bpm: Number(raw.bpm ?? 120),
     countInBeats: Number(raw.countInBeats ?? 4),
     dryLevel: Number(raw.dryLevel ?? 1),
+    clickDuringCapture: raw.clickDuringCapture !== false,
     clickPitch: Number(raw.clickPitch ?? 1000),
     clickAccentPitch: Number(raw.clickAccentPitch ?? 1500),
     clickDecay: Number(raw.clickDecay ?? 90),
@@ -76,7 +88,7 @@ function readInitialTransport() {
      takePlaying: Boolean(raw.takePlaying),
      takePosition: Number(raw.takePosition ?? 0),
      takePeaks: Array.isArray(raw.takePeaks) ? raw.takePeaks : [],
-     looperRecording: Boolean(raw.looperRecording), looperPreRoll: Boolean(raw.looperPreRoll), looperPlaying: Boolean(raw.looperPlaying), looperLooping: raw.looperLooping !== false, looperClickEnabled: raw.looperClickEnabled !== false, looperClickDuringCapture: raw.looperClickDuringCapture !== false, looperCountInBeats: Number(raw.looperCountInBeats ?? 4), looperCropStartBeats: Number(raw.looperCropStartBeats ?? 0), looperCropEndBeats: Number(raw.looperCropEndBeats ?? 0), audioLoopStart: Number(raw.audioLoopStart ?? 0), audioLoopPosition: Number(raw.audioLoopPosition ?? 0), audioLoopLength: Number(raw.audioLoopLength ?? 0), audioLoopPeaks: Array.isArray(raw.audioLoopPeaks) ? raw.audioLoopPeaks : [], chainLevels: Array.isArray(raw.chainLevels) ? raw.chainLevels : [],
+     looperRecording: Boolean(raw.looperRecording), looperPreRoll: Boolean(raw.looperPreRoll), looperPlaying: Boolean(raw.looperPlaying), looperLooping: raw.looperLooping !== false, looperCountInBeats: Number(raw.looperCountInBeats ?? 4), looperCropStartBeats: Number(raw.looperCropStartBeats ?? 0), looperCropEndBeats: Number(raw.looperCropEndBeats ?? 0), audioLoopStart: Number(raw.audioLoopStart ?? 0), audioLoopPosition: Number(raw.audioLoopPosition ?? 0), audioLoopLength: Number(raw.audioLoopLength ?? 0), audioLoopPeaks: Array.isArray(raw.audioLoopPeaks) ? raw.audioLoopPeaks : [], chainLevels: Array.isArray(raw.chainLevels) ? raw.chainLevels : [],
   };
 }
 
@@ -85,6 +97,7 @@ export default function App() {
   const [gain, setGain] = useState(initial.gain);
   const [playbackVolume, setPlaybackVolume] = useState(initial.playbackVolume);
   const [snippets, setSnippets] = useState(readInitialSnippets);
+  const [tagNames, setTagNames] = useState(readInitialTagNames);
   const [transport, setTransport] = useState(readInitialTransport);
   const [notification, setNotification] = useState(null);
   const [vst3, setVst3] = useState({
@@ -93,8 +106,33 @@ export default function App() {
     available: [],
     defaultFolder: "",
     inputChannels: 2,
+    restoring: false,
+    restoreError: "",
   });
   const [scanState, setScanState] = useState({ active: false, current: 0, total: 0, currentFile: "", folder: "" });
+
+  // Splash lifecycle. `showing` -> `leaving` (fade) -> `hidden`. The splash
+  // stays up until the first chain snapshot arrives (covering the WebView2
+  // boot + first round trip) and then until any deferred plugin restore
+  // finishes — the backend loads saved VST3s one at a time on startup.
+  const [splashPhase, setSplashPhase] = useState("showing");
+  const [chainSnapshotReceived, setChainSnapshotReceived] = useState(false);
+  const mountedAt = useRef(Date.now());
+
+  useEffect(() => {
+    if (!chainSnapshotReceived || splashPhase !== "showing") return;
+    if (vst3.restoring) return;
+    const elapsed = Date.now() - mountedAt.current;
+    const delay = Math.max(0, SPLASH_MIN_MS - elapsed);
+    const t = setTimeout(() => setSplashPhase("leaving"), delay);
+    return () => clearTimeout(t);
+  }, [chainSnapshotReceived, splashPhase, vst3.restoring]);
+
+  useEffect(() => {
+    if (splashPhase !== "leaving") return;
+    const t = setTimeout(() => setSplashPhase("hidden"), SPLASH_FADE_MS);
+    return () => clearTimeout(t);
+  }, [splashPhase]);
 
   useEffect(() => {
     const unsubParam = subscribe(BACKEND_EVENTS.parameters, (payload) => {
@@ -113,6 +151,7 @@ export default function App() {
       }
       if (typeof payload === "object" && payload !== null) {
         if (Array.isArray(payload.snippets)) setSnippets(payload.snippets);
+        if (payload.tagNames && typeof payload.tagNames === "object") setTagNames(payload.tagNames);
         setTransport((prev) => ({
           ...prev,
           libraryFolder: payload.libraryFolder ?? prev.libraryFolder,
@@ -134,6 +173,13 @@ export default function App() {
     emit(FRONTEND_EVENTS.getSnippets);
   }, []);
 
+  // Same pattern for the chain snapshot — the splash needs it to know
+  // whether a deferred plugin restore is in flight. The emit from
+  // PluginChain coalesces with this one into a single snapshot.
+  useEffect(() => {
+    emit(FRONTEND_EVENTS.getVst3Chain);
+  }, []);
+
   useEffect(() => {
     const unsubTransport = subscribe(BACKEND_EVENTS.transport, (payload) => {
       if (typeof payload !== "object" || payload == null) return;
@@ -152,6 +198,7 @@ export default function App() {
         bpm:              payload.bpm !== undefined              ? Number(payload.bpm)              : prev.bpm,
         countInBeats:     payload.countInBeats !== undefined     ? Number(payload.countInBeats)     : prev.countInBeats,
         dryLevel:         payload.dryLevel !== undefined         ? Number(payload.dryLevel)         : prev.dryLevel,
+        clickDuringCapture: payload.clickDuringCapture !== undefined ? Boolean(payload.clickDuringCapture) : prev.clickDuringCapture,
         clickPitch:        payload.clickPitch        !== undefined ? Number(payload.clickPitch)        : prev.clickPitch,
         clickAccentPitch:  payload.clickAccentPitch  !== undefined ? Number(payload.clickAccentPitch)  : prev.clickAccentPitch,
         clickDecay:        payload.clickDecay        !== undefined ? Number(payload.clickDecay)        : prev.clickDecay,
@@ -172,8 +219,6 @@ export default function App() {
          looperPreRoll: payload.looperPreRoll !== undefined ? Boolean(payload.looperPreRoll) : prev.looperPreRoll,
          looperPlaying: payload.looperPlaying !== undefined ? Boolean(payload.looperPlaying) : prev.looperPlaying,
          looperLooping: payload.looperLooping !== undefined ? Boolean(payload.looperLooping) : prev.looperLooping,
-         looperClickEnabled: payload.looperClickEnabled !== undefined ? Boolean(payload.looperClickEnabled) : prev.looperClickEnabled,
-         looperClickDuringCapture: payload.looperClickDuringCapture !== undefined ? Boolean(payload.looperClickDuringCapture) : prev.looperClickDuringCapture,
          looperCountInBeats: payload.looperCountInBeats !== undefined ? Number(payload.looperCountInBeats) : prev.looperCountInBeats,
          looperCropStartBeats: payload.looperCropStartBeats !== undefined ? Number(payload.looperCropStartBeats) : prev.looperCropStartBeats,
          looperCropEndBeats: payload.looperCropEndBeats !== undefined ? Number(payload.looperCropEndBeats) : prev.looperCropEndBeats,
@@ -214,6 +259,7 @@ export default function App() {
           volume: Number(base.volume ?? 0),
           muted: Boolean(base.muted),
           midiChannels,
+          pending: Number(base.pending ?? 0),
           slots: Array.isArray(base.slots) ? base.slots : [],
         };
       };
@@ -223,6 +269,7 @@ export default function App() {
       const defaultFolder = typeof payload.folder === "string" ? payload.folder : "";
       const inputChannels = Number.isFinite(payload.inputChannels) ? Number(payload.inputChannels) : 2;
 
+      setChainSnapshotReceived(true);
       setVst3((prev) => {
         let chains = prev.chains;
         if (Array.isArray(payload.chains)) {
@@ -238,7 +285,15 @@ export default function App() {
             normalizeChain(audio, { id: "chain1", name: "Audio FX Chain", wantsMidi: false }),
           ];
         }
-        return { chains, openEditors, available, defaultFolder, inputChannels };
+        return {
+          chains,
+          openEditors,
+          available,
+          defaultFolder,
+          inputChannels,
+          restoring: payload.restoring !== undefined ? Boolean(payload.restoring) : prev.restoring,
+          restoreError: typeof payload.restoreError === "string" ? payload.restoreError : prev.restoreError,
+        };
       });
     });
     return unsubChain;
@@ -298,20 +353,43 @@ export default function App() {
     emit(FRONTEND_EVENTS.setMidiDevice, { device });
   };
 
-  const handleTakeMidiClockChange = (enabled) => {
-    setTransport((prev) => ({ ...prev, takeMidiClock: enabled }));
-    emit(FRONTEND_EVENTS.setTakeMidiClock, { enabled });
+  const handleClickDuringCaptureChange = (enabled) => {
+    setTransport((prev) => ({ ...prev, clickDuringCapture: enabled }));
+    emit(FRONTEND_EVENTS.setClickDuringCapture, { enabled });
   };
 
-  const handleClickDuringTakeChange = (enabled) => {
-    setTransport((prev) => ({ ...prev, clickDuringTake: enabled }));
-    emit(FRONTEND_EVENTS.setClickDuringTake, { enabled });
+  const handleRenameTag = (color, name) => {
+    // Optimistic local update; the backend persists and echoes the map.
+    setTagNames((prev) => {
+      const next = { ...prev };
+      const trimmed = String(name ?? "").trim();
+      if (trimmed) next[color] = trimmed;
+      else delete next[color];
+      return next;
+    });
+    emit(FRONTEND_EVENTS.renameTag, { color, name: String(name ?? "") });
   };
 
   const playingSnippet = transport.playingSnippetId >= 0 ? snippets.find((s) => s.id === transport.playingSnippetId) : null;
   const playPositionSeconds = playingSnippet && playingSnippet.sampleRate > 0
     ? transport.playingPosition / playingSnippet.sampleRate
     : 0;
+
+  // Restore progress for the splash: total = loaded slots + pending loads.
+  const { pendingTotal, totalPlugins } = useMemo(() => {
+    let pending = 0;
+    let total = 0;
+    for (const chain of vst3.chains) {
+      const p = Number(chain.pending ?? 0);
+      pending += p;
+      total += (Array.isArray(chain.slots) ? chain.slots.length : 0) + p;
+    }
+    return { pendingTotal: pending, totalPlugins: total };
+  }, [vst3.chains]);
+  const restoreProgress = totalPlugins > 0 ? ((totalPlugins - pendingTotal) / totalPlugins) * 100 : 0;
+  const restoringChains = vst3.chains
+    .filter((chain) => Number(chain.pending ?? 0) > 0)
+    .map((chain) => ({ id: chain.id, name: chain.name, pending: Number(chain.pending) }));
 
   return (
     <main className="app">
@@ -330,37 +408,31 @@ export default function App() {
           onPlaybackVolumeChange={handlePlaybackVolumeChange}
           dryLevel={transport.dryLevel}
           onDryLevelChange={handleDryLevelChange}
+          metronomeEnabled={transport.metronomeEnabled !== false}
+          onMetronomeChange={handleMetronomeChange}
+          clickDuringCapture={transport.clickDuringCapture !== false}
+          onClickDuringCaptureChange={handleClickDuringCaptureChange}
+          midiClockEnabled={Boolean(transport.midiClockEnabled)}
+          onMidiClockChange={handleMidiClockChange}
+          midiOutputDevice={transport.midiOutputDevice}
+          midiOutputDeviceList={transport.midiOutputDeviceList}
+          onMidiDeviceChange={handleMidiDeviceChange}
           clickParams={transport}
         />
       </header>
 
       <Transport
         transport={transport}
-        metronomeEnabled={transport.metronomeEnabled}
         bpm={transport.bpm}
         countInBeats={transport.countInBeats}
-        midiClockEnabled={transport.midiClockEnabled}
-        takeMidiClock={transport.takeMidiClock}
-        clickDuringTake={transport.clickDuringTake !== false}
-        onMetronomeChange={handleMetronomeChange}
         onBpmChange={handleBpmChange}
         onCountInBeatsChange={handleCountInBeatsChange}
-        onTakeMidiClockChange={handleTakeMidiClockChange}
-        onClickDuringTakeChange={handleClickDuringTakeChange}
-      />
-
-      <MidiClock
-        enabled={transport.midiClockEnabled}
-        device={transport.midiOutputDevice}
-        deviceList={transport.midiOutputDeviceList}
-        bpm={transport.bpm}
-        onStartStop={() => handleMidiClockChange(!transport.midiClockEnabled)}
-        onDeviceChange={handleMidiDeviceChange}
       />
 
       <TakeReview transport={transport} />
 
       <Looper transport={transport} />
+
 
 
       <PluginChain
@@ -383,6 +455,8 @@ export default function App() {
         <ErrorBoundary>
           <SnippetList
             snippets={snippets}
+            tagNames={tagNames}
+            onRenameTag={handleRenameTag}
             playingSnippetId={transport.playingSnippetId}
             playPositionSeconds={playPositionSeconds}
           />
@@ -392,6 +466,18 @@ export default function App() {
       <Notification
         notification={notification}
         onDismiss={() => setNotification(null)}
+      />
+
+      <SplashScreen
+        visible={splashPhase !== "hidden"}
+        leaving={splashPhase === "leaving"}
+        restoring={Boolean(vst3.restoring)}
+        snapshotReceived={chainSnapshotReceived}
+        progress={restoreProgress}
+        remaining={pendingTotal}
+        total={totalPlugins}
+        chains={restoringChains}
+        error={vst3.restoreError}
       />
 
       <footer className="app-footer">
