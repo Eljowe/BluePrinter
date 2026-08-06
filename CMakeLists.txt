@@ -2,6 +2,13 @@ cmake_minimum_required(VERSION 3.22)
 
 project(BluePrinter VERSION 1.0.0)
 
+# CMake 4.x normalizes install() DESTINATION paths; with this policy set,
+# backslashes in -DBLUEPRINTER_VST3_DIR="C:\Users\...\VST3" are treated as
+# literal path separators instead of invalid escapes ("\U" errors).
+if(POLICY CMP0177)
+    cmake_policy(SET CMP0177 NEW)
+endif()
+
 set(JUCE_DIR "C:/JUCE/JUCE" CACHE PATH "Path to the JUCE source tree")
 
 add_subdirectory(${JUCE_DIR} JUCE EXCLUDE_FROM_ALL)
