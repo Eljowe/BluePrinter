@@ -14,7 +14,7 @@ import {
   IconX,
 } from "./icons";
 
-export function SnippetCard({ snippet, isPlaying, playPositionSeconds }) {
+export function SnippetCard({ snippet, tagNames, isPlaying, playPositionSeconds }) {
   const [name, setName] = useState(snippet.name ?? "");
   const [comments, setComments] = useState(snippet.comments ?? "");
   const [color, setColor] = useState(snippet.color ?? "");
@@ -112,6 +112,11 @@ export function SnippetCard({ snippet, isPlaying, playPositionSeconds }) {
     ? `Detected key: ${snippet.key} (confidence ${Math.round(keyConfidence * 100)}%)`
     : "No key detected yet";
   const currentColor = snippetColor(color);
+  const currentColorName = (() => {
+    const custom = tagNames?.[color];
+    if (typeof custom === "string" && custom.trim()) return custom.trim();
+    return currentColor?.label ?? "";
+  })();
 
   return (
     <article
@@ -144,7 +149,7 @@ export function SnippetCard({ snippet, isPlaying, playPositionSeconds }) {
             <span
               className="snippet-color-dot"
               style={{ background: currentColor.main }}
-              title={`Colour: ${currentColor.label}`}
+              title={currentColorName ? `Tag: ${currentColorName}` : `Colour: ${currentColor.label}`}
               aria-hidden="true"
             />
           ) : null}

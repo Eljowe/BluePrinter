@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Knob } from "./controls";
-import { IconX } from "./icons";
+import { IconMetronome, IconX } from "./icons";
 import { emit, FRONTEND_EVENTS } from "../bridge";
 
 const CLICK_DEFAULTS = {
@@ -119,9 +119,13 @@ function ClickSoundPopover({ transport, onClose }) {
   );
 }
 
-// Global monitoring + click controls: Dry / Gain / Play Vol knobs and
-// the Click sound popover. Shared by every recording/playback path, so
-// they live in the plugin header rather than the recording block.
+// Header-level recording settings, shared by every recording/playback
+// path so the transport and looper sections stay lean:
+//   - Click (master metronome on/off — count-ins, takes, loop captures,
+//     and the free-running clock all use it)
+//   - Click: capture (off = click only during count-ins)
+//   - MIDI clock (one toggle: free-runs and takes / loops ride it) +
+//     the output device
 export function HeaderControls({
   gain,
   onGainChange,
@@ -129,13 +133,55 @@ export function HeaderControls({
   onPlaybackVolumeChange,
   dryLevel,
   onDryLevelChange,
+  metronomeEnabled,
+  onMetronomeChange,
+  clickDuringCapture,
+  onClickDuringCaptureChange,
+  midiClockEnabled,
+  onMidiClockChange,
+  midiOutputDevice,
+  midiOutputDeviceList,
+  onMidiDeviceChange,
   clickParams,
 }) {
   const [clickOpen, setClickOpen] = useState(false);
+  const devices = Array.isArray(midiOutputDeviceList) ? midiOutputDeviceList : [];
+  const selectedDevice = midiOutputDevice || devices[0] || "";
 
   return (
     <div className="app-header-controls">
       <div className="header-click-sound">
+        <button
+          type="button"
+          className={`metronome-toggle ${metronomeEnabled ? "is-on" : ""}`}
+          onClick={() => onMetronomeChange(!metronomeEnabled)}
+          title={metronomeEnabled
+            ? "Click is on — count-ins, takes, loop captures and the free-running clock"
+            : "Click is off — no metronome click anywhere"}
+          aria-pressed={metronomeEnabled}
+        >
+          <IconMetronome size={15} />
+          <span className="metronome-state">
+            <span className={metronomeEnabled ? "is-active" : ""}>Click on</span>
+            <span className={metronomeEnabled ? "" : "is-active"}>Click off</span>
+          </span>
+        </button>
+
+        <button
+          type="button"
+          className={`metronome-toggle ${clickDuringCapture ? "is-on" : ""}`}
+          onClick={() => onClickDuringCaptureChange(!clickDuringCapture)}
+          title={clickDuringCapture
+            ? "Click plays through the whole take and loop capture. Turn on for count-in only."
+            : "Click only during count-ins — silent while takes and loop captures record."}
+          aria-pressed={clickDuringCapture}
+        >
+          <span className="metronome-state">
+            <span className={clickDuringCapture ? "is-active" : ""}>Click: capture</span>
+            <span className={clickDuringCapture ? "" : "is-active"}>Click: count-in only</span>
+          </span>
+        </button>
+
         <button
           type="button"
           className="click-sound-toggle"
@@ -148,6 +194,42 @@ export function HeaderControls({
         {clickOpen ? (
           <ClickSoundPopover transport={clickParams} onClose={() => setClickOpen(false)} />
         ) : null}
+      </div>
+
+      <div className="header-midi-clock">
+        <button
+          type="button"
+          className={`metronome-toggle ${midiClockEnabled ? "is-on" : ""}`}
+          onClick={() => onMidiClockChange(!midiClockEnabled)}
+          title={midiClockEnabled
+            ? "MIDI clock is running — Start + 24 ppqn pulses to the drum machine (free-run; takes and loop captures ride it)"
+            : "Start the MIDI clock — Start + 24 ppqn pulses to the drum machine (free-run; takes and loop captures ride it)"}
+          aria-pressed={midiClockEnabled}
+        >
+          <span className={`clock-live-dot ${midiClockEnabled ? "is-live" : ""}`} aria-hidden="true" />
+          <span className="metronome-state">
+            <span className={midiClockEnabled ? "is-active" : ""}>Clock running</span>
+            <span className={midiClockEnabled ? "" : "is-active"}>MIDI clock</span>
+          </span>
+        </button>
+
+        <label className="header-midi-device" title="Device that receives the MIDI clock">
+          <span className="header-midi-device-label">MIDI out</span>
+          <select
+            className="midi-device-select"
+            value={selectedDevice}
+            onChange={(e) => onMidiDeviceChange(e.target.value)}
+            disabled={devices.length === 0}
+          >
+            {devices.length === 0 ? (
+              <option value="">No MIDI devices</option>
+            ) : (
+              devices.map((name) => (
+                <option key={name} value={name}>{name}</option>
+              ))
+            )}
+          </select>
+        </label>
       </div>
 
       <div className="header-knobs">

@@ -48,6 +48,7 @@ public:
     // either. Asking once on mount is the belt-and-suspenders fix
     // that mirrors what the chain UI already does.
     static constexpr const char* frontendGetSnippetsEvent      = "frontendGetSnippets";
+    static constexpr const char* frontendRenameTagEvent        = "frontendRenameTag";
     static constexpr const char* frontendSetMetronomeEvent     = "frontendSetMetronome";
     static constexpr const char* frontendSetBpmEvent           = "frontendSetBpm";
     static constexpr const char* frontendSetCountInBeatsEvent  = "frontendSetCountInBeats";
@@ -55,15 +56,11 @@ public:
     static constexpr const char* frontendSetClickParamsEvent   = "frontendSetClickParams";
     static constexpr const char* frontendSetMidiClockEvent     = "frontendSetMidiClock";
     static constexpr const char* frontendSetMidiDeviceEvent    = "frontendSetMidiDevice";
-    static constexpr const char* frontendSetTakeMidiClockEvent    = "frontendSetTakeMidiClock";
-    static constexpr const char* frontendSetLooperMidiClockEvent  = "frontendSetLooperMidiClock";
-    static constexpr const char* frontendSetClickDuringTakeEvent  = "frontendSetClickDuringTake";
+    static constexpr const char* frontendSetClickDuringCaptureEvent = "frontendSetClickDuringCapture";
     static constexpr const char* frontendSetLooperRecordingEvent = "frontendSetLooperRecording";
     static constexpr const char* frontendSetLooperPlayingEvent   = "frontendSetLooperPlaying";
     static constexpr const char* frontendSetLooperLoopingEvent   = "frontendSetLooperLooping";
-    static constexpr const char* frontendSetLooperClickEvent     = "frontendSetLooperClick";
     static constexpr const char* frontendSetLooperCountInEvent   = "frontendSetLooperCountIn";
-    static constexpr const char* frontendSetLooperClickDuringCaptureEvent = "frontendSetLooperClickDuringCapture";
     static constexpr const char* frontendSetLoopCropEvent        = "frontendSetLoopCrop";
     static constexpr const char* frontendClearLoopEvent          = "frontendClearLoop";
     static constexpr const char* frontendAddVst3Event          = "frontendAddVst3";
@@ -148,6 +145,7 @@ public:
 
     // Snapshot helpers — public so the listener lambdas can use them.
     juce::var makeSnippetsSnapshot() const;
+    juce::var makeTagNamesSnapshot() const;
     juce::var makeTransportSnapshot() const;
 
     // Fire a transient notification to the frontend. Public so the

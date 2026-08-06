@@ -200,12 +200,12 @@ public:
     bool    isLooperPreRolling() const { return looperPreRollActive.load(); }
     bool    isLooperPlaying() const { return audioLoopPlaying.load(); }
     bool    isLooperLooping() const { return looperLooping.load(); }
-    bool    isLooperClickEnabled() const { return looperMetronomeEnabled.load(); }
     int     getLooperCountInBeats() const { return looperCountInBeats.load(); }
-    // When false the click only plays during the loop count-in, never
-    // through the capture itself. Mirrors clickDuringTake for the take
-    // recorder.
-    bool    getLooperClickDuringCapture() const { return looperClickDuringCapture.load (std::memory_order_acquire); }
+    // Header-level click-during-capture gate, shared by the take recorder
+    // and the looper: when false the click only plays during count-ins,
+    // never through the take or the loop capture itself. The count-in
+    // click still plays (pre-roll is independent of this toggle).
+    bool    getClickDuringCapture() const { return clickDuringCapture.load (std::memory_order_acquire); }
     // Beats trimmed off the start/end of the captured loop (message-thread
     // crop settings, applied to audioLoopStart/audioLoopLength). Beat
     // granularity — finer than the bar-aligned capture trim.
@@ -221,9 +221,8 @@ public:
     void    setLooperRecording (bool enabled);
     void    setLooperPlaying (bool enabled);
     void    setLooperLooping (bool enabled);
-    void    setLooperClickEnabled (bool enabled);
     void    setLooperCountInBeats (int beats);
-    void    setLooperClickDuringCapture (bool enabled);
+    void    setClickDuringCapture (bool enabled);
     // Trim start/end of the loop in whole beats (4 per bar at the current
     // BPM), clamped so the window never fully collapses.
     void    setLoopCrop (int startBeats, int endBeats);
@@ -236,28 +235,23 @@ public:
     int saveLoopSnippet();
 
     // MIDI clock output for syncing external hardware (analog drum
-    // machines, sequencers). Enabled via the transport UI.
+    // machines, sequencers). One header-level toggle: when on, the clock
+    // free-runs (Start + 24 ppqn) and takes / loop captures ride it,
+    // re-syncing (Start again) at actual-recording / capture time.
     bool    isMidiClockEnabled()    const { return midiClockEnabled.load (std::memory_order_acquire); }
     void    setMidiClockEnabled (bool enabled);
     juce::String getMidiOutputDeviceName() const;
     void    setMidiOutputDeviceName (const juce::String& name);
     juce::StringArray getAvailableMidiOutputDevices() const;
 
-    // Per-section MIDI clock toggles: the take recorder and the looper can
-    // each drive the clock (Start when the operation starts — count-in or
-    // capture — Stop when it ends) independently of the free-running global
-    // clock toggle. The clock runs while any source wants it.
-    bool    getTakeMidiClockEnabled()   const { return takeMidiClockEnabled.load (std::memory_order_acquire); }
-    bool    getLooperMidiClockEnabled() const { return looperMidiClockEnabled.load (std::memory_order_acquire); }
-    void    setTakeMidiClockEnabled (bool enabled);
-    void    setLooperMidiClockEnabled (bool enabled);
-    // When false the click only plays during the count-in, never through
-    // the take itself. The count-in click itself still plays (pre-roll is
-    // independent of this toggle).
-    bool    getClickDuringTake() const { return clickDuringTake.load (std::memory_order_acquire); }
-    void    setClickDuringTake (bool enabled);
-
     juce::String getLastSaveError() const;
+
+    // User-editable tag names for the snippet colours, persisted in the
+    // properties file (`tagNames`, a JSON object keyed by colour key).
+    // An empty/missing name falls back to the built-in label ("Red", …)
+    // on the frontend. Message thread only.
+    std::map<juce::String, juce::String> getTagNames() const;
+    void setTagName (const juce::String& colorKey, const juce::String& name);
 
     // Crash diagnostics (Windows only): the chain-restore step currently
     // running, recorded so the unhandled-exception filter can attribute a
@@ -343,6 +337,15 @@ private:
 
     SnippetLibrary library;
     Vst3Library    vst3Library;
+    // Colour key -> user tag name (message-thread only, persisted in the
+    // properties file via setTagName). Keys with no user name are absent.
+    std::map<juce::String, juce::String> tagNames;
+    // Debounced tagNames persist (mirrors the chain persist): the actual
+    // properties-file write is deferred to the 30 Hz timerCallback so it
+    // never runs synchronously inside the WebView2 event dispatch.
+    bool tagPersistPending = false;
+    int64_t tagPersistDeadline = 0;
+    void flushTagNamePersist();
     // The chain list. Chains are independent parallel processors of the
     // input; see the chain API comments above. Owned by the processor
     // (unique_ptr), guarded by chainLock. The audio thread iterates a
@@ -411,8 +414,12 @@ private:
 
     // Metronome / count-in. Settings are user-tweakable and persisted; the
     // preRoll* / transportPosition fields are audio-thread runtime state.
+    // metronomeEnabled is the header-level master click on/off, shared by
+    // the take recorder, the looper and the free-running clock.
+    // clickDuringCapture is the header-level gate for the click through
+    // takes and loop captures (off = count-in only).
     std::atomic<bool>    metronomeEnabled { true };
-    std::atomic<bool>    clickDuringTake  { true };
+    std::atomic<bool>    clickDuringCapture { true };
     std::atomic<float>   bpm              { 120.0f };
     std::atomic<int>     countInBeats     { 4 };
     std::atomic<float>   dryLevel         { 1.0f };
@@ -424,8 +431,6 @@ private:
     // recordBuffer up to audioLoopLength; crop skips audioLoopStart
     // samples at playback/save time. All audio-thread reads go through
     // the atomics; the crop bar counts are message-thread only.
-    std::atomic<bool>    looperMetronomeEnabled { true };
-    std::atomic<bool>    looperClickDuringCapture { true };
     std::atomic<int>     looperCountInBeats     { 4 };
     std::atomic<bool>    looperPreRollActive    { false };
     std::atomic<bool>    looperCaptureArmed     { false };
@@ -472,14 +477,9 @@ private:
     // MIDI clock output. Clock pulses (0xF8, 24 ppqn) are generated in
     // processBlock alongside the audible metronome. MIDI Start / Stop
     // are queued from the message thread and flushed at the start of
-    // the next audio block. The clock runs whenever any source wants it:
-    // the free-running global toggle (midiClockEnabled), the take
-    // recorder (takeMidiClockEnabled while a take or its count-in is
-    // active), or the looper (looperMidiClockEnabled while pre-rolling,
-    // capturing or playing).
+    // the next audio block. One header-level toggle (midiClockEnabled):
+    // when on the clock free-runs and takes / loop captures ride it.
     std::atomic<bool>    midiClockEnabled       { false };
-    std::atomic<bool>    takeMidiClockEnabled   { false };
-    std::atomic<bool>    looperMidiClockEnabled { false };
     std::atomic<bool>    clockRunning           { false };
     std::atomic<bool>    midiStartPending       { false };
     std::atomic<bool>    midiStopPending        { false };
