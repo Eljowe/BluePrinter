@@ -326,3 +326,15 @@ Provided under Terminal -> Run Task:
 - **Build BluePrinter Debug**
 - **Rebuild BluePrinter Debug**
 - **Run BluePrinter Debug**
+- **Build + Install + Run BluePrinter (Release, per-user)** — builds, installs
+  to `%USERPROFILE%\BluePrinter` and launches
+- **Install VST3 to Program Files (elevated)** — UAC copy of the built VST3
+  into the standard DAW scan folder
+- **Build Installer (Inno Setup)** — compiles `installer/BluePrinter.iss`
+  into `build/installer/BluePrinterSetup-<version>.exe`
+- **Build Release Bundle** — WebUI + Release build, then assembles
+  `build/release/BluePrinter-<version>/` with the installer, LICENSE,
+  README.md and SHA256SUMS.txt
+- **Create GitHub Release (draft)** — tags the default branch and creates a
+  draft release with all bundle files as assets (needs `$env:GH_TOKEN` with
+  `repo` scope; run with `-Published` to skip the draft)
