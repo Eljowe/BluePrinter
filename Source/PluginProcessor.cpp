@@ -691,16 +691,24 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     //    whatever the selected chains produce (synth sounds, FX).
     //    Deliberately before the click is mixed in so the click never
     //    ends up in the loop. Uses the same pre-allocated recordBuffer
-    //    as the take recorder.
+    //    as the take recorder. In overdub mode the new layer is written
+    //    into the region after the existing loop (overdubWritePos) while
+    //    audioLoopLength stays fixed, so the loop's wrap boundary never
+    //    moves mid-capture; the layer is mixed into the loop on stop.
     if (looperCaptureArmed.load (std::memory_order_acquire))
     {
-        const auto writePos = audioLoopLength.load (std::memory_order_relaxed);
+        const auto writePos = looperOverdubCapture.load (std::memory_order_acquire)
+            ? overdubWritePos.load (std::memory_order_relaxed)
+            : audioLoopLength.load (std::memory_order_relaxed);
         const auto toCopy = juce::jmin (numSamples, maxRecordSamples - static_cast<int> (writePos));
         if (toCopy > 0)
         {
             for (int ch = 0; ch < juce::jmin (numChannels, recordBuffer->getNumChannels()); ++ch)
                 recordBuffer->copyFrom (ch, static_cast<int> (writePos), recordingMixBuffer, ch, 0, toCopy);
-            audioLoopLength.store (writePos + toCopy, std::memory_order_release);
+            if (looperOverdubCapture.load (std::memory_order_acquire))
+                overdubWritePos.store (writePos + toCopy, std::memory_order_release);
+            else
+                audioLoopLength.store (writePos + toCopy, std::memory_order_release);
         }
     }
 
@@ -798,7 +806,10 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             looperPreRollActive.store (false, std::memory_order_release);
             looperCaptureArmed.store (true, std::memory_order_release);
             audioLoopRecording.store (true, std::memory_order_release);
-            audioLoopLength.store (0, std::memory_order_release);
+            // Overdub captures keep the existing loop length — only a
+            // fresh capture resets it.
+            if (! looperOverdubCapture.load (std::memory_order_acquire))
+                audioLoopLength.store (0, std::memory_order_release);
             // Capture is starting: re-sync external gear when the clock
             // is already running (the header-level clock toggle).
             if (clockRunning.load (std::memory_order_acquire))
@@ -883,14 +894,17 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     // 12. MIDI clock output. Clock pulses (0xF8) are generated at
     //    24 ppqn from the continuous metronomePosition so they align
     //    with the audible metronome and run through count-in into the
-    //    recording. The header-level clock toggle keeps it alive: the
-    //    clock advances the position itself so it runs free — the user
-    //    can drive a drum machine's presets without recording, and the
-    //    audible click plays along so the beats can be heard (subject
-    //    to the metronome toggle). Takes and loop captures ride the
-    //    same clock, re-syncing with a Start at actual-recording /
-    //    capture time. Queued MIDI Start / Stop are flushed here so
-    //    the receiver gets them at a block boundary.
+    //    recording. The header-level clock toggle keeps it alive: with
+    //    midiClockOnRecord off the clock advances the position itself
+    //    so it runs free — the user can drive a drum machine's presets
+    //    without recording, and the audible click plays along so the
+    //    beats can be heard (subject to the metronome toggle). With
+    //    midiClockOnRecord on, the clock only runs while a take or
+    //    loop capture is active (count-in included) and stops when the
+    //    capture ends. Takes and loop captures ride the clock either
+    //    way, re-syncing with a Start at actual-recording / capture
+    //    time. Queued MIDI Start / Stop are flushed here so the
+    //    receiver gets them at a block boundary.
     {
         refreshClockRunning();
 
@@ -1285,26 +1299,54 @@ void BluePrinterAudioProcessor::setLooperRecording (bool enabled)
         if (recordBuffer == nullptr || maxRecordSamples <= 0)
             return;
 
-        // Loop capture overwrites recordBuffer from sample 0, so any
-        // pending (unsaved) take is invalidated.
+        // Any new capture (take or loop) invalidates the pending take.
         clearPendingTake();
 
-        looperPreRollActive.store (false, std::memory_order_release);
-        looperCaptureArmed.store (false, std::memory_order_release);
-        audioLoopRecording.store (false, std::memory_order_release);
-        audioLoopPlaying.store (false, std::memory_order_release);
-        audioLoopStart.store (0, std::memory_order_release);
-        audioLoopLength.store (0, std::memory_order_release);
-        audioLoopPosition.store (0, std::memory_order_release);
-        looperCropStartBeats = 0;
-        looperCropEndBeats = 0;
-        looperPeaks.clear();
+        const bool overdubbing = looperOverdub.load (std::memory_order_acquire)
+            && looperLooping.load (std::memory_order_acquire)
+            && audioLoopLength.load (std::memory_order_acquire) > 0;
+
+        if (overdubbing)
+        {
+            // Layer over the existing loop: keep the loop intact and
+            // write the new input into the region after it (the audio
+            // thread taps overdubWritePos while audioLoopLength stays
+            // fixed, so the wrap boundary never moves). Auto-play the
+            // loop from the top so the user hears it while layering —
+            // count-in included. The layer is mixed into the loop on
+            // stop.
+            looperPreRollActive.store (false, std::memory_order_release);
+            looperCaptureArmed.store (false, std::memory_order_release);
+            audioLoopRecording.store (false, std::memory_order_release);
+            looperOverdubCapture.store (true, std::memory_order_release);
+            overdubWritePos.store (audioLoopLength.load (std::memory_order_acquire),
+                                   std::memory_order_release);
+            audioLoopPosition.store (0, std::memory_order_release);
+            audioLoopPlaying.store (true, std::memory_order_release);
+        }
+        else
+        {
+            // Fresh capture: wipe the loop and start from sample 0.
+            looperPreRollActive.store (false, std::memory_order_release);
+            looperCaptureArmed.store (false, std::memory_order_release);
+            audioLoopRecording.store (false, std::memory_order_release);
+            audioLoopPlaying.store (false, std::memory_order_release);
+            looperOverdubCapture.store (false, std::memory_order_release);
+            overdubWritePos.store (0, std::memory_order_release);
+            audioLoopStart.store (0, std::memory_order_release);
+            audioLoopLength.store (0, std::memory_order_release);
+            audioLoopPosition.store (0, std::memory_order_release);
+            looperCropStartBeats = 0;
+            looperCropEndBeats = 0;
+            looperPeaks.clear();
+        }
 
         if (metronomeEnabled.load (std::memory_order_acquire)
             && looperCountInBeats.load (std::memory_order_acquire) > 0)
         {
             // Count-in: play N beats of click, then start capture. The
-            // transition happens in processBlock.
+            // transition happens in processBlock (an overdub keeps the
+            // loop playing underneath the count-in).
             metronomePosition.store (0, std::memory_order_release);
             transportPosition.store (0, std::memory_order_release);
             looperPreRollActive.store (true, std::memory_order_release);
@@ -1325,7 +1367,23 @@ void BluePrinterAudioProcessor::setLooperRecording (bool enabled)
         looperPreRollActive.store (false, std::memory_order_release);
         looperCaptureArmed.store (false, std::memory_order_release);
         audioLoopRecording.store (false, std::memory_order_release);
-        trimLooperToMusicalGrid();
+
+        // Overdub stop: stop the loop playback first (so the mix below
+        // can't race the audio thread's unlocked loop reads), then mix
+        // the recorded layer into the loop and refresh the waveform.
+        // The loop is left stopped — press Play to hear the result.
+        if (looperOverdubCapture.exchange (false, std::memory_order_acq_rel))
+        {
+            audioLoopPlaying.store (false, std::memory_order_release);
+            const auto loopLength = audioLoopLength.load (std::memory_order_acquire);
+            const auto layerLength = overdubWritePos.load (std::memory_order_acquire) - loopLength;
+            mixOverdubLayer (loopLength, layerLength);
+            refreshLooperPeaks();
+        }
+        else
+        {
+            trimLooperToMusicalGrid();
+        }
     }
 
     // The looper may drive the MIDI clock: start it when capture begins
@@ -1374,6 +1432,35 @@ void BluePrinterAudioProcessor::trimLooperToMusicalGrid()
     looperCropStartBeats = 0;
     looperCropEndBeats = 0;
     refreshLooperPeaks();
+}
+
+// Mixes the overdub layer (recorded into [loopLength, loopLength +
+// layerLength) during the capture) into the audible loop window
+// [audioLoopStart, audioLoopStart + loopLength), wrapping across loop
+// cycles pedal-style — play past the end and it layers on top of the
+// next cycle. Message thread only: capture is stopped and playback is
+// off, so the only recordBuffer access here is ours, under the lock
+// (matching refreshLooperPeaks).
+void BluePrinterAudioProcessor::mixOverdubLayer (int64_t loopLength, int64_t layerLength)
+{
+    if (recordBuffer == nullptr || loopLength <= 0 || layerLength <= 0)
+        return;
+
+    const auto start = audioLoopStart.load (std::memory_order_acquire);
+    const int channels = recordBuffer->getNumChannels();
+
+    const juce::ScopedLock sl (recordLock);
+    for (int64_t offset = 0; offset < layerLength;)
+    {
+        const auto cyclePos = offset % loopLength;
+        const auto toMix = juce::jmin (loopLength - cyclePos, layerLength - offset);
+        for (int ch = 0; ch < channels; ++ch)
+            recordBuffer->addFrom (ch, static_cast<int> (start + cyclePos),
+                                   *recordBuffer, ch,
+                                   static_cast<int> (loopLength + offset),
+                                   static_cast<int> (toMix));
+        offset += toMix;
+    }
 }
 
 int BluePrinterAudioProcessor::saveLoopSnippet()
@@ -1452,6 +1539,15 @@ void BluePrinterAudioProcessor::setLooperLooping (bool enabled)
     listeners.call ([](Listener& l) { l.transportChanged(); });
 }
 
+// Overdub mode (session-only, like looperLooping): with a loop captured
+// and looping on, record layers the new input over the loop instead of
+// replacing it. Takes effect on the next capture.
+void BluePrinterAudioProcessor::setLooperOverdub (bool enabled)
+{
+    looperOverdub.store (enabled, std::memory_order_release);
+    listeners.call ([](Listener& l) { l.transportChanged(); });
+}
+
 void BluePrinterAudioProcessor::setLooperCountInBeats (int beats)
 {
     looperCountInBeats.store (juce::jlimit (0, 8, beats));
@@ -1494,6 +1590,8 @@ void BluePrinterAudioProcessor::clearLoop()
     looperPreRollActive.store (false, std::memory_order_release);
     looperCaptureArmed.store (false, std::memory_order_release);
     audioLoopRecording.store (false, std::memory_order_release);
+    looperOverdubCapture.store (false, std::memory_order_release);
+    overdubWritePos.store (0, std::memory_order_release);
     audioLoopPlaying.store (false, std::memory_order_release);
     audioLoopStart.store (0, std::memory_order_release);
     audioLoopLength.store (0, std::memory_order_release);
@@ -1905,21 +2003,54 @@ void BluePrinterAudioProcessor::setMidiClockEnabled (bool enabled)
     if (enabled == prev)
         return;
 
-    // The header-level toggle is the only clock source: on = the clock
-    // runs free (takes and loop captures ride it), off = stopped.
+    // The header-level toggle is the master clock source: on = the clock
+    // runs (free-running, or recording-only when midiClockOnRecord is
+    // on), off = stopped.
     updateClockRunState();
 
     listeners.call ([](Listener& l) { l.transportChanged(); });
 }
 
-// The clock runs while the header-level toggle is on. Edges send
-// Start / Stop directly to the hardware and queue them for the host
-// buffer. (Takes and loop captures ride the free-running clock and
-// re-sync with a Start at actual-recording/capture time — see
-// beginActualRecording.)
+// "Clock: on record" — restrict the clock to take / loop captures
+// instead of free-running. Changing the mode re-arbitrates the run
+// condition immediately: turning it on while idle stops the clock;
+// turning it off while idle starts the free-run.
+void BluePrinterAudioProcessor::setMidiClockOnRecord (bool enabled)
+{
+    const bool prev = midiClockOnRecord.exchange (enabled, std::memory_order_release);
+    if (enabled == prev)
+        return;
+
+    updateClockRunState();
+
+    listeners.call ([](Listener& l) { l.transportChanged(); });
+}
+
+// Atomics-only (safe on both the audio and the message thread). The
+// clock runs when the master toggle is on, and either the mode is
+// free-run or a take / loop capture is in progress (including its
+// count-in pre-roll, so external gear is synced from the first click).
+bool BluePrinterAudioProcessor::wantsClockRun() const
+{
+    if (! midiClockEnabled.load (std::memory_order_acquire))
+        return false;
+
+    if (! midiClockOnRecord.load (std::memory_order_acquire))
+        return true;
+
+    return recordingRequested.load (std::memory_order_acquire)
+        || preRollActive.load (std::memory_order_acquire)
+        || looperCaptureArmed.load (std::memory_order_acquire)
+        || looperPreRollActive.load (std::memory_order_acquire);
+}
+
+// The clock runs while wantsClockRun() is true. Edges send Start / Stop
+// directly to the hardware and queue them for the host buffer. (Takes
+// and loop captures ride the clock and re-sync with a Start at
+// actual-recording/capture time — see beginActualRecording.)
 void BluePrinterAudioProcessor::updateClockRunState()
 {
-    const bool wantRun = midiClockEnabled.load (std::memory_order_acquire);
+    const bool wantRun = wantsClockRun();
 
     const bool wasRunning = clockRunning.exchange (wantRun, std::memory_order_acq_rel);
 
@@ -1946,7 +2077,7 @@ void BluePrinterAudioProcessor::refreshClockRunning()
     // store from a state restore is picked up without waiting for the
     // next user mutation, and commands Start/Stop on the edge (the
     // device open/close itself stays on the message thread).
-    const bool wantRun = midiClockEnabled.load (std::memory_order_acquire);
+    const bool wantRun = wantsClockRun();
     const bool wasRunning = clockRunning.exchange (wantRun, std::memory_order_acq_rel);
     if (wantRun == wasRunning)
         return;
@@ -2632,6 +2763,7 @@ void BluePrinterAudioProcessor::getStateInformation (juce::MemoryBlock& destData
     state.setProperty ("countInBeats",     countInBeats.load(),     nullptr);
     state.setProperty ("dryLevel",         dryLevel.load(),         nullptr);
     state.setProperty ("midiClockEnabled", midiClockEnabled.load(), nullptr);
+    state.setProperty ("midiClockOnRecord", midiClockOnRecord.load(), nullptr);
     state.setProperty ("clickDuringCapture", clickDuringCapture.load(), nullptr);
     state.setProperty ("midiDeviceName",   midiOutputDeviceName,    nullptr);
     // Click sound tuning.
@@ -2674,6 +2806,7 @@ void BluePrinterAudioProcessor::setStateInformation (const void* data, int sizeI
             countInBeats.store     (static_cast<int>   (state.getProperty ("countInBeats",     4)));
             dryLevel.store         (static_cast<float> (state.getProperty ("dryLevel",         1.0f)));
             midiClockEnabled.store (static_cast<bool>  (state.getProperty ("midiClockEnabled", false)));
+            midiClockOnRecord.store (static_cast<bool> (state.getProperty ("midiClockOnRecord", false)));
             // Header-level click-during-capture gate. Old builds had
             // separate take/looper toggles; migrate by keeping the old
             // behaviour (on unless BOTH old toggles were off).
@@ -2711,10 +2844,13 @@ void BluePrinterAudioProcessor::setStateInformation (const void* data, int sizeI
         }
 
         // If MIDI clock was enabled in a previous session, re-open the
-        // output device so external gear picks up right away. This is
-        // deferred to the message thread because MidiOutput::openDevice
-        // must run there.
-        if (midiClockEnabled.load (std::memory_order_acquire))
+        // output device so external gear picks up right away. Skipped in
+        // "on record" mode: there the clock starts when a capture starts
+        // (updateClockRunState opens the device then), not at launch.
+        // This is deferred to the message thread because
+        // MidiOutput::openDevice must run there.
+        if (midiClockEnabled.load (std::memory_order_acquire)
+            && ! midiClockOnRecord.load (std::memory_order_acquire))
         {
             juce::MessageManager::callAsync ([this]
             {

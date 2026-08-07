@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FRONTEND_EVENTS, emit } from "../bridge";
 import { IconPlay, IconSave, IconStop, IconTrash } from "./icons";
+import { LevelMeter } from "./LevelMeter";
 import { Waveform } from "./Waveform";
 
 // Shared with the transport: count-in field with a "beats" suffix.
@@ -73,18 +74,30 @@ function formatBeats(beats) {
   return `${beats} beats`;
 }
 
-export function Looper({ transport }) {
+export function Looper({ transport, onOverdubChange }) {
   const recording = Boolean(transport?.looperRecording);
   const preRoll = Boolean(transport?.looperPreRoll);
   const isRecording = recording || preRoll;
   const playing = Boolean(transport?.looperPlaying);
   const looping = transport?.looperLooping !== false;
+  const overdub = Boolean(transport?.looperOverdub);
+
+  const loopLength = Number(transport?.audioLoopLength ?? 0);
+  const hasLoop = loopLength > 0;
+
+  // A capture layers over the loop when overdub is on, looping is on and
+  // a loop exists — matches the backend's condition at capture start.
+  const isOverdubbing = isRecording && overdub && hasLoop;
   const countInBeats = Number(transport?.looperCountInBeats ?? 0);
   const cropStartBeats = Number(transport?.looperCropStartBeats ?? 0);
   const cropEndBeats = Number(transport?.looperCropEndBeats ?? 0);
 
-  const loopLength = Number(transport?.audioLoopLength ?? 0);
-  const hasLoop = loopLength > 0;
+  // Fresh-capture progress: the timeline fills as the capture grows
+  // toward the record buffer's capacity.
+  const captureMax = Number(transport?.maxRecordSamples ?? 0);
+  const capturePct = captureMax > 0 && isRecording && !isOverdubbing
+    ? Math.min(100, Math.max(0, (loopLength / captureMax) * 100))
+    : 0;
 
   // The captured loop is trimmed to whole bars, so the beat count can be
   // derived from the current BPM/sample rate.
@@ -102,29 +115,47 @@ export function Looper({ transport }) {
   const cropStartPct = totalBeats > 0 ? (cropStartBeats / totalBeats) * 100 : 0;
   const cropEndPct = totalBeats > 0 ? (cropEndBeats / totalBeats) * 100 : 0;
 
+  // Count-in countdown, identical to the take transport: the pre-roll
+  // advances transportPosition in processBlock, so the beat boundary is
+  // derived from the shared BPM/sample rate and the remaining beats
+  // count down from the configured count-in length.
+  let countdown = null;
+  if (preRoll && Number(transport?.bpm ?? 0) > 0 && Number(transport?.recordingSampleRate ?? 0) > 0) {
+    const samplesPerBeat = (60.0 / Number(transport.bpm)) * Number(transport.recordingSampleRate);
+    const currentBeat = Math.floor((Number(transport.transportPosition ?? 0)) / samplesPerBeat);
+    countdown = Math.max(1, countInBeats - currentBeat);
+  }
+
   const setRecording = (enabled) => emit(FRONTEND_EVENTS.setLooperRecording, { enabled });
   const setPlaying = (enabled) => emit(FRONTEND_EVENTS.setLooperPlaying, { enabled });
   const emitCrop = (startBeats, endBeats) => emit(FRONTEND_EVENTS.setLoopCrop, { startBeats, endBeats });
 
   return (
-    <section className={`looper ${isRecording ? "is-recording" : ""} ${playing ? "is-playing" : ""}`}>
+    <section className={`looper ${isRecording ? "is-recording" : ""} ${playing ? "is-playing" : ""} ${preRoll ? "is-counting-in" : ""}`}>
       <div className="looper-header">
         <div>
-          <div className="eyebrow">Looper</div>
           <h2>Capture a loop. Play over it.</h2>
           <p>Records whatever the chains make — synth, guitar, FX — so the loop sounds exactly like what you heard.</p>
         </div>
         <div className="looper-state" aria-live="polite">
           <span className="looper-state-dot" />
-          {preRoll ? `Count-in ${countInBeats}` : recording ? "Recording" : playing ? "Loop playing" : hasLoop ? `${formatBeats(croppedBeats)} loop ready` : "Empty"}
+          {preRoll ? "Count-in" : isOverdubbing ? "Overdub" : recording ? "Recording" : playing ? "Playing" : hasLoop ? `${formatBeats(croppedBeats)} loop ready` : "Empty"}
         </div>
       </div>
 
-      <div className="looper-timeline" aria-label={`${formatBeats(croppedBeats)} loop`}>
+      <div className={`looper-timeline ${preRoll ? "is-counting-in" : ""}`} aria-label={`${formatBeats(croppedBeats)} loop`}>
         <div className="looper-grid-lines"><i /><i /><i /><i /><i /><i /><i /><i /></div>
+        {isRecording && !isOverdubbing && capturePct > 0 ? (
+          <div className="looper-capture-progress" style={{ width: `${capturePct}%` }} />
+        ) : null}
         {hasLoop ? (
           <div className="looper-waveform">
             <Waveform peaks={transport.audioLoopPeaks ?? []} width={360} height={88} />
+          </div>
+        ) : null}
+        {preRoll && countdown != null ? (
+          <div className="looper-countdown" key={countdown} aria-hidden="true">
+            {countdown}
           </div>
         ) : null}
         {hasLoop ? <div className="looper-crop-left" style={{ width: `${cropStartPct}%` }} /> : null}
@@ -148,11 +179,20 @@ export function Looper({ transport }) {
           >
             <span className="looper-record-dot" aria-hidden="true" />
           </button>
+          <div className="looper-meter" aria-hidden={!isRecording}>
+            <LevelMeter level={transport?.inputLevel ?? 0} peak={transport?.inputPeak ?? 0} />
+          </div>
           <button type="button" className="btn btn-primary btn-sm" disabled={!hasLoop} onClick={() => setPlaying(!playing)}>
             {playing ? <IconStop size={13} /> : <IconPlay size={13} />} {playing ? "Stop loop" : "Play loop"}
           </button>
-          <button type="button" className="btn btn-ghost btn-sm" disabled={!hasLoop && !isRecording} onClick={() => emit(FRONTEND_EVENTS.clearLoop)}>
-            <IconTrash size={13} /> Clear
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            disabled={!hasLoop && !isRecording}
+            onClick={() => emit(FRONTEND_EVENTS.clearLoop)}
+            title="Delete the loop without saving"
+          >
+            <IconTrash size={13} /> Discard
           </button>
           <button type="button" className="btn btn-ghost btn-sm" disabled={!hasLoop} onClick={() => emit(FRONTEND_EVENTS.saveLoop)}>
             <IconSave size={13} /> Save to library
@@ -174,10 +214,26 @@ export function Looper({ transport }) {
             />
           </label>
 
-          <label className="looper-loop-switch">
+          <label className={`looper-loop-switch ${!looping ? "is-disabled" : ""}`}>
             <input type="checkbox" checked={looping} onChange={(e) => emit(FRONTEND_EVENTS.setLooperLooping, { enabled: e.target.checked })} />
             <span className="looper-switch" />
             <span>{looping ? "Loop" : "One shot"}</span>
+          </label>
+
+          <label
+            className={`looper-loop-switch ${!looping ? "is-disabled" : ""}`}
+            title={looping
+              ? (overdub ? "Overdub on — record layers over the loop" : "Overdub off — record replaces the loop. Turn on to layer.")
+              : "Overdub needs loop mode"}
+          >
+            <input
+              type="checkbox"
+              checked={overdub}
+              disabled={!looping}
+              onChange={(e) => onOverdubChange(e.target.checked)}
+            />
+            <span className="looper-switch" />
+            <span>Overdub</span>
           </label>
 
           <Stepper

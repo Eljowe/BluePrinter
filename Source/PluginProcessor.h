@@ -200,6 +200,9 @@ public:
     bool    isLooperPreRolling() const { return looperPreRollActive.load(); }
     bool    isLooperPlaying() const { return audioLoopPlaying.load(); }
     bool    isLooperLooping() const { return looperLooping.load(); }
+    // Overdub mode: with a loop captured and looping on, record layers
+    // the new input over the existing loop instead of replacing it.
+    bool    isLooperOverdub() const { return looperOverdub.load(); }
     int     getLooperCountInBeats() const { return looperCountInBeats.load(); }
     // Header-level click-during-capture gate, shared by the take recorder
     // and the looper: when false the click only plays during count-ins,
@@ -215,12 +218,16 @@ public:
     int64_t getAudioLoopPosition() const { return audioLoopPosition.load(); }
     int64_t getAudioLoopLength() const { return audioLoopLength.load(); }
     int64_t getAudioLoopStart() const { return audioLoopStart.load(); }
+    // Total record-buffer capacity in samples (bounds a fresh capture;
+    // the frontend uses it to draw capture progress).
+    int     getMaxRecordSamples() const { return maxRecordSamples; }
     // Waveform peaks for the cropped loop region, recomputed on the
     // message thread whenever the loop changes (stop/trim/crop).
     const std::vector<float>& getLooperPeaks() const { return looperPeaks; }
     void    setLooperRecording (bool enabled);
     void    setLooperPlaying (bool enabled);
     void    setLooperLooping (bool enabled);
+    void    setLooperOverdub (bool enabled);
     void    setLooperCountInBeats (int beats);
     void    setClickDuringCapture (bool enabled);
     // Trim start/end of the loop in whole beats (4 per bar at the current
@@ -240,6 +247,11 @@ public:
     // re-syncing (Start again) at actual-recording / capture time.
     bool    isMidiClockEnabled()    const { return midiClockEnabled.load (std::memory_order_acquire); }
     void    setMidiClockEnabled (bool enabled);
+    // "Clock: on record" — when on (and the clock toggle is on), the
+    // clock does NOT free-run: it starts when a take or loop capture
+    // begins (count-in pre-roll included) and stops when it ends.
+    bool    isMidiClockOnRecord()   const { return midiClockOnRecord.load (std::memory_order_acquire); }
+    void    setMidiClockOnRecord (bool enabled);
     juce::String getMidiOutputDeviceName() const;
     void    setMidiOutputDeviceName (const juce::String& name);
     juce::StringArray getAvailableMidiOutputDevices() const;
@@ -330,6 +342,11 @@ private:
     // version: it only updates the running flag and commands the
     // transport when an operation it owns ends on the audio thread
     // (one-shot loop finished, max-length recording filled).
+    // The run condition (wantsClockRun, atomics-only so both threads can
+    // evaluate it): the header-level toggle must be on, and either the
+    // clock is in free-run mode (midiClockOnRecord off) or a take / loop
+    // capture is active (recording or its count-in pre-roll).
+    bool wantsClockRun() const;
     void updateClockRunState();
     void refreshClockRunning();
 
@@ -435,6 +452,16 @@ private:
     std::atomic<bool>    looperPreRollActive    { false };
     std::atomic<bool>    looperCaptureArmed     { false };
     std::atomic<bool>    looperLooping          { true };
+    // Overdub mode (session-only, like looperLooping): when on and a
+    // loop exists, a new capture layers the input over the loop instead
+    // of replacing it. looperOverdubCapture is set by the message thread
+    // for the duration of an overdub capture; the audio thread then
+    // writes the new layer into the region after the loop (overdubWritePos)
+    // while audioLoopLength stays fixed, so the wrap boundary never
+    // moves mid-capture. The layer is mixed into the loop on stop.
+    std::atomic<bool>    looperOverdub          { false };
+    std::atomic<bool>    looperOverdubCapture   { false };
+    std::atomic<int64_t> overdubWritePos        { 0 };
     std::atomic<int64_t> audioLoopStart   { 0 };
     std::atomic<int64_t> audioLoopLength  { 0 };
     std::atomic<int64_t> audioLoopPosition { 0 };
@@ -449,6 +476,11 @@ private:
 
     void refreshLooperPeaks();
     void trimLooperToMusicalGrid();
+    // Mixes the overdub layer region (overdubWritePos - oldLoopLength)
+    // into the loop [audioLoopStart, +audioLoopLength), wrapping across
+    // loop cycles pedal-style. Message thread only, run with capture
+    // stopped and playback off.
+    void mixOverdubLayer (int64_t oldLoopLength, int64_t layerLength);
 
     // Pre-rendered metronome clicks. Two sounds, both synthesized by
     // resynthesizeClicks() (message thread only): a bright accent tick
@@ -477,9 +509,14 @@ private:
     // MIDI clock output. Clock pulses (0xF8, 24 ppqn) are generated in
     // processBlock alongside the audible metronome. MIDI Start / Stop
     // are queued from the message thread and flushed at the start of
-    // the next audio block. One header-level toggle (midiClockEnabled):
-    // when on the clock free-runs and takes / loop captures ride it.
+    // the next audio block. Two header-level toggles: midiClockEnabled
+    // is the master on/off — when on, the clock either free-runs
+    // (midiClockOnRecord off) or runs only while a take / loop capture
+    // is active (midiClockOnRecord on); takes and loop captures ride
+    // whichever mode is selected and re-sync with a Start at
+    // actual-recording / capture time.
     std::atomic<bool>    midiClockEnabled       { false };
+    std::atomic<bool>    midiClockOnRecord      { false };
     std::atomic<bool>    clockRunning           { false };
     std::atomic<bool>    midiStartPending       { false };
     std::atomic<bool>    midiStopPending        { false };

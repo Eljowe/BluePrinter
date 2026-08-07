@@ -9,7 +9,7 @@ export const SNIPPET_COLORS = [
   { key: "yellow", label: "Yellow", main: "#d9b93c", soft: "#f7edc4" },
   { key: "green",  label: "Green",  main: "#6bbf6a", soft: "#d7ecd3" },
   { key: "teal",   label: "Teal",   main: "#4db6ac", soft: "#cdeae5" },
-  { key: "blue",   label: "Blue",   main: "#4a90d9", soft: "#d3e4f6" },
+  { key: "blue",   label: "Blue",   main: "#5570cf", soft: "#d9e1f7" },
   { key: "purple", label: "Purple", main: "#9575cd", soft: "#e2d9f2" },
   { key: "pink",   label: "Pink",   main: "#e87ea0", soft: "#f7d8e2" },
 ];

@@ -355,6 +355,11 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
             if (auto* obj = data.getDynamicObject())
                 processor.setMidiClockEnabled (static_cast<bool> (obj->getProperty ("enabled")));
         })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetMidiClockOnRecordEvent, [&processor](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+                processor.setMidiClockOnRecord (static_cast<bool> (obj->getProperty ("enabled")));
+        })
         .withEventListener(BluePrinterWebViewEditor::frontendSetMidiDeviceEvent, [&processor](juce::var data)
         {
             if (auto* obj = data.getDynamicObject())
@@ -371,6 +376,8 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
         { if (auto* obj = data.getDynamicObject()) processor.setLooperPlaying (static_cast<bool> (obj->getProperty ("enabled"))); })
         .withEventListener(BluePrinterWebViewEditor::frontendSetLooperLoopingEvent, [&processor](juce::var data)
         { if (auto* obj = data.getDynamicObject()) processor.setLooperLooping (static_cast<bool> (obj->getProperty ("enabled"))); })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetLooperOverdubEvent, [&processor](juce::var data)
+        { if (auto* obj = data.getDynamicObject()) processor.setLooperOverdub (static_cast<bool> (obj->getProperty ("enabled"))); })
         .withEventListener(BluePrinterWebViewEditor::frontendSetLooperCountInEvent, [&processor](juce::var data)
         { if (auto* obj = data.getDynamicObject()) processor.setLooperCountInBeats (static_cast<int> (obj->getProperty ("beats"))); })
         .withEventListener(BluePrinterWebViewEditor::frontendSetLoopCropEvent, [&processor](juce::var data)
@@ -805,6 +812,7 @@ juce::var BluePrinterWebViewEditor::makeTransportSnapshot() const
     obj->setProperty ("clickAccentVolume", audioProcessor.getClickAccentVolume());
     obj->setProperty ("clickNoise",        audioProcessor.getClickNoise());
     obj->setProperty ("midiClockEnabled", audioProcessor.isMidiClockEnabled());
+    obj->setProperty ("midiClockOnRecord", audioProcessor.isMidiClockOnRecord());
     obj->setProperty ("clickDuringCapture", audioProcessor.getClickDuringCapture());
     obj->setProperty ("midiOutputDevice", audioProcessor.getMidiOutputDeviceName());
     {
@@ -832,9 +840,11 @@ juce::var BluePrinterWebViewEditor::makeTransportSnapshot() const
     obj->setProperty ("looperPreRoll", audioProcessor.isLooperPreRolling());
     obj->setProperty ("looperPlaying", audioProcessor.isLooperPlaying());
     obj->setProperty ("looperLooping", audioProcessor.isLooperLooping());
+    obj->setProperty ("looperOverdub", audioProcessor.isLooperOverdub());
     obj->setProperty ("looperCountInBeats", audioProcessor.getLooperCountInBeats());
     obj->setProperty ("looperCropStartBeats", audioProcessor.getLooperCropStartBeats());
     obj->setProperty ("looperCropEndBeats", audioProcessor.getLooperCropEndBeats());
+    obj->setProperty ("maxRecordSamples", audioProcessor.getMaxRecordSamples());
     obj->setProperty ("audioLoopStart", static_cast<double> (audioProcessor.getAudioLoopStart()));
     obj->setProperty ("audioLoopLength", static_cast<double> (audioProcessor.getAudioLoopLength()));
     obj->setProperty ("audioLoopPosition", static_cast<double> (audioProcessor.getAudioLoopPosition()));

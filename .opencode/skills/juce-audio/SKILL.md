@@ -31,7 +31,13 @@ BluePrinter uses JUCE for audio processing, VST3 hosting, and WebView2 UI integr
    output MIDI stays raw input (+ clock events)
 3. Looper capture tap: if the looper is armed, copy the POST-CHAIN buffer into
    the loop region of recordBuffer (bakes in synth sounds + FX; the click is
-   mixed later so it never lands in the loop)
+   mixed later so it never lands in the loop). In overdub mode
+   (`looperOverdubCapture` set by the message thread at capture start) the tap
+   instead writes the layer into the region after the existing loop
+   (`overdubWritePos` — `audioLoopLength` stays fixed so the loop's wrap
+   boundary never moves mid-capture); on stop, `mixOverdubLayer` wrap-mixes the
+   layer into the loop on the message thread under `recordLock` (playback is
+   stopped first so the mix can't race the audio thread's unlocked loop reads).
 4. Record the take-recorder tap (post-gain, pre-click) under recordLock
 5. Compute input levels (RMS + peak) from the clean signal
 6. Audio loop playback: addFrom the cropped window
@@ -50,18 +56,21 @@ BluePrinter uses JUCE for audio processing, VST3 hosting, and WebView2 UI integr
     during the count-in; looper capture uses the same gate)
 11. Click during looper capture + advance the same beat clock
 12. MIDI clock output (24 ppqn from metronomePosition) + flush pending
-    MIDI Start / Stop. One header-level toggle (`midiClockEnabled`)
-    drives it: the clock free-runs — advances `metronomePosition`
-    itself and renders the audible click (subject to `metronomeEnabled`)
-    — and takes / loop captures ride the same clock, re-syncing with a
-    Start at actual-recording/capture time (`midiStartPending`). Edges
-    send Start/Stop directly to the hardware output device
-    (`sendDirectMidiStart`/`sendDirectMidiStop` + `midiOutputLock`) —
-    the standalone never forwards the host MIDI buffer to hardware, so
-    without the direct send the drum machine stays silent. The click is
-    gated header-level too: `metronomeEnabled` (master) AND
-    `clickDuringCapture` (off = count-in only) for both take recording
-    and looper capture.
+    MIDI Start / Stop. Two header-level toggles drive it: `midiClockEnabled`
+    is the master on/off; with `midiClockOnRecord` off the clock free-runs
+    — advances `metronomePosition` itself and renders the audible click
+    (subject to `metronomeEnabled`) — and takes / loop captures ride the
+    same clock, re-syncing with a Start at actual-recording/capture time
+    (`midiStartPending`). With `midiClockOnRecord` on the clock runs only
+    while a take or loop capture is active (count-in included) and stops
+    when the capture ends; the run condition is the atomics-only helper
+    `wantsClockRun()`. Edges send Start/Stop directly to the hardware
+    output device (`sendDirectMidiStart`/`sendDirectMidiStop` +
+    `midiOutputLock`) — the standalone never forwards the host MIDI
+    buffer to hardware, so without the direct send the drum machine stays
+    silent. The click is gated header-level too: `metronomeEnabled`
+    (master) AND `clickDuringCapture` (off = count-in only) for both take
+    recording and looper capture.
 ```
 
 The take recorder and the audio looper share `recordBuffer`; `startRecording`

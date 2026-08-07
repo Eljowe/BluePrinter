@@ -483,11 +483,8 @@ export function PluginChain({ chainState, inputChannels, chainLevels, availableP
   const makeBypassHandler = (chain) => (index, currentBypassed) =>
     emit(FRONTEND_EVENTS.setVst3Bypass, { chain, index, bypassed: !currentBypassed });
 
-  const makeRemoveHandler = (chain) => (index) => {
-    if (window.confirm(`Remove this plugin from the chain?`)) {
-      emit(FRONTEND_EVENTS.removeVst3, { chain, index });
-    }
-  };
+  const makeRemoveHandler = (chain) => (index) =>
+    emit(FRONTEND_EVENTS.removeVst3, { chain, index });
 
   const makeOpenEditorHandler = (chain) => (index) =>
     emit(FRONTEND_EVENTS.openVst3Editor, { chain, index });
@@ -504,11 +501,7 @@ export function PluginChain({ chainState, inputChannels, chainLevels, availableP
   const handleAddChain = () => emit(FRONTEND_EVENTS.addChain, {});
   const handleScanFolder = () => emit(FRONTEND_EVENTS.scanVst3Folder, {});
 
-  const handleRemoveChain = (chain, name) => {
-    if (window.confirm(`Remove chain "${name}"? Its plugins will be removed.`)) {
-      emit(FRONTEND_EVENTS.removeChain, { chain });
-    }
-  };
+  const handleRemoveChain = (chain) => emit(FRONTEND_EVENTS.removeChain, { chain });
 
   return (
     <section className="fx-chain">
@@ -582,7 +575,7 @@ export function PluginChain({ chainState, inputChannels, chainLevels, availableP
               onOpenEditor={makeOpenEditorHandler(chain.id)}
               onCloseEditor={makeCloseEditorHandler(chain.id)}
               onMove={makeMoveHandler(chain.id)(Array.isArray(chain.slots) ? chain.slots : [])}
-              onRemoveChain={() => handleRemoveChain(chain.id, chain.name || "Unnamed chain")}
+              onRemoveChain={() => handleRemoveChain(chain.id)}
             />
           ))}
         </div>

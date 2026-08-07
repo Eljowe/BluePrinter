@@ -1,49 +1,67 @@
-/* Hallmark · redesign · editorial light · theme: Editorial Light (refined)
- * paper: #fafaf8 warm cream · accent: #2970c4 cool cobalt (single system accent)
+/* Hallmark · redesign · editorial light (navy & coral variant)
+ * paper: #f9e9de warm paper · ink: #3e5172 navy · accent: #cc6c5c coral
+ * (single system accent; navy carries the ink/borders/meters so the coral
+ * stays the loud voice — no corporate blue, no leather brown)
+ * tactile paper bevels + navy-tinted shadows (material language inherited
+ * from the ObstaclePlugin studio theme, restrained on light paper)
  * chips derive from accent + warn — no imported violet hue
  * display: system sans · roman · Hallmark pre-emit critique: P5 H5 E4 S5 R5 V4 */
 
 :root {
   color-scheme: light;
 
-  /* surfaces — warm editorial paper stack */
-  --bg: #fafaf8;
-  --panel: #ffffff;
-  --panel-2: #f3f3f0;
-  --inset: #eeedeb;
+  /* surfaces — warm paper stack (peachier than the old cream) */
+  --bg: #f9e9de;
+  --panel: #fdf6ee;
+  --panel-2: #f3e2d2;
+  --inset: #efe0cd;
 
-  /* borders */
-  --border: #e1e0dc;
-  --border-soft: #e9e8e5;
-  --border-strong: #d2d1cd;
+  /* borders — warm hairlines on paper */
+  --border: #e9d7c3;
+  --border-soft: #f1e4d3;
+  --border-strong: #dbc2a6;
 
-  /* text */
-  --text: #1b1a18;
-  --text-2: #5e5c58;
-  --text-3: #8e8d88;
+  /* text — navy ink (palette #3e5172) with navy-grey tiers. The muted
+     tiers sit at WCAG 4.5:1+ on the paper stack (bg/panel/inset). */
+  --text: #3e5172;
+  --text-2: #4a6188;
+  --text-3: #546579;
 
-  /* accents — single system accent cobalt, plus the warn/rec semantic hues */
-  --accent: #2970c4;
-  --accent-dim: rgba(41, 112, 196, 0.08);
-  --accent-border: rgba(41, 112, 196, 0.25);
-  --rec: #dc2626;
-  --rec-dark: #b91c1c;
-  --ok: #16a34a;
-  --warn: #d2850a;
+  /* accents — single system accent: coral #cc6c5c (palette) plus the
+     warn/rec semantic hues; the rec red stays distinct from the coral.
+     Three strength tiers: --accent is the loud fill, --accent-strong is
+     the fill for surfaces carrying white text / glyphs (4.5:1 vs white),
+     --accent-ink is the colour for accent-as-text on light paper. */
+  --accent: #cc6c5c;
+  --accent-strong: #b55442;
+  --accent-ink: #a6473b;
+  --accent-dim: rgba(204, 108, 92, 0.10);
+  --accent-border: rgba(204, 108, 92, 0.28);
+  --accent-glow: rgba(204, 108, 92, 0.35);
+  --rec: #d6452f;
+  --rec-dark: #b33625;
+  --ok: #3f9e63;
+  --warn: #c98a1b;
+  --warn-ink: #8a5f13;
 
   /* component tokens */
-  --scrollbar-thumb: #c8c7c3;
-  --btn-hover-bg: #e8e7e4;
-  --knob-track: #d8d7d3;
+  --scrollbar-thumb: #d9c4a8;
+  --btn-hover-bg: #f1e0cf;
+  --knob-track: #e8d5bf;
   /* chips derive from the system accent (key) and the warn amber (notes),
      instead of importing an unrelated violet from a preset scale. */
-  --chip-key-text: var(--accent);
-  --chip-notes-text: #8a5a08;
-  --chip-notes-dim: rgba(210, 133, 10, 0.07);
-  --chip-notes-border: rgba(210, 133, 10, 0.22);
-  --meter-peak: rgba(0, 0, 0, 0.45);
-  --meter-tick: rgba(0, 0, 0, 0.06);
+  --chip-key-text: var(--accent-ink);
+  --chip-notes-text: #8a4d0e;
+  --chip-notes-dim: rgba(201, 138, 27, 0.08);
+  --chip-notes-border: rgba(201, 138, 27, 0.24);
+  --meter-peak: rgba(62, 81, 114, 0.45);
+  --meter-tick: rgba(62, 81, 114, 0.08);
   --playing-text: #ffffff;
+
+  /* tactile paper material: a pressed-in top bevel on card surfaces and
+     navy-tinted drop shadows (from the ObstaclePlugin studio language) */
+  --bevel-hi: rgba(255, 255, 255, 0.6);
+  --card-shadow: rgba(62, 81, 114, 0.12);
 
   /* geometry — consolidated radius scale */
   --radius: 10px;
@@ -69,8 +87,14 @@ body, html, #root {
   -webkit-font-smoothing: antialiased;
 }
 
+/* No horizontal scroll at any window width; clip keeps sticky/fixed
+   descendants working. */
+html, body {
+  overflow-x: clip;
+}
+
 ::selection {
-  background: rgba(41, 112, 196, 0.18);
+  background: rgba(204, 108, 92, 0.18);
 }
 
 /* thin scrollbars everywhere */
@@ -92,7 +116,7 @@ body, html, #root {
 
 /* one global, consistent focus ring */
 :focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--accent-strong);
   outline-offset: 2px;
 }
 
@@ -149,14 +173,38 @@ button {
   color: var(--text);
 }
 
+/* Primary action: coral fill dark enough that white button text clears
+   4.5:1 (--accent-strong), not the loud --accent. */
+.btn-primary {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+  color: var(--playing-text);
+  font-weight: 600;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent-ink);
+  border-color: var(--accent-ink);
+  color: var(--playing-text);
+}
+
 .btn-danger {
-  color: var(--rec);
+  color: var(--rec-dark);
 }
 
 .btn-danger:hover:not(:disabled) {
-  background: rgba(220, 38, 38, 0.06);
-  border-color: rgba(220, 38, 38, 0.25);
+  background: rgba(214, 69, 47, 0.06);
+  border-color: rgba(214, 69, 47, 0.25);
   color: var(--rec-dark);
+}
+
+/* Two-step delete: armed state is a solid red fill, so the destructive
+   action is unmistakable before the second click commits it. */
+.btn-danger.is-armed,
+.btn-danger.is-armed:hover:not(:disabled) {
+  background: var(--rec);
+  border-color: var(--rec);
+  color: var(--playing-text);
 }
 
 /* square icon-only button */
@@ -186,13 +234,13 @@ button {
 }
 
 .icon-btn.is-active {
-  color: var(--accent);
+  color: var(--accent-ink);
   background: var(--accent-dim);
 }
 
 .icon-btn-danger:hover:not(:disabled) {
-  background: rgba(220, 38, 38, 0.07);
-  color: var(--rec);
+  background: rgba(214, 69, 47, 0.07);
+  color: var(--rec-dark);
 }
 
 /* ============================================================
@@ -244,23 +292,9 @@ button {
   font-size: 0.78rem;
 }
 
-/* Header controls on the right: the click cluster, the MIDI clock
-   cluster and the monitoring knobs. Each cluster is its own flex row
-   with a hairline divider (border-left) separating it from the
-   previous one, so the header reads as three distinct groups rather
-   than a clump of pills. The block hugs the right edge and wraps
-   internally on narrow widths. */
-.app-header-controls {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  flex: 1;
-  min-width: 0;
-  gap: 0;
-  row-gap: 10px;
-  flex-wrap: wrap;
-}
-
+/* Header right side: the monitoring knobs only — tempo, dry, gain,
+   playback volume. The click and MIDI clock toggles moved out into the
+   sync strip next to the recording tabs (see .record-tools). */
 .header-knobs {
   display: flex;
   align-items: flex-start;
@@ -270,36 +304,146 @@ button {
   border-left: 1px solid var(--border-soft);
 }
 
-.header-click-sound {
+/* Recording tools row: the Take/Loop tabs and the sync strip share one
+   horizontal line so the recording settings sit in context, not
+   crammed into the header. */
+.record-tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+/* The click + MIDI clock controls as one contained bar, split into two
+   labeled groups (click / MIDI clock) around a hairline divider. */
+.sync-strip {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 8px;
-}
-
-.header-click-sound .click-sound-toggle {
-  height: 30px;
-  padding: 0 14px;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 6px;
+  background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--radius-pill);
+  box-shadow: inset 0 1px 0 var(--bevel-hi), 0 1px 3px var(--card-shadow);
+}
+
+/* Each group is a tight segmented cluster; the strip gap between groups
+   is wider, so the divider reads as a separator between clusters. */
+.sync-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* Compact single-state toggle with a status dot (accent when on, the
+   clock dot blinks while the clock toggle is on). */
+.sync-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
   background: transparent;
-  color: var(--text-3);
-  font-size: 0.68rem;
+  color: var(--text-2);
+  font-size: 0.72rem;
   font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
   cursor: pointer;
   white-space: nowrap;
   transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
 }
 
-.header-click-sound .click-sound-toggle:hover {
+.sync-toggle:hover {
   color: var(--text);
-  border-color: var(--border-strong);
+  background: var(--panel-2);
 }
 
-/* Anchor the popover to the right edge so it stays inside the header. */
-.header-click-sound .click-popover {
+.sync-toggle.is-on {
+  background: var(--accent-dim);
+  border-color: var(--accent-border);
+  color: var(--accent-ink);
+  box-shadow: 0 0 0 1px var(--accent-border), 0 0 10px var(--accent-glow);
+}
+
+.sync-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-3);
+  opacity: 0.5;
+  flex-shrink: 0;
+}
+
+.sync-toggle.is-on .sync-dot {
+  background: var(--accent-strong);
+  opacity: 1;
+}
+
+.sync-toggle.is-live .sync-dot {
+  background: var(--accent-strong);
+  opacity: 1;
+  animation: status-blink 0.9s ease-in-out infinite;
+}
+
+/* Plain text action (click sound tuning) — reads as a quiet pill so it
+   belongs to the strip instead of floating between toggles. */
+.sync-text {
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-3);
+  font-size: 0.7rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  font-family: inherit;
+  transition: color 0.12s ease, background 0.12s ease;
+}
+
+.sync-text:hover {
+  color: var(--text);
+  background: var(--panel-2);
+  text-decoration: none;
+}
+
+/* Hairline between the click group and the clock group. */
+.sync-divider {
+  width: 1px;
+  height: 18px;
+  background: var(--border);
+  flex-shrink: 0;
+}
+
+.sync-device {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 10px;
+}
+
+.sync-device-label {
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.sync-device .midi-device-select {
+  max-width: 150px;
+  height: 28px;
+}
+
+/* Anchor the click-sound popover to the right edge of the sync strip
+   so it stays inside the window. */
+.sync-strip .click-popover {
   left: auto;
   right: 0;
 }
@@ -336,10 +480,10 @@ button {
 
 .section-title h2 {
   margin: 0;
-  font-size: 0.76rem;
-  font-weight: 650;
+  font-size: 0.82rem;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.13em;
+  letter-spacing: 0.1em;
   color: var(--text-2);
   white-space: nowrap;
 }
@@ -360,6 +504,87 @@ button {
 .section-actions {
   display: flex;
   gap: 8px;
+  flex-shrink: 0;
+}
+
+/* Tactile paper: every card surface gets a pressed-in top bevel and a
+   warm-tinted drop shadow (the ObstaclePlugin material language,
+   restrained on the light paper). Popovers keep their stronger float
+   shadows and add the same bevel. */
+.transport,
+.looper,
+.take-review,
+.library-folder,
+.snippet,
+.fx-chain-panel {
+  box-shadow: inset 0 1px 0 var(--bevel-hi), 0 1px 3px var(--card-shadow);
+}
+
+/* Active controls glow: a hairline accent ring plus a faint halo, like
+   an LED that just lit. */
+.fx-midi-toggle.is-on,
+.fx-power.is-on,
+.fx-input-chip.is-on,
+.fx-midi-channel-chip.is-on,
+.snippet-tag-chip.is-active {
+  box-shadow: 0 0 0 1px var(--accent-border), 0 0 10px var(--accent-glow);
+}
+
+.looper-loop-switch input:checked + .looper-switch {
+  box-shadow: 0 0 0 1px var(--accent-border), 0 0 8px var(--accent-glow);
+}
+
+/* ============================================================
+   Recording approach tabs (Take / Loop)
+   ============================================================ */
+
+.recording-tabs {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 3px;
+  background: var(--inset);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  box-shadow: inset 0 1px 2px rgba(62, 81, 114, 0.12);
+}
+
+.recording-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  padding: 0 16px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-3);
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.recording-tab:hover {
+  color: var(--text);
+}
+
+.recording-tab.is-active {
+  background: var(--panel);
+  border-color: var(--border-strong);
+  color: var(--text);
+  box-shadow: 0 0 0 1px var(--accent-border), 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+.recording-tab-badge {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--rec);
   flex-shrink: 0;
 }
 
@@ -408,8 +633,8 @@ button {
 }
 
 .rec-button:hover {
-  border-color: rgba(220, 38, 38, 0.50);
-  box-shadow: 0 0 0 4px rgba(220, 38, 38, 0.06);
+  border-color: rgba(214, 69, 47, 0.50);
+  box-shadow: 0 0 0 4px rgba(214, 69, 47, 0.06);
 }
 
 .rec-button:active {
@@ -430,8 +655,8 @@ button {
 }
 
 @keyframes rec-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.22); }
-  50% { box-shadow: 0 0 0 7px rgba(220, 38, 38, 0); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(214, 69, 47, 0.22); }
+  50% { box-shadow: 0 0 0 7px rgba(214, 69, 47, 0); }
 }
 
 /* time readout */
@@ -452,7 +677,7 @@ button {
 }
 
 .transport-readout.is-counting-in .transport-time-value {
-  color: var(--warn);
+  color: var(--warn-ink);
   animation: count-in-pulse 0.5s ease-out;
 }
 
@@ -481,19 +706,19 @@ button {
   flex-shrink: 0;
 }
 
-.transport.is-recording .transport-status { color: var(--rec); }
+.transport.is-recording .transport-status { color: var(--rec-dark); }
 .transport.is-recording .transport-status-dot {
-  background: var(--rec);
+  background: var(--rec-dark);
   animation: status-blink 1.2s ease-in-out infinite;
 }
-.transport.is-count-in .transport-status { color: var(--warn); }
-.transport.is-count-in .transport-status-dot { background: var(--warn); }
-.transport.is-playing .transport-status { color: var(--accent); }
-.transport.is-playing .transport-status-dot { background: var(--accent); }
+.transport.is-count-in .transport-status { color: var(--warn-ink); }
+.transport.is-count-in .transport-status-dot { background: var(--warn-ink); }
+.transport.is-playing .transport-status { color: var(--accent-ink); }
+.transport.is-playing .transport-status-dot { background: var(--accent-strong); }
 /* Free-running MIDI clock (no recording / looping) */
-.transport.is-clock .transport-status { color: var(--accent); }
+.transport.is-clock .transport-status { color: var(--accent-ink); }
 .transport.is-clock .transport-status-dot {
-  background: var(--accent);
+  background: var(--accent-strong);
   animation: status-blink 1.2s ease-in-out infinite;
 }
 
@@ -524,68 +749,7 @@ button {
   border-left: 1px solid var(--border-soft);
 }
 
-/* Header-level MIDI clock group: the on/off toggle plus the output
-   device select (compact, beside the toggle rather than in its own
-   section). */
-.header-midi-clock {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-left: 22px;
-  padding-left: 22px;
-  border-left: 1px solid var(--border-soft);
-}
-
-.header-midi-device {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  color: var(--text-3);
-  white-space: nowrap;
-}
-
-.header-midi-device-label {
-  font-size: 0.68rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.header-midi-device .midi-device-select {
-  max-width: 150px;
-  height: 30px;
-}
-
-.clock-live-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--text-3);
-  opacity: 0.35;
-  flex-shrink: 0;
-}
-
-.clock-live-dot.is-live {
-  background: var(--accent);
-  opacity: 1;
-  animation: status-blink 0.9s ease-in-out infinite;
-}
-
-.click-sound-toggle {
-  padding: 0 6px;
-  border: none;
-  background: transparent;
-  color: var(--text-3);
-  font-size: 0.66rem;
-  font-weight: 600;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.click-sound-toggle:hover {
-  color: var(--text);
-  text-decoration: underline;
-}
-
+/* click sound popover */
 .click-popover {
   position: absolute;
   top: calc(100% + 6px);
@@ -596,7 +760,7 @@ button {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  box-shadow: inset 0 1px 0 var(--bevel-hi), 0 8px 24px rgba(0, 0, 0, 0.45);
   display: flex;
   flex-direction: column;
   gap: 9px;
@@ -650,53 +814,6 @@ button {
   color: var(--text-3);
 }
 
-/* metronome toggle */
-.metronome-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  height: 30px;
-  padding: 0 12px;
-  border-radius: var(--radius-pill);
-  border: 1px solid var(--border);
-  background: transparent;
-  color: var(--text-3);
-  font-size: 0.74rem;
-  font-weight: 600;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
-}
-
-.metronome-toggle:hover {
-  color: var(--text);
-  border-color: var(--border-strong);
-}
-
-.metronome-toggle.is-on {
-  background: var(--accent-dim);
-  border-color: var(--accent-border);
-  color: var(--accent);
-}
-
-.metronome-state {
-  display: grid;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  font-size: 0.68rem;
-}
-
-/* Both toggle labels share one grid cell, so the button keeps a
-   constant width no matter which state is active. */
-.metronome-state > span {
-  grid-area: 1 / 1;
-  white-space: nowrap;
-}
-
-.metronome-state > span:not(.is-active) {
-  visibility: hidden;
-}
-
 /* count-in */
 .count-in-control {
   display: flex;
@@ -734,7 +851,6 @@ button {
 }
 
 .count-in-field input:focus {
-  outline: none;
   border-color: var(--accent);
 }
 
@@ -751,18 +867,6 @@ button {
 .count-in-suffix {
   color: var(--text-3);
   font-size: 0.7rem;
-}
-
-/* MIDI device selector (visible when MIDI clock is on). Floats
-   below the toggle instead of participating in the flex row, so
-   revealing it never moves the BPM knob or the toggle itself. */
-.midi-device-control {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  z-index: 10;
-  display: flex;
-  align-items: center;
 }
 
 .midi-device-select {
@@ -782,18 +886,7 @@ button {
 }
 
 .midi-device-select:focus {
-  outline: none;
   border-color: var(--accent);
-}
-
-.midi-no-devices {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  z-index: 10;
-  font-size: 0.68rem;
-  color: var(--rec);
-  white-space: nowrap;
 }
 
 /* ============================================================
@@ -838,14 +931,6 @@ button {
   font-size: 0.78rem;
 }
 
-.eyebrow {
-  color: var(--accent);
-  font-size: 0.63rem;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-}
-
 .looper-state {
   display: flex;
   align-items: center;
@@ -865,10 +950,36 @@ button {
   background: var(--text-3);
 }
 
-.looper.is-recording .looper-state { color: var(--rec); }
-.looper.is-recording .looper-state-dot { background: var(--rec); animation: status-blink 1.2s ease-in-out infinite; }
-.looper.is-playing .looper-state { color: var(--accent); }
-.looper.is-playing .looper-state-dot { background: var(--accent); }
+.looper.is-recording .looper-state { color: var(--rec-dark); }
+.looper.is-recording .looper-state-dot { background: var(--rec-dark); animation: status-blink 1.2s ease-in-out infinite; }
+.looper.is-playing .looper-state { color: var(--accent-ink); }
+.looper.is-playing .looper-state-dot { background: var(--accent-strong); }
+
+/* Count-in countdown, mirroring the take transport: a big pulsing
+   number on the timeline and a warn-blinking state dot. The number
+   re-pulses on every beat (React re-keys it each count step). */
+.looper.is-counting-in .looper-state { color: var(--warn-ink); }
+.looper.is-counting-in .looper-state-dot { background: var(--warn-ink); animation: status-blink 1.2s ease-in-out infinite; }
+
+.looper-timeline.is-counting-in {
+  border-color: var(--chip-notes-border);
+}
+
+.looper-countdown {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  z-index: 2;
+  font-family: var(--mono);
+  font-size: 2.2rem;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--warn-ink);
+  text-shadow: 0 1px 0 var(--bevel-hi);
+  animation: count-in-pulse 0.5s ease-out;
+  pointer-events: none;
+}
 
 .looper-timeline {
   position: relative;
@@ -889,7 +1000,7 @@ button {
 .looper-grid-lines i { width: 1px; background: var(--border-soft); }
 .looper-waveform { position: absolute; inset: 0; padding: 14px 12px 26px; }
 .looper-waveform .waveform { height: 100%; }
-.looper-waveform .waveform-trace { stroke: var(--accent); opacity: 0.9; }
+.looper-waveform .waveform-trace { stroke: var(--accent-strong); opacity: 0.9; }
 .looper-waveform .waveform-baseline { display: none; }
 .looper-crop-left, .looper-crop-right { position: absolute; top: 0; bottom: 0; background: var(--border-soft); opacity: 0.45; z-index: 1; }
 .looper-crop-left { left: 0; }
@@ -912,8 +1023,8 @@ button {
   transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
 }
 .looper-record-button:hover {
-  border-color: rgba(220, 38, 38, 0.50);
-  box-shadow: 0 0 0 4px rgba(220, 38, 38, 0.06);
+  border-color: rgba(214, 69, 47, 0.50);
+  box-shadow: 0 0 0 4px rgba(214, 69, 47, 0.06);
 }
 .looper-record-button:active { transform: scale(0.96); }
 .looper-record-button.is-active {
@@ -935,14 +1046,37 @@ button {
   height: 10px;
 }
 
-.looper-settings { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 14px; }
+.looper-settings { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 16px; }
 
 .looper-loop-switch { display: inline-flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 0.75rem; cursor: pointer; }
 .looper-loop-switch input { position: absolute; opacity: 0; pointer-events: none; }
+.looper-loop-switch.is-disabled { opacity: 0.45; cursor: not-allowed; }
 .looper-switch { position: relative; width: 30px; height: 17px; border-radius: 99px; background: var(--border-strong); transition: background 0.15s ease; }
 .looper-switch::after { position: absolute; top: 3px; left: 3px; width: 11px; height: 11px; border-radius: 50%; background: var(--text-3); content: ""; transition: transform 0.15s ease, background 0.15s ease; }
-.looper-loop-switch input:checked + .looper-switch { background: var(--accent); }
+.looper-loop-switch input:checked + .looper-switch { background: var(--accent-strong); }
 .looper-loop-switch input:checked + .looper-switch::after { transform: translateX(13px); background: #fff; }
+
+/* Input VU meter while recording (capture or overdub). The slot is
+   always reserved so the controls never shift when it appears. */
+.looper-meter {
+  width: 110px;
+  display: flex;
+  align-items: center;
+  visibility: hidden;
+}
+.looper.is-recording .looper-meter { visibility: visible; }
+
+/* Fresh-capture progress: the timeline fills as the capture grows. */
+.looper-capture-progress {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  background: var(--accent-dim);
+  border-right: 1px solid var(--accent-border);
+  z-index: 1;
+  transition: width 0.12s linear;
+}
 
 .looper-settings { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 16px; }
 
@@ -950,7 +1084,7 @@ button {
 .looper-stepper-label { font-size: 0.64rem; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.12em; font-weight: 600; }
 .looper-stepper-control { display: flex; align-items: center; gap: 2px; }
 .looper-stepper-btn { width: 24px; height: 26px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--inset); color: var(--text-2); font-size: 0.9rem; line-height: 1; cursor: pointer; }
-.looper-stepper-btn:hover:not(:disabled) { border-color: var(--accent-border); color: var(--accent); }
+.looper-stepper-btn:hover:not(:disabled) { border-color: var(--accent-border); color: var(--accent-ink); }
 .looper-stepper-btn:disabled { opacity: 0.35; cursor: default; }
 .looper-stepper-value { min-width: 26px; text-align: center; font-family: var(--mono); font-size: 0.8rem; color: var(--text); font-variant-numeric: tabular-nums; }
 
@@ -1008,8 +1142,8 @@ button {
   background: var(--text-3);
 }
 
-.take-review.is-playing .take-review-state { color: var(--accent); }
-.take-review.is-playing .take-review-state-dot { background: var(--accent); }
+.take-review.is-playing .take-review-state { color: var(--accent-ink); }
+.take-review.is-playing .take-review-state-dot { background: var(--accent-strong); }
 
 .take-review-timeline {
   position: relative;
@@ -1026,7 +1160,7 @@ button {
   padding: 10px 12px 20px;
 }
 
-.take-review-timeline .waveform-trace { stroke: var(--accent); opacity: 0.9; }
+.take-review-timeline .waveform-trace { stroke: var(--accent-strong); opacity: 0.9; }
 .take-review-timeline .waveform-baseline { display: none; }
 
 .take-review-playhead {
@@ -1150,7 +1284,7 @@ button {
 
 .library-folder-error {
   margin-top: 4px;
-  color: var(--rec);
+  color: var(--rec-dark);
   font-size: 0.76rem;
 }
 
@@ -1182,7 +1316,7 @@ button {
 }
 
 .fx-chain-folder.is-scanning {
-  color: var(--warn);
+  color: var(--warn-ink);
   font-family: var(--font);
   font-weight: 500;
 }
@@ -1195,22 +1329,30 @@ button {
   max-width: 82ch;
 }
 
+/* Chains sit in a horizontal rail: fixed-width cards that scroll
+   sideways instead of stretching the page vertically. Each card's
+   plugin list scrolls internally, so the section takes constant
+   height no matter how many chains or plugins exist. */
 .fx-chain-panels {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+  display: flex;
   gap: 14px;
-  align-items: start;
+  align-items: flex-start;
+  overflow-x: auto;
+  scroll-snap-type: x proximity;
+  padding-bottom: 4px;
 }
 
 .fx-chain-panel {
   display: flex;
   flex-direction: column;
+  flex: 0 0 340px;
   gap: 10px;
   padding: 14px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   min-width: 0;
+  scroll-snap-align: start;
 }
 
 .fx-chain-header {
@@ -1255,6 +1397,8 @@ button {
   color: var(--text-3);
   cursor: pointer;
   white-space: nowrap;
+  background: transparent;
+  font-family: var(--font);
   transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
 }
 
@@ -1281,12 +1425,12 @@ button {
 .fx-midi-toggle.is-on {
   background: var(--accent-dim);
   border-color: var(--accent-border);
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 
 .fx-midi-toggle.is-on .fx-midi-toggle-box {
-  background: var(--accent);
-  border-color: var(--accent);
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
 }
 
 /* Chain identity + routing controls in the panel header. */
@@ -1305,12 +1449,7 @@ button {
 }
 
 .fx-chain-name:focus {
-  border-color: var(--accent-border);
-}
-
-.fx-midi-toggle {
-  font-family: var(--font);
-  background: transparent;
+  border-color: var(--accent);
 }
 
 /* Second header row: input channel chips, volume knob, mute, meter. */
@@ -1362,7 +1501,7 @@ button {
 .fx-input-chip.is-on {
   background: var(--accent-dim);
   border-color: var(--accent-border);
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 
 .fx-volume-knob {
@@ -1443,7 +1582,7 @@ button {
 .fx-midi-channel-chip.is-on {
   background: var(--accent-dim);
   border-color: var(--accent-border);
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 
 .fx-chain-empty {
@@ -1459,11 +1598,16 @@ button {
 
 .fx-chain-slots {
   list-style: none;
-  padding: 0;
+  padding: 0 2px 0 0;
   margin: 0;
   display: flex;
   flex-direction: column;
   gap: 5px;
+  /* Internal scroll so a long plugin list never stretches the card
+     (or the rail) — the panel header and controls stay visible.
+     Short chains close flush below their last slot. */
+  max-height: 240px;
+  overflow-y: auto;
 }
 
 .fx-slot {
@@ -1578,7 +1722,7 @@ button {
 .fx-power.is-on {
   background: var(--accent-dim);
   border-color: var(--accent-border);
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 
 .fx-power.is-off:hover {
@@ -1715,6 +1859,13 @@ button {
   border-color: var(--accent);
 }
 
+/* The inner input kills the global ring (border: none), so the pill
+   shows the keyboard focus ring itself. */
+.snippet-search:has(input:focus-visible) {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 1px;
+}
+
 .snippet-search input {
   flex: 1;
   min-width: 0;
@@ -1744,7 +1895,6 @@ button {
 }
 
 .snippet-toolbar-select select:focus {
-  outline: none;
   border-color: var(--accent);
 }
 
@@ -1781,7 +1931,7 @@ button {
   min-width: 16px;
   padding: 0 4px;
   border-radius: var(--radius-pill);
-  background: var(--accent);
+  background: var(--accent-strong);
   color: var(--playing-text);
   font-size: 0.62rem;
   font-weight: 700;
@@ -1802,7 +1952,7 @@ button {
   background: var(--panel);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.08);
+  box-shadow: inset 0 1px 0 var(--bevel-hi), 0 10px 28px rgba(0, 0, 0, 0.08);
 }
 
 .snippet-tags-popover-header {
@@ -1846,7 +1996,6 @@ button {
 }
 
 .snippet-tag-rename-row input:focus {
-  outline: none;
   border-color: var(--accent);
 }
 
@@ -1883,7 +2032,7 @@ button {
 .snippet-tag-chip.is-active {
   background: var(--accent-dim);
   border-color: var(--accent-border);
-  color: var(--accent);
+  color: var(--accent-ink);
   font-weight: 600;
 }
 
@@ -1907,7 +2056,7 @@ button {
 }
 
 .snippet-filter-clear:hover {
-  color: var(--rec);
+  color: var(--rec-dark);
 }
 
 .snippet-empty {
@@ -1917,6 +2066,23 @@ button {
   text-align: center;
   color: var(--text-3);
   font-size: 0.86rem;
+}
+
+/* "Show more" below the capped takes grid. */
+.snippet-show-more {
+  display: flex;
+  justify-content: center;
+  padding-top: 2px;
+}
+
+.snippet-show-more-count {
+  padding: 0 6px;
+  border-radius: var(--radius-pill);
+  background: var(--panel-2);
+  border: 1px solid var(--border-soft);
+  font-size: 0.64rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Render-error fallback (ErrorBoundary) — never a white screen. */
@@ -1935,7 +2101,7 @@ button {
   margin: 0;
   font-size: 0.82rem;
   font-weight: 700;
-  color: var(--warn);
+  color: var(--warn-ink);
 }
 
 .error-boundary-message {
@@ -1948,7 +2114,7 @@ button {
 
 .snippet-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr));
   gap: 12px;
   align-items: start;
 }
@@ -1969,7 +2135,7 @@ button {
 
 .snippet.is-playing {
   border-color: var(--accent-border);
-  box-shadow: 0 0 0 1px var(--accent-border);
+  box-shadow: inset 0 1px 0 var(--bevel-hi), 0 0 0 1px var(--accent-border), 0 1px 3px var(--card-shadow);
 }
 
 .snippet-header {
@@ -1996,12 +2162,12 @@ button {
 
 .play-button:hover {
   border-color: var(--accent-border);
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 
 .play-button.is-playing {
-  background: var(--accent);
-  border-color: var(--accent);
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
   color: var(--playing-text);
 }
 
@@ -2009,8 +2175,10 @@ button {
   flex: 1;
   min-width: 0;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+  row-gap: 6px;
   padding: 4px 6px;
   margin: 0 -4px;
   border-radius: var(--radius-xs);
@@ -2025,7 +2193,18 @@ button {
   background: var(--panel-2);
 }
 
+/* Row 1: the tag dot + full-width name, so a long name never competes
+   with the key/notes chips. Row 2 holds the chips, duration and date. */
+.snippet-title-line {
+  flex: 1 1 100%;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .snippet-name {
+  flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2102,7 +2281,7 @@ button {
 }
 
 .waveform-trace {
-  stroke: var(--accent);
+  stroke: var(--accent-strong);
 }
 
 .waveform-baseline {
@@ -2149,30 +2328,13 @@ button {
 
 .snippet-field input:focus,
 .snippet-field textarea:focus {
-  outline: none;
   border-color: var(--accent);
 }
 
-/* Organisational colour tags. The card gets a strong left accent
-   (inset shadow so layout doesn't shift) and the waveform a pastel
-   wash; the summary shows a matching dot. */
-.snippet.color-red    { box-shadow: inset 3px 0 0 #e26d6a; }
-.snippet.color-orange { box-shadow: inset 3px 0 0 #e89b4e; }
-.snippet.color-yellow { box-shadow: inset 3px 0 0 #d9b93c; }
-.snippet.color-green  { box-shadow: inset 3px 0 0 #6bbf6a; }
-.snippet.color-teal   { box-shadow: inset 3px 0 0 #4db6ac; }
-.snippet.color-blue   { box-shadow: inset 3px 0 0 #4a90d9; }
-.snippet.color-purple { box-shadow: inset 3px 0 0 #9575cd; }
-.snippet.color-pink   { box-shadow: inset 3px 0 0 #e87ea0; }
-
-.snippet.color-red    .snippet-waveform { background: #f6d3d1; }
-.snippet.color-orange .snippet-waveform { background: #f7e0c8; }
-.snippet.color-yellow .snippet-waveform { background: #f7edc4; }
-.snippet.color-green  .snippet-waveform { background: #d7ecd3; }
-.snippet.color-teal   .snippet-waveform { background: #cdeae5; }
-.snippet.color-blue   .snippet-waveform { background: #d3e4f6; }
-.snippet.color-purple .snippet-waveform { background: #e2d9f2; }
-.snippet.color-pink   .snippet-waveform { background: #f7d8e2; }
+/* Organisational colour tags. The waveform wash is applied inline from
+   `SNIPPET_COLORS` in utils.js (the single source for the tag palette —
+   the dot and the swatches read the same values), so the tag colours
+   never drift from the rest of the app. */
 
 .snippet-color-dot {
   width: 10px;
@@ -2276,7 +2438,7 @@ button {
   max-width: 360px;
   background: var(--panel-2);
   border: 1px solid var(--border-strong);
-  border-left: 3px solid var(--accent);
+  border-left: 2px solid var(--accent);
   border-radius: var(--radius-sm);
   padding: 11px 14px;
   color: var(--text);
@@ -2285,7 +2447,7 @@ button {
   cursor: pointer;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12);
   z-index: 100;
-  animation: toast-in 0.2s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+  animation: toast-in 0.2s cubic-bezier(0.2, 0.6, 0.4, 1);
 }
 
 @keyframes toast-in {
@@ -2343,7 +2505,7 @@ button {
 
 .knob-arc {
   fill: none;
-  stroke: var(--accent);
+  stroke: var(--accent-strong);
   stroke-width: 3.5;
   stroke-linecap: round;
 }
@@ -2365,7 +2527,7 @@ button {
 }
 
 .knob-tip {
-  fill: var(--accent);
+  fill: var(--accent-strong);
 }
 
 .knob-value {
@@ -2398,15 +2560,10 @@ button {
     align-items: stretch;
   }
 
-  /* Stacked header: the divider hairlines between control clusters
-     become plain spacing, and the block wraps from the left. */
-  .app-header-controls {
-    align-self: stretch;
-    justify-content: flex-start;
-  }
-
-  .header-midi-clock,
+  /* Stacked header: the knob row drops its divider hairline and the
+     block wraps from the left. */
   .header-knobs {
+    align-self: flex-start;
     margin-left: 0;
     padding-left: 0;
     border-left: none;
@@ -2441,18 +2598,11 @@ button {
   }
 }
 
-@media (max-width: 900px) {
-  .fx-chain-panels {
-    grid-template-columns: 1fr;
-  }
-}
-
 /* ============ startup splash ============
    Hallmark · component: splash-screen · genre: editorial
- * theme: Editorial Light (in-system: paper/ink/cobalt tokens only)
+ * theme: navy & coral (in-system: paper/ink/coral tokens only)
  * states: starting · restoring · done · error · leaving · reduced-motion
- * contrast: pass (paper/ink 15:1 · text-2 ~7:1 · accent ~4.6:1)
- * pre-emit critique: P5 H5 E5 S4 R5 V4 */
+ * contrast: pass (paper/ink 6.7:1 · text-2 ~5.3:1 · text-3 ~5:1 · accent-ink ~4.9:1) */
 /* While the splash is up, the document must not scroll — the app
    underneath is rendered and would otherwise show a scrollbar. */
 html:has(.bp-splash) {
@@ -2464,9 +2614,7 @@ html:has(.bp-splash) {
   inset: 0;
   z-index: 1000;
   overflow: hidden;
-  background:
-    radial-gradient(900px 480px at 10% -10%, var(--accent-dim), transparent 60%),
-    var(--bg);
+  background: var(--bg);
   color: var(--text);
   font-family: var(--font);
   transition: opacity 0.4s ease;
@@ -2545,7 +2693,7 @@ html:has(.bp-splash) {
 }
 
 .bp-splash__status.is-error {
-  color: var(--warn);
+  color: var(--warn-ink);
 }
 
 .bp-splash__tagline {
@@ -2567,7 +2715,7 @@ html:has(.bp-splash) {
   border-radius: var(--radius-pill);
   background: var(--accent-dim);
   font-size: 0.72rem;
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 
 .bp-splash__footer {
@@ -2641,7 +2789,10 @@ html:has(.bp-splash) {
   }
 
   .looper-playhead,
-  .looper.is-recording .looper-state-dot {
+  .looper.is-recording .looper-state-dot,
+  .looper.is-counting-in .looper-state-dot,
+  .looper-countdown,
+  .sync-toggle.is-live .sync-dot {
     animation: none;
   }
 
