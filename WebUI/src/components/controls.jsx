@@ -30,7 +30,7 @@ function arcPath(cx, cy, r, startAngle, endAngle) {
   return `M ${sx} ${sy} A ${r} ${r} 0 ${largeArc} 1 ${ex} ${ey}`;
 }
 
-export function Knob({ label, min, max, value, onChange, unit = "", step = "0.01", className = "", decimals = 1, disabled = false }) {
+export function Knob({ label, min, max, value, onChange, unit = "", step = "0.01", className = "", decimals = 1, disabled = false, title = "" }) {
   const normalized = clamp((value - min) / (max - min), 0, 1);
   const angle = ARC_START + normalized * ARC_SWEEP;
   const dragState = useRef(null);
@@ -119,6 +119,7 @@ export function Knob({ label, min, max, value, onChange, unit = "", step = "0.01
         className="knob-shell"
         role="slider"
         tabIndex={0}
+        title={title || undefined}
         aria-label={label}
         aria-valuemin={min}
         aria-valuemax={max}

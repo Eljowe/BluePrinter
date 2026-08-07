@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Knob } from "./controls";
 import { LevelMeter } from "./LevelMeter";
 import { IconStop } from "./icons";
 import { formatTime } from "../utils";
@@ -50,7 +49,6 @@ export function Transport({
   transport,
   bpm,
   countInBeats,
-  onBpmChange,
   onCountInBeatsChange,
 }) {
   const isPreRoll = Boolean(transport?.preRollActive);
@@ -119,16 +117,6 @@ export function Transport({
       </div>
 
       <div className="transport-group">
-        <Knob
-          label="BPM"
-          min={40}
-          max={240}
-          value={bpm}
-          onChange={onBpmChange}
-          step="1"
-          decimals={0}
-        />
-
         <label className="count-in-control">
           <span className="count-in-label">Count-in</span>
           <NumberInput

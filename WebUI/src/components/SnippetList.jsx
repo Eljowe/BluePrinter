@@ -1,7 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { SnippetCard } from "./SnippetCard";
 import { SNIPPET_COLORS, snippetColor } from "../utils";
-import { IconSearch, IconTag, IconX } from "./icons";
+import { IconChevronDown, IconSearch, IconTag, IconX } from "./icons";
 
 const SORT_OPTIONS = [
   { key: "newest", label: "Newest" },
@@ -11,6 +11,12 @@ const SORT_OPTIONS = [
   { key: "longest", label: "Longest" },
   { key: "shortest", label: "Shortest" },
 ];
+
+// How many takes render before the "Show more" button appears. The
+// grid re-caps whenever the filters change so the first page always
+// starts at the top of the result set.
+const VISIBLE_PAGE = 10;
+const SHOW_MORE_STEP = 10;
 
 // The built-in colour labels stand in until the user renames a tag;
 // a user name (from the properties file) wins.
@@ -71,6 +77,12 @@ export function SnippetList({ snippets, tagNames, onRenameTag, playingSnippetId,
   const [tagFilter, setTagFilter] = useState(() => new Set());
   const [keyFilter, setKeyFilter] = useState("");
   const [tagsOpen, setTagsOpen] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(VISIBLE_PAGE);
+
+  // Any filter/sort change restarts the visible window at the top.
+  useEffect(() => {
+    setVisibleCount(VISIBLE_PAGE);
+  }, [query, sortBy, tagFilter, keyFilter]);
 
   // Distinct detected keys present in the library (sorted), for the
   // key filter dropdown.
@@ -133,6 +145,8 @@ export function SnippetList({ snippets, tagNames, onRenameTag, playingSnippetId,
 
   const isFiltering = tagFilter.size > 0 || keyFilter !== "" || query.trim() !== "";
   const activeTagCount = tagFilter.size;
+  const visibleTakes = ordered.slice(0, visibleCount);
+  const hiddenCount = ordered.length - visibleTakes.length;
 
   return (
     <section className="snippet-list">
@@ -242,17 +256,35 @@ export function SnippetList({ snippets, tagNames, onRenameTag, playingSnippetId,
             : "No takes match the current filters."}
         </div>
       ) : (
-        <div className="snippet-grid">
-          {ordered.map((s) => (
-            <SnippetCard
-              key={s.id}
-              snippet={s}
-              tagNames={tagNames}
-              isPlaying={s.id === playingSnippetId}
-              playPositionSeconds={playPositionSeconds}
-            />
-          ))}
-        </div>
+        <>
+          <div className="snippet-grid">
+            {visibleTakes.map((s) => (
+              <SnippetCard
+                key={s.id}
+                snippet={s}
+                tagNames={tagNames}
+                isPlaying={s.id === playingSnippetId}
+                playPositionSeconds={playPositionSeconds}
+              />
+            ))}
+          </div>
+          {hiddenCount > 0 ? (
+            <div className="snippet-show-more">
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => setVisibleCount((n) => n + SHOW_MORE_STEP)}
+                title={`Show ${Math.min(SHOW_MORE_STEP, hiddenCount)} more takes`}
+              >
+                <IconChevronDown size={13} />
+                Show {Math.min(SHOW_MORE_STEP, hiddenCount)} more
+                <span className="snippet-show-more-count">
+                  {visibleTakes.length} / {ordered.length}
+                </span>
+              </button>
+            </div>
+          ) : null}
+        </>
       )}
     </section>
   );

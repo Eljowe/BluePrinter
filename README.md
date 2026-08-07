@@ -269,12 +269,14 @@ produce, so the loop sounds exactly like what you heard while recording:
   pre-allocated `recordBuffer`, so synth sounds and FX from the selected
   chains are baked in and deselected chains are left out.
 - Its own **click + count-in** run off the same metronome clock; the click is
-  mixed after the capture tap so it never ends up in the loop. The looper has
-  the same click controls as the take recorder — click on/off, **Click: loop /
-  count-in only** (click silent through the capture), a count-in field, and
-  the **Clock w/ loop** MIDI clock toggle — plus the global **Click sound**
-  tuning (pitch/snap/volume) in the plugin header, which the take and the
-  looper share.
+  mixed after the capture tap so it never ends up in the loop. The looper
+  shares the header-level click and MIDI clock controls with the take
+  recorder (no per-section toggles): the master **Click** on/off
+  (`metronomeEnabled`), **Click: capture** (`clickDuringCapture`, click
+  silent through the capture when off, count-in only), a per-mode count-in
+  field, and the **Clock** / **Clock: on record** MIDI clock toggles — plus
+  the global **Click sound** tuning (pitch/snap/volume) in the sync strip
+  beside the recording tabs, which the take and the looper share.
 - On stop, the captured length is trimmed to the nearest full 4/4 bar
   (beat-length fallback). **Crop start / end** steppers trim in **whole
   beats** (4 per bar at the current BPM) off either side — the audible window

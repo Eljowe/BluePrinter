@@ -24,6 +24,9 @@ export function SnippetCard({ snippet, tagNames, isPlaying, playPositionSeconds 
   // back through the snippet prop. We key it on the snippet id so
   // switching cards doesn't carry the spinner across.
   const [detecting, setDetecting] = useState(false);
+  // Two-step delete: the first click arms the button ("Confirm?"), the
+  // second commits. Arming auto-disarms after a few seconds.
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   // Track the last values we successfully committed so we never
   // skip a commit because the backend echoed the same prop values
@@ -77,10 +80,19 @@ export function SnippetCard({ snippet, tagNames, isPlaying, playPositionSeconds 
     else emit(FRONTEND_EVENTS.startPlayback, { id: snippet.id });
   };
 
+  useEffect(() => {
+    if (!confirmDelete) return undefined;
+    const t = setTimeout(() => setConfirmDelete(false), 3500);
+    return () => clearTimeout(t);
+  }, [confirmDelete]);
+
   const handleDelete = () => {
-    if (window.confirm(`Delete snippet "${snippet.name || "(untitled)"}"?`)) {
-      emit(FRONTEND_EVENTS.deleteSnippet, { id: snippet.id });
+    if (!confirmDelete) {
+      setConfirmDelete(true);
+      return;
     }
+    setConfirmDelete(false);
+    emit(FRONTEND_EVENTS.deleteSnippet, { id: snippet.id });
   };
 
   const handleSave = () => {
@@ -120,7 +132,7 @@ export function SnippetCard({ snippet, tagNames, isPlaying, playPositionSeconds 
 
   return (
     <article
-      className={`snippet ${isPlaying ? "is-playing" : ""} ${expanded ? "is-expanded" : "is-mini"} ${color ? `color-${color}` : ""}`}
+      className={`snippet ${isPlaying ? "is-playing" : ""} ${expanded ? "is-expanded" : "is-mini"}`}
     >
       <header className="snippet-header">
         <button
@@ -145,15 +157,17 @@ export function SnippetCard({ snippet, tagNames, isPlaying, playPositionSeconds 
             }
           }}
         >
-          {currentColor ? (
-            <span
-              className="snippet-color-dot"
-              style={{ background: currentColor.main }}
-              title={currentColorName ? `Tag: ${currentColorName}` : `Colour: ${currentColor.label}`}
-              aria-hidden="true"
-            />
-          ) : null}
-          <span className="snippet-name" title={displayName}>{displayName}</span>
+          <span className="snippet-title-line">
+            {currentColor ? (
+              <span
+                className="snippet-color-dot"
+                style={{ background: currentColor.main }}
+                title={currentColorName ? `Tag: ${currentColorName}` : `Colour: ${currentColor.label}`}
+                aria-hidden="true"
+              />
+            ) : null}
+            <span className="snippet-name" title={displayName}>{displayName}</span>
+          </span>
           {hasKey ? (
             <span
               className="chip chip-key"
@@ -189,7 +203,10 @@ export function SnippetCard({ snippet, tagNames, isPlaying, playPositionSeconds 
 
       {expanded ? (
         <div className="snippet-details">
-          <div className="snippet-waveform">
+          <div
+            className="snippet-waveform"
+            style={currentColor ? { background: currentColor.soft } : undefined}
+          >
             <Waveform peaks={snippet.peaks ?? []} width={520} height={56} />
             {isPlaying ? (
               <div
@@ -308,12 +325,14 @@ export function SnippetCard({ snippet, tagNames, isPlaying, playPositionSeconds 
               </button>
               <button
                 type="button"
-                className="btn btn-sm btn-danger"
+                className={`btn btn-sm btn-danger ${confirmDelete ? "is-armed" : ""}`}
                 onClick={handleDelete}
-                title="Delete snippet"
+                title={confirmDelete
+                  ? "Click again to permanently delete this snippet"
+                  : "Delete snippet"}
               >
                 <IconTrash size={13} />
-                Delete
+                {confirmDelete ? "Confirm?" : "Delete"}
               </button>
             </div>
           </footer>

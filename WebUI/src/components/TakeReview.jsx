@@ -22,7 +22,6 @@ export function TakeReview({ transport }) {
     <section className={`take-review ${playing ? "is-playing" : ""}`}>
       <div className="take-review-header">
         <div>
-          <div className="eyebrow">Last take</div>
           <h2>Review the take</h2>
           <p>Play it back, then save it to the library or discard it. A new recording replaces it.</p>
         </div>
@@ -47,7 +46,7 @@ export function TakeReview({ transport }) {
           className="btn btn-primary btn-sm"
           onClick={() => emit(FRONTEND_EVENTS.setTakePlayback, { enabled: !playing })}
         >
-          {playing ? <IconStop size={13} /> : <IconPlay size={13} />} {playing ? "Stop" : "Play take"}
+          {playing ? <IconStop size={13} /> : <IconPlay size={13} />} {playing ? "Stop take" : "Play take"}
         </button>
         <button
           type="button"

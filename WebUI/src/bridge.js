@@ -48,6 +48,10 @@ export const FRONTEND_EVENTS = {
   // accentVolume, noise } — all values sent on every change.
   setClickParams: "frontendSetClickParams",
   setMidiClock: "frontendSetMidiClock",
+  // { enabled } — when on (and the MIDI clock toggle is on), the clock
+  // doesn't free-run: it starts when a take or loop capture begins
+  // (count-in included) and stops when it ends.
+  setMidiClockOnRecord: "frontendSetMidiClockOnRecord",
   setMidiDevice: "frontendSetMidiDevice",
   // Header-level click-during-capture gate: { enabled } — false = the
   // click only plays during count-ins, silent through takes and loop
@@ -56,6 +60,9 @@ export const FRONTEND_EVENTS = {
   setLooperRecording: "frontendSetLooperRecording",
   setLooperPlaying: "frontendSetLooperPlaying",
   setLooperLooping: "frontendSetLooperLooping",
+  // { enabled } — overdub mode: with a loop captured and looping on,
+  // record layers the new input over the loop instead of replacing it.
+  setLooperOverdub: "frontendSetLooperOverdub",
   setLooperCountIn: "frontendSetLooperCountIn",
   // Crop the captured loop: { startBeats, endBeats } in whole beats
   // (4 per bar at the current BPM).

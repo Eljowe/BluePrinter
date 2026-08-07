@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Transport } from "./components/Transport";
 import { HeaderControls } from "./components/HeaderControls";
+import { SyncControls } from "./components/SyncControls";
 import { TakeReview } from "./components/TakeReview";
 import { LibraryFolderRow } from "./components/LibraryFolderRow";
 import { SnippetList } from "./components/SnippetList";
@@ -21,6 +22,14 @@ const PARAM_IDS = {
 // (chain-less) startup still feels intentional, then fade out over this.
 const SPLASH_MIN_MS = 900;
 const SPLASH_FADE_MS = 400;
+
+// Which recording approach the tab bar shows: the one-shot take recorder
+// or the looper. Persisted so the plugin reopens where you left off.
+const RECORDING_MODE_KEY = "bp:recordingMode";
+
+function readInitialRecordingMode() {
+  return localStorage.getItem(RECORDING_MODE_KEY) === "loop" ? "loop" : "take";
+}
 
 function readInitialParameters() {
   const first = getInitialData().parameters?.[0];
@@ -53,10 +62,10 @@ function readInitialTransport() {
     libraryFolder: "", lastSaveError: "",
     metronomeEnabled: true, bpm: 120, countInBeats: 4, dryLevel: 1, clickDuringCapture: true,
     clickPitch: 1000, clickAccentPitch: 1500, clickDecay: 90, clickVolume: 0.35, clickAccentVolume: 0.5, clickNoise: 0.1,
-    midiClockEnabled: false, midiOutputDevice: "", midiOutputDeviceList: [],
+    midiClockEnabled: false, midiClockOnRecord: false, midiOutputDevice: "", midiOutputDeviceList: [],
      preRollActive: false, transportPosition: 0,
      takePending: false, takeLength: 0, takePlaying: false, takePosition: 0, takePeaks: [],
-     looperRecording: false, looperPreRoll: false, looperPlaying: false, looperLooping: true, looperCountInBeats: 4, looperCropStartBeats: 0, looperCropEndBeats: 0, audioLoopStart: 0, audioLoopPosition: 0, audioLoopLength: 0, audioLoopPeaks: [], chainLevels: [],
+     looperRecording: false, looperPreRoll: false, looperPlaying: false, looperLooping: true, looperOverdub: false, looperCountInBeats: 4, looperCropStartBeats: 0, looperCropEndBeats: 0, audioLoopStart: 0, audioLoopPosition: 0, audioLoopLength: 0, audioLoopPeaks: [], chainLevels: [], maxRecordSamples: 0,
   };
   return {
     ...raw,
@@ -79,6 +88,7 @@ function readInitialTransport() {
     clickAccentVolume: Number(raw.clickAccentVolume ?? 0.5),
     clickNoise: Number(raw.clickNoise ?? 0.1),
     midiClockEnabled: Boolean(raw.midiClockEnabled),
+    midiClockOnRecord: Boolean(raw.midiClockOnRecord),
     midiOutputDevice: typeof raw.midiOutputDevice === "string" ? raw.midiOutputDevice : "",
     midiOutputDeviceList: Array.isArray(raw.midiOutputDeviceList) ? raw.midiOutputDeviceList : [],
      preRollActive: Boolean(raw.preRollActive),
@@ -88,7 +98,7 @@ function readInitialTransport() {
      takePlaying: Boolean(raw.takePlaying),
      takePosition: Number(raw.takePosition ?? 0),
      takePeaks: Array.isArray(raw.takePeaks) ? raw.takePeaks : [],
-     looperRecording: Boolean(raw.looperRecording), looperPreRoll: Boolean(raw.looperPreRoll), looperPlaying: Boolean(raw.looperPlaying), looperLooping: raw.looperLooping !== false, looperCountInBeats: Number(raw.looperCountInBeats ?? 4), looperCropStartBeats: Number(raw.looperCropStartBeats ?? 0), looperCropEndBeats: Number(raw.looperCropEndBeats ?? 0), audioLoopStart: Number(raw.audioLoopStart ?? 0), audioLoopPosition: Number(raw.audioLoopPosition ?? 0), audioLoopLength: Number(raw.audioLoopLength ?? 0), audioLoopPeaks: Array.isArray(raw.audioLoopPeaks) ? raw.audioLoopPeaks : [], chainLevels: Array.isArray(raw.chainLevels) ? raw.chainLevels : [],
+     looperRecording: Boolean(raw.looperRecording), looperPreRoll: Boolean(raw.looperPreRoll), looperPlaying: Boolean(raw.looperPlaying), looperLooping: raw.looperLooping !== false, looperOverdub: Boolean(raw.looperOverdub), looperCountInBeats: Number(raw.looperCountInBeats ?? 4), looperCropStartBeats: Number(raw.looperCropStartBeats ?? 0), looperCropEndBeats: Number(raw.looperCropEndBeats ?? 0), audioLoopStart: Number(raw.audioLoopStart ?? 0), audioLoopPosition: Number(raw.audioLoopPosition ?? 0), audioLoopLength: Number(raw.audioLoopLength ?? 0), audioLoopPeaks: Array.isArray(raw.audioLoopPeaks) ? raw.audioLoopPeaks : [], chainLevels: Array.isArray(raw.chainLevels) ? raw.chainLevels : [], maxRecordSamples: Number(raw.maxRecordSamples ?? 0),
   };
 }
 
@@ -110,6 +120,24 @@ export default function App() {
     restoreError: "",
   });
   const [scanState, setScanState] = useState({ active: false, current: 0, total: 0, currentFile: "", folder: "" });
+  const [recordingMode, setRecordingMode] = useState(readInitialRecordingMode);
+
+  const handleRecordingModeChange = (mode) => {
+    setRecordingMode(mode);
+    localStorage.setItem(RECORDING_MODE_KEY, mode);
+  };
+
+  // WAI-ARIA tabs pattern: Left/Right arrows cycle the tab and move
+  // focus with it; only the active tab is in the tab order.
+  const handleRecordingTabsKeyDown = (e) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    const next = e.key === "ArrowRight"
+      ? (recordingMode === "take" ? "loop" : "take")
+      : (recordingMode === "loop" ? "take" : "loop");
+    handleRecordingModeChange(next);
+    document.getElementById(`recording-tab-${next}`)?.focus();
+  };
 
   // Splash lifecycle. `showing` -> `leaving` (fade) -> `hidden`. The splash
   // stays up until the first chain snapshot arrives (covering the WebView2
@@ -206,6 +234,7 @@ export default function App() {
         clickAccentVolume: payload.clickAccentVolume !== undefined ? Number(payload.clickAccentVolume) : prev.clickAccentVolume,
         clickNoise:        payload.clickNoise        !== undefined ? Number(payload.clickNoise)        : prev.clickNoise,
         midiClockEnabled: payload.midiClockEnabled !== undefined ? Boolean(payload.midiClockEnabled) : prev.midiClockEnabled,
+        midiClockOnRecord: payload.midiClockOnRecord !== undefined ? Boolean(payload.midiClockOnRecord) : prev.midiClockOnRecord,
         midiOutputDevice: typeof payload.midiOutputDevice === "string" ? payload.midiOutputDevice : prev.midiOutputDevice,
         midiOutputDeviceList: Array.isArray(payload.midiOutputDeviceList) ? payload.midiOutputDeviceList : prev.midiOutputDeviceList,
         preRollActive:    Boolean(payload.preRollActive),
@@ -219,6 +248,8 @@ export default function App() {
          looperPreRoll: payload.looperPreRoll !== undefined ? Boolean(payload.looperPreRoll) : prev.looperPreRoll,
          looperPlaying: payload.looperPlaying !== undefined ? Boolean(payload.looperPlaying) : prev.looperPlaying,
          looperLooping: payload.looperLooping !== undefined ? Boolean(payload.looperLooping) : prev.looperLooping,
+         looperOverdub: payload.looperOverdub !== undefined ? Boolean(payload.looperOverdub) : prev.looperOverdub,
+         maxRecordSamples: payload.maxRecordSamples !== undefined ? Number(payload.maxRecordSamples) : prev.maxRecordSamples,
          looperCountInBeats: payload.looperCountInBeats !== undefined ? Number(payload.looperCountInBeats) : prev.looperCountInBeats,
          looperCropStartBeats: payload.looperCropStartBeats !== undefined ? Number(payload.looperCropStartBeats) : prev.looperCropStartBeats,
          looperCropEndBeats: payload.looperCropEndBeats !== undefined ? Number(payload.looperCropEndBeats) : prev.looperCropEndBeats,
@@ -348,6 +379,11 @@ export default function App() {
     emit(FRONTEND_EVENTS.setMidiClock, { enabled });
   };
 
+  const handleMidiClockOnRecordChange = (enabled) => {
+    setTransport((prev) => ({ ...prev, midiClockOnRecord: enabled }));
+    emit(FRONTEND_EVENTS.setMidiClockOnRecord, { enabled });
+  };
+
   const handleMidiDeviceChange = (device) => {
     setTransport((prev) => ({ ...prev, midiOutputDevice: device }));
     emit(FRONTEND_EVENTS.setMidiDevice, { device });
@@ -356,6 +392,11 @@ export default function App() {
   const handleClickDuringCaptureChange = (enabled) => {
     setTransport((prev) => ({ ...prev, clickDuringCapture: enabled }));
     emit(FRONTEND_EVENTS.setClickDuringCapture, { enabled });
+  };
+
+  const handleLooperOverdubChange = (enabled) => {
+    setTransport((prev) => ({ ...prev, looperOverdub: enabled }));
+    emit(FRONTEND_EVENTS.setLooperOverdub, { enabled });
   };
 
   const handleRenameTag = (color, name) => {
@@ -408,32 +449,82 @@ export default function App() {
           onPlaybackVolumeChange={handlePlaybackVolumeChange}
           dryLevel={transport.dryLevel}
           onDryLevelChange={handleDryLevelChange}
+          bpm={transport.bpm}
+          onBpmChange={handleBpmChange}
+        />
+      </header>
+
+      <div className="record-tools">
+        <div
+          className="recording-tabs"
+          role="tablist"
+          aria-label="Recording approach"
+          onKeyDown={handleRecordingTabsKeyDown}
+        >
+          <button
+            type="button"
+            role="tab"
+            id="recording-tab-take"
+            aria-selected={recordingMode === "take"}
+            aria-controls="recording-panel-take"
+            tabIndex={recordingMode === "take" ? 0 : -1}
+            className={`recording-tab ${recordingMode === "take" ? "is-active" : ""}`}
+            onClick={() => handleRecordingModeChange("take")}
+          >
+            Take
+            {transport.takePending ? (
+              <span className="recording-tab-badge" title="Unsaved take — review it" aria-label="Unsaved take pending" />
+            ) : null}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            id="recording-tab-loop"
+            aria-selected={recordingMode === "loop"}
+            aria-controls="recording-panel-loop"
+            tabIndex={recordingMode === "loop" ? 0 : -1}
+            className={`recording-tab ${recordingMode === "loop" ? "is-active" : ""}`}
+            onClick={() => handleRecordingModeChange("loop")}
+          >
+            Loop
+          </button>
+        </div>
+
+        <SyncControls
           metronomeEnabled={transport.metronomeEnabled !== false}
           onMetronomeChange={handleMetronomeChange}
           clickDuringCapture={transport.clickDuringCapture !== false}
           onClickDuringCaptureChange={handleClickDuringCaptureChange}
+          clickParams={transport}
           midiClockEnabled={Boolean(transport.midiClockEnabled)}
           onMidiClockChange={handleMidiClockChange}
+          midiClockOnRecord={Boolean(transport.midiClockOnRecord)}
+          onMidiClockOnRecordChange={handleMidiClockOnRecordChange}
           midiOutputDevice={transport.midiOutputDevice}
           midiOutputDeviceList={transport.midiOutputDeviceList}
           onMidiDeviceChange={handleMidiDeviceChange}
-          clickParams={transport}
         />
-      </header>
+      </div>
 
-      <Transport
-        transport={transport}
-        bpm={transport.bpm}
-        countInBeats={transport.countInBeats}
-        onBpmChange={handleBpmChange}
-        onCountInBeatsChange={handleCountInBeatsChange}
-      />
+      {recordingMode === "take" ? (
+        <div id="recording-panel-take" role="tabpanel" aria-labelledby="recording-tab-take">
+          <Transport
+            transport={transport}
+            bpm={transport.bpm}
+            countInBeats={transport.countInBeats}
+            onCountInBeatsChange={handleCountInBeatsChange}
+          />
 
-      <TakeReview transport={transport} />
-
-      <Looper transport={transport} />
-
-
+          <TakeReview transport={transport} />
+        </div>
+      ) : (
+        <div id="recording-panel-loop" role="tabpanel" aria-labelledby="recording-tab-loop">
+          <Looper
+            transport={transport}
+            onOverdubChange={handleLooperOverdubChange}
+          />
+        </div>
+      )}
 
       <PluginChain
         chainState={{ chains: vst3.chains, openEditors: vst3.openEditors }}
