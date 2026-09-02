@@ -2359,8 +2359,8 @@ void BluePrinterAudioProcessor::applyChainState (const juce::var& state, juce::S
     // at startup (reloadPluginState), and without this guard that echo
     // wiped the saved chains on every launch. Nested suppression is
     // fine (restoreSavedPluginChains also sets the flag).
-    const bool wasPersisting = persistingPluginChain;
-    persistingPluginChain = true;
+    const bool wasPersisting = persistingPluginChain.load (std::memory_order_acquire);
+    persistingPluginChain.store (true, std::memory_order_release);
 
     // Blocklist first so each chain's setChainState can check it. The
     // blocklist is folder-wide, so restoring it is a single set
@@ -2467,17 +2467,33 @@ void BluePrinterAudioProcessor::applyChainState (const juce::var& state, juce::S
         nextChainId = juce::jmax (nextChainId, static_cast<int> (obj->getProperty ("nextChainId")));
     ensureUniqueChainIds();
 
-    // The whole restore completed without crashing — clear the crash
-    // marker so the next launch restores saved plugin states again.
-    if (auto* props = getUserState())
-    {
-        props->setValue ("chainRestoreCrashed", false);
-        props->saveIfNeeded();
-    }
-
     restoreActive = false;
 
-    persistingPluginChain = wasPersisting;
+    persistingPluginChain.store (wasPersisting, std::memory_order_release);
+
+    // Crash-marker lifecycle. The marker was set above and must stay
+    // set until the WHOLE restore has completed. When saved slots load
+    // deferred — one per timer tick, AFTER this function returns (the
+    // normal case) — a crash in one of those loads (e.g. an Archetype
+    // "X" amp sim dying in setStateInformation) leaves the marker set
+    // so the next launch skips the state blobs. Clearing it here while
+    // slots are still queued made the same crashing blob apply on
+    // every launch: crash, clear-marker, crash again. Only clear
+    // immediately when nothing is deferred; otherwise the timer driver
+    // clears it once the deferred restore drains.
+    if (! isChainRestoreInProgress())
+    {
+        restoreRequestedThisSession = false;
+        if (auto* props = getUserState())
+        {
+            props->setValue ("chainRestoreCrashed", false);
+            props->saveIfNeeded();
+        }
+    }
+    else
+    {
+        restoreRequestedThisSession = true;
+    }
 }
 
 void BluePrinterAudioProcessor::clearLastChainRestoreError()
@@ -2489,7 +2505,8 @@ void BluePrinterAudioProcessor::clearLastChainRestoreError()
 void BluePrinterAudioProcessor::timerCallback()
 {
     // Flush the debounced chain save once it has been quiet for 500 ms.
-    if (chainPersistPending && juce::Time::currentTimeMillis() >= chainPersistDeadline)
+    if (chainPersistPending.load (std::memory_order_acquire)
+        && juce::Time::currentTimeMillis() >= chainPersistDeadline.load (std::memory_order_acquire))
         flushPendingChainPersist();
 
     // Flush the debounced tag-name save the same way — never inside the
@@ -2509,6 +2526,28 @@ void BluePrinterAudioProcessor::timerCallback()
     // messages to fire safely before the next plugin is created.
     if (pendingPluginLoads.load (std::memory_order_acquire) == 0 && ! restoreActive)
     {
+        // Apply the previous slot's saved state one message-loop turn
+        // after its plugin finished loading — never inside the load
+        // callback (see the addPluginAsync lambda below). The gap lets
+        // the plugin's queued window messages be dispatched by the
+        // normal pump first: dispatching them reentrantly from inside
+        // setStateInformation killed some plugins (Neural DSP "X" amp
+        // sims — heap fault in the first instance's window proc).
+        if (pendingStateApply != nullptr)
+        {
+            auto apply = std::move (pendingStateApply);
+            if (auto* chain = getChainById (apply->chainId))
+            {
+                if (auto* plugin = chain->getPlugin (apply->slotIndex))
+                {
+                    BluePrinterAudioProcessor::setCrashOp ("restoring plugin state (setStateInformation)",
+                                                           plugin->getName().toRawUTF8());
+                    plugin->setStateInformation (apply->state.getData(),
+                                                 static_cast<int> (apply->state.getSize()));
+                }
+            }
+        }
+
         PluginChain* target = nullptr;
         for (auto& chain : chains)
         {
@@ -2552,27 +2591,46 @@ void BluePrinterAudioProcessor::timerCallback()
 
                         chain->setBypass (slotIndex, slot.bypassed);
 
-                        // Apply the saved state blob. Bypassed slots and
-                        // self-healing mode (a previous launch crashed
-                        // mid-restore) skip it.
+                        // Queue the saved state blob for the NEXT
+                        // message-loop turn instead of applying it
+                        // here. This callback runs on the message
+                        // thread right after the plugin's window was
+                        // created (on the load worker), with its queued
+                        // window messages still undispatched; poking
+                        // setStateInformation then made some plugins
+                        // run their window proc reentrantly and die
+                        // with a heap fault (Neural DSP "X" amp sims).
+                        // One idle loop turn puts the pump between the
+                        // window's creation and the state poke.
+                        // Bypassed slots and self-healing mode (a
+                        // previous launch crashed mid-restore) skip it.
                         if (! slot.bypassed && slot.stateBase64.isNotEmpty()
                             && ! vst3Library.getSkipStateRestore())
                         {
                             juce::MemoryBlock stateData;
                             if (stateData.fromBase64Encoding (slot.stateBase64))
-                            {
-                                if (auto* plugin = chain->getPlugin (slotIndex))
-                                {
-                                    BluePrinterAudioProcessor::setCrashOp ("restoring plugin state (setStateInformation)", slot.file.getFileName().toRawUTF8());
-                                    plugin->setStateInformation (stateData.getData(),
-                                                                 static_cast<int> (stateData.getSize()));
-                                }
-                            }
+                                pendingStateApply = std::make_unique<PendingStateApply> (
+                                    PendingStateApply { chainId, slotIndex, std::move (stateData) });
                         }
 
                         listeners.call ([](Listener& l) { l.pluginChainChanged(); });
                     });
             }
+        }
+    }
+
+    // Crash-marker lifecycle (see applyChainState): the marker stays
+    // set while the deferred restore has anything queued and is
+    // cleared here once it has fully drained — a crash at any point
+    // (instantiation or state apply) leaves it set, so the next launch
+    // self-heals by loading plugins with defaults.
+    if (restoreRequestedThisSession && ! isChainRestoreInProgress())
+    {
+        restoreRequestedThisSession = false;
+        if (auto* props = getUserState())
+        {
+            props->setValue ("chainRestoreCrashed", false);
+            props->saveIfNeeded();
         }
     }
 
@@ -3014,10 +3072,10 @@ void BluePrinterAudioProcessor::restoreUserState()
     const auto chainVar = loadSavedChainState();
     if (chainVar.isObject())
     {
-        persistingPluginChain = true;
+        persistingPluginChain.store (true, std::memory_order_release);
         juce::String error;
         applyChainState (chainVar, error);
-        persistingPluginChain = false;
+        persistingPluginChain.store (false, std::memory_order_release);
         if (error.isNotEmpty())
             lastChainRestoreError = error;
     }
@@ -3034,10 +3092,10 @@ void BluePrinterAudioProcessor::restoreSavedPluginChains()
     if (! chainVar.isObject())
         return;
 
-    persistingPluginChain = true;
+    persistingPluginChain.store (true, std::memory_order_release);
     juce::String error;
     applyChainState (chainVar, error);
-    persistingPluginChain = false;
+    persistingPluginChain.store (false, std::memory_order_release);
     if (error.isNotEmpty())
         lastChainRestoreError = error;
 }
@@ -3058,6 +3116,12 @@ bool BluePrinterAudioProcessor::isChainRestoreInProgress() const
         return true;
     if (pendingPluginLoads.load (std::memory_order_acquire) != 0)
         return true;
+    // A state blob queued by the load callback but not yet applied
+    // (applied on the next timer tick): while it waits, the in-memory
+    // chains would serialize the plugin's defaults instead of its
+    // saved state, so treat the restore as still running.
+    if (pendingStateApply != nullptr)
+        return true;
     const juce::ScopedLock sl (chainLock);
     for (const auto& chain : chains)
         if (chain->hasPendingSlots())
@@ -3067,7 +3131,12 @@ bool BluePrinterAudioProcessor::isChainRestoreInProgress() const
 
 void BluePrinterAudioProcessor::persistPluginChain()
 {
-    if (persistingPluginChain)
+    // Safe to call from any thread: hosted plugins notify parameter
+    // changes from their audio thread (PluginChain's
+    // AudioProcessorListener forwards straight here), so this only
+    // touches atomics. The expensive serialize + disk write happens on
+    // the message thread in flushPendingChainPersist (via timerCallback).
+    if (persistingPluginChain.load (std::memory_order_acquire))
         return; // restore in progress, don't echo back
     // Debounced: the actual save (serializing every plugin's state and
     // writing the file) happens once, 500 ms after the last mutation —
@@ -3078,13 +3147,14 @@ void BluePrinterAudioProcessor::persistPluginChain()
     // the user adds a plugin while the saved ones are still loading)
     // is persisted as soon as the restore finishes instead of being
     // silently dropped.
-    chainPersistPending = true;
-    chainPersistDeadline = juce::Time::currentTimeMillis() + 500;
+    chainPersistPending.store (true, std::memory_order_release);
+    chainPersistDeadline.store (juce::Time::currentTimeMillis() + 500,
+                                std::memory_order_release);
 }
 
 void BluePrinterAudioProcessor::flushPendingChainPersist()
 {
-    if (! chainPersistPending)
+    if (! chainPersistPending.load (std::memory_order_acquire))
         return;
     // While the deferred restore is still loading saved slots, the
     // in-memory chains are partial (or empty); writing now would
@@ -3094,7 +3164,7 @@ void BluePrinterAudioProcessor::flushPendingChainPersist()
     // complete state (including any mid-restore user mutations).
     if (isChainRestoreInProgress())
         return;
-    chainPersistPending = false;
+    chainPersistPending.store (false, std::memory_order_release);
     if (auto* props = getUserState())
     {
         props->setValue ("pluginChains",

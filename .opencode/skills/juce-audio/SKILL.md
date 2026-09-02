@@ -13,7 +13,7 @@ BluePrinter uses JUCE for audio processing, VST3 hosting, and WebView2 UI integr
 - APVTS: `juce::AudioProcessorValueTreeState apvts {*this, nullptr, "Parameters", createParameterLayout()}`. Always declared inline in the header. Parameters defined in `createParameterLayout()`.
 - **Parameter access**: `apvts.getRawParameterValue("Gain")->load()` for audio thread reads.
 - **Thread-safe communication**: `std::atomic` for flags read on the audio thread, set on the message thread.
-- **State persistence**: `getStateInformation` / `setStateInformation` serialize to XML (`juce::XmlElement`). Standalone uses `juce::PropertiesFile` for user settings (window size, library folder, etc.).
+- **State persistence**: `getStateInformation` / `setStateInformation` round-trip a `juce::XmlElement` (from `apvts.copyState().createXml()`); the chain bundle rides inside as a `pluginChains` JSON string property (`juce::JSON::toString (makeChainState())`) — a JSON string because ValueTree can't carry an arbitrary blob — plus the non-automatable atomics (metronome, BPM, dry level, MIDI clock, click params) as plain properties. `getStateInformation` omits `pluginChains` entirely while the deferred restore is in flight (see AGENTS.md "Deferred chain restore"). The standalone keeps user settings (window size, library folder, tag names) in `juce::PropertiesFile`.
 
 ## Audio Path (`processBlock`)
 
@@ -77,15 +77,7 @@ The take recorder and the audio looper share `recordBuffer`; `startRecording`
 and `setLooperRecording` preempt each other so they never capture
 simultaneously. Both loops are otherwise independent of the metronome/clock.
 
-**MIDI input limitation**: in the standalone, all MIDI input devices are
-merged by the JUCE host into the single `MidiBuffer` that `processBlock`
-receives — `AudioProcessorPlayer::handleIncomingMidiMessage` drops the
-`MidiInput*`, and JUCE 8 `MidiMessage` has no source/device ID field. The
-MIDI channel is the only per-message discriminator; per-chain device routing
-is not possible without a custom standalone app main
-(`JUCE_USE_CUSTOM_PLUGIN_STANDALONE_APP`). Per-chain channel filtering lives
-in `PluginChain::processBlock` (`midiChannelsMask`, channels 1–16, system
-messages always pass).
+**MIDI input limitation**: the standalone merges all MIDI input devices into the single `MidiBuffer` `processBlock` receives (JUCE 8 `MidiMessage` carries no source ID), so the MIDI channel is the only per-message discriminator — full reasoning and the per-device routing alternative are in AGENTS.md "VST3 Chains". Per-chain channel filtering lives in `PluginChain::processBlock` (`midiChannelsMask`, channels 1–16, system messages always pass).
 
 ## Threading Model
 
@@ -151,12 +143,7 @@ Thread-safe behind a mutex. Supports:
 
 ## Deferred Chain Restore (startup + host state loads)
 
-`setChainState` never instantiates plugins — saved slots are queued as `PendingSlot`s (path, bypass, base64 state blob) and the processor's `timerCallback` (the `pendingPluginLoads`/`restoreActive` driver, fired from the 30 Hz `transportTimerHz` timer started in `prepareToPlay`) loads them ONE per message-loop turn via `addPluginAsync` (30 s timeout per slot), applying bypass + saved state in the load callback. This is deliberate: synchronously instantiating several plugins in a row kept the message thread inside plugin code, so window messages the plugins queue during setup got dispatched reentrantly and crashed some plugins (Neural DSP "X" amp sims heap-faulted). One slot per loop turn gives every plugin an idle gap.
-
-- `isChainRestoreInProgress()` is true while `restoreActive`, while a load is in flight (`pendingPluginLoads != 0`), or while any chain has pending slots.
-- **Persist guards**: `flushPendingChainPersist` refuses to write while a restore is in progress (keeps the arm pending and retries each tick); `getStateInformation` omits the `pluginChains` property entirely — the standalone writes its state blob on exit, so quitting mid-restore would otherwise capture the partial state and the next launch would restore *that* empty state.
-- `chainRestoreCrashed` properties-file marker: if a launch crashes mid-restore, the next launch skips state-blob restore (plugins load with defaults). Crash diagnostics: `SetUnhandledExceptionFilter` writes `%APPDATA%\Retrokielto\crash-info.txt` via `setCrashOp`/`getCrashOp`.
-- The frontend shows restore progress: per-chain `pending` counts + a `restoring` flag in `backendVst3Chain`, rendered by `SplashScreen.jsx` on startup.
+The full story (why one slot per loop turn, the persist guards, the crash marker) is in AGENTS.md "Deferred chain restore". The C++ mechanics: `setChainState` queues saved slots as `PendingSlot`s (path, bypass, base64 state blob); the processor's `timerCallback` — the `pendingPluginLoads`/`restoreActive` driver, fired from the 30 Hz `transportTimerHz` timer started in `prepareToPlay` — pops ONE per message-loop turn via `addPluginAsync` (30 s timeout per slot) and applies bypass + saved state in the load callback. `isChainRestoreInProgress()` = `restoreActive` || `pendingPluginLoads != 0` || any chain has pending slots.
 
 ## Parameters (APVTS)
 
@@ -175,6 +162,5 @@ Currently the APVTS exposes **`Gain`** (`AudioParameterFloat`, range 0.0–1.0, 
 
 ## Don't
 
-- Don't allocate, lock, or call UI APIs from `processBlock` / `prepareToPlay` / `releaseResources`.
-- Don't add metronome / BPM / count-in / MIDI-clock settings to APVTS — use standalone user state + atomics.
-- Don't introduce raw owning pointers — use `std::unique_ptr` (or `std::shared_ptr` for shared snippet audio, as `SnippetLibrary` already does).
+- Allocate, lock, or call UI APIs in `processBlock` / `prepareToPlay` / `releaseResources` — the audio path stays allocation-free, lock-free, UI-free.
+- Add metronome / BPM / count-in / MIDI-clock settings to APVTS — see the Parameters section above: standalone user state + atomics.

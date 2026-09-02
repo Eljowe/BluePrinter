@@ -44,12 +44,7 @@ export function SplashScreen({
   const inkStyle = restoringWithProgress ? { width: `${Math.round(progress)}%` } : undefined;
 
   return (
-    <div
-      className={`bp-splash ${phaseClass}`}
-      role="status"
-      aria-live="polite"
-      aria-label="Loading BluePrinter"
-    >
+    <div className={`bp-splash ${phaseClass}`} role="status" aria-live="polite" aria-label="Loading BluePrinter">
       <div className="bp-splash__paper">
         <header className="bp-splash__masthead">
           <img src={iconUrl} alt="" className="bp-splash__emblem" draggable="false" />
@@ -60,11 +55,7 @@ export function SplashScreen({
           <h2 className="bp-splash__headline">{headline}</h2>
 
           <p className={error ? "bp-splash__status is-error" : "bp-splash__status"}>
-            {error
-              ? error
-              : restoringWithProgress
-                ? `${total - remaining} of ${total} plugins ready`
-                : "starting up"}
+            {error ? error : restoringWithProgress ? `${total - remaining} of ${total} plugins ready` : "starting up"}
           </p>
 
           <p className="bp-splash__tagline">Record a take, name it, note what to work on.</p>
@@ -86,7 +77,7 @@ export function SplashScreen({
           </div>
           <div className="bp-splash__meta">
             <span>{restoringWithProgress ? `${remaining} remaining` : "ready"}</span>
-            <span>amp sims load one at a time — they never fight the UI</span>
+            <span>Loading plugins...</span>
           </div>
         </footer>
       </div>

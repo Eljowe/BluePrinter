@@ -120,4 +120,18 @@ if(WIN32)
         install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/WebUI/dist"
             DESTINATION WebUI)
     endif()
+
+    # Embed the WebUI into the VST3 bundle at build time
+    # (Contents/Resources/WebUI/dist — copy_directory copies the *contents*
+    # of the source dir, so the destination must include the dist level) so
+    # the editor can always find it, regardless of which process hosts the
+    # plugin. A build-time copy (not an install rule) so any install that
+    # copies the bundle straight from the build tree carries the UI too.
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/WebUI/dist/index.html")
+        add_custom_command(TARGET BluePrinter_VST3 POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${CMAKE_CURRENT_SOURCE_DIR}/WebUI/dist"
+                "$<TARGET_FILE_DIR:BluePrinter_VST3>/../../Contents/Resources/WebUI/dist"
+            COMMENT "Embedding WebUI into VST3 bundle")
+    endif()
 endif()

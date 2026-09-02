@@ -288,8 +288,8 @@ public:
     void persistPluginChain();
 
     // True while the deferred chain restore still has work queued
-    // (restoreActive, a load in flight, or pending slots on any chain).
-    // Message-thread only.
+    // (restoreActive, a load in flight, a queued state-blob apply, or
+    // pending slots on any chain). Message-thread only.
     bool isChainRestoreInProgress() const;
 
     // Meter values updated by the audio thread (peak + RMS over the last block).
@@ -573,10 +573,18 @@ private:
     // pending save immediately (also called on release/destruction so
     // the final state is never lost).
     void flushPendingChainPersist();
-    bool persistingPluginChain = false;
+    // Set while applyChainState (or a user-state restore) is running;
+    // persistPluginChain skips arming while it is set. Atomic because
+    // persistPluginChain can now be called from a hosted plugin's audio
+    // thread (AudioProcessorListener on PluginChain).
+    std::atomic<bool> persistingPluginChain { false };
     bool pluginChainsRestored = false;
-    bool chainPersistPending = false;
-    int64_t chainPersistDeadline = 0;
+    // Debounced chain-persist arm. persistPluginChain is callable from
+    // any thread (plugins notify parameter changes from their audio
+    // thread), so both fields are atomic; flushPendingChainPersist and
+    // the timerCallback check run on the message thread.
+    std::atomic<bool> chainPersistPending { false };
+    std::atomic<int64_t> chainPersistDeadline { 0 };
     // One async plugin load in flight from the deferred restore driver
     // (timerCallback); message-thread only.
     std::atomic<int> pendingPluginLoads { 0 };
@@ -584,6 +592,29 @@ private:
     // load during a restore (clearChains would destroy the chain that a
     // worker thread is about to finalize into).
     bool restoreActive = false;
+    // A deferred restore with queued state-blob applies is in flight:
+    // the chainRestoreCrashed marker must stay set until the driver
+    // drains it (timerCallback clears the marker once this flag is set
+    // and the restore is no longer in progress). Clearing it inside
+    // applyChainState — before the deferred slots even load — let a
+    // crash in one of those loads (e.g. Archetype "X" dying in
+    // setStateInformation) recur on every launch. Message-thread only.
+    bool restoreRequestedThisSession = false;
+    // Saved state blob of the most recently loaded deferred slot. The
+    // load callback only queues it here; the NEXT message-loop turn
+    // (timerCallback, before the next slot pops) applies it. The idle
+    // gap lets the plugin's queued window messages be dispatched by
+    // the normal pump first — dispatching them reentrantly from inside
+    // setStateInformation killed some plugins (Neural DSP "X" amp sims
+    // — heap fault in the first instance's window proc). Message-thread
+    // only.
+    struct PendingStateApply
+    {
+        juce::String chainId;
+        int slotIndex = -1;
+        juce::MemoryBlock state;
+    };
+    std::unique_ptr<PendingStateApply> pendingStateApply;
 
     // Build the combined plugin-chain bundle (all chains + library
     // metadata) for persistence. See PluginProcessor.cpp for the
