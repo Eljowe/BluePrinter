@@ -128,6 +128,11 @@ int PluginChain::addPlugin (const juce::File& vst3File, juce::String& outError)
     if (instance == nullptr)
         return -1;
 
+    // Listen for parameter/structure changes inside the plugin so the
+    // owner can persist tweaks (onChanged). Attached here on the
+    // message thread; removed before the plugin is destroyed.
+    instance->addListener (this);
+
     BluePrinterAudioProcessor::setCrashOp ("preparing plugin (prepareToPlay)", vst3File.getFileName().toRawUTF8());
     instance->prepareToPlay (currentSampleRate, currentBlockSize);
 
@@ -166,6 +171,11 @@ int PluginChain::finalizeAsyncLoad (std::unique_ptr<juce::AudioPluginInstance> i
     // plugin ready in case the host queries state before then.
     if (hasPluginFile (file))
         return -1;
+
+    // Listen for parameter/structure changes inside the plugin so the
+    // owner can persist tweaks (onChanged). Attached here on the
+    // message thread; removed before the plugin is destroyed.
+    instance->addListener (this);
 
     BluePrinterAudioProcessor::setCrashOp ("preparing plugin (finalizeAsyncLoad)", file.getFileName().toRawUTF8());
     instance->prepareToPlay (currentSampleRate, currentBlockSize);
@@ -338,7 +348,10 @@ bool PluginChain::removePlugin (int index)
         if (index < 0 || index >= static_cast<int> (slots.size()))
             return false;
         if (slots[index]->plugin != nullptr)
+        {
+            slots[index]->plugin->removeListener (this);
             slots[index]->plugin->releaseResources();
+        }
         slots.erase (slots.begin() + index);
     }
     if (onSlotRemoved)
@@ -387,7 +400,10 @@ void PluginChain::clear()
         for (size_t i = 0; i < slots.size(); ++i)
         {
             if (slots[i]->plugin != nullptr)
+            {
+                slots[i]->plugin->removeListener (this);
                 slots[i]->plugin->releaseResources();
+            }
             removedIndices.push_back (static_cast<int> (i));
         }
         slots.clear();

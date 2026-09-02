@@ -34,7 +34,7 @@ enum ChainInputBits : int
 // The chain does not own its blocklist or its cached scan result — both
 // live in the Vst3Library that is shared with the other chain. The
 // library reference is required: passing nullptr is a programming error.
-class PluginChain
+class PluginChain : public juce::AudioProcessorListener
 {
 public:
     // The library must outlive the chain. The processor owns both and
@@ -194,9 +194,30 @@ public:
     // owner and called with the removed slot index.
     std::function<void (int)> onSlotRemoved;
 
-    // Fired after any structural change (add/remove/bypass/clear). The
-    // owner uses it to push a fresh snapshot to the UI.
+    // Fired after any structural change (add/remove/bypass/clear), and
+    // also when a hosted plugin notifies its listeners of a parameter
+    // or structure change (AudioProcessorListener callbacks below).
+    // NOTE: the parameter-changed callback may fire from a plugin's
+    // audio thread, so this callback must stay lightweight and
+    // thread-safe (the owner only uses it to arm a debounced persist).
     std::function<void()> onChanged;
+
+    // AudioProcessorListener: host-plugin parameter/structure changes.
+    // Called by the plugin instance (possibly from its audio thread);
+    // forwards to onChanged so parameter tweaks inside a plugin's
+    // editor arm the same debounced persistence as structural changes.
+    void audioProcessorParameterChanged (juce::AudioProcessor*, int, float) override
+    {
+        if (onChanged)
+            onChanged();
+    }
+
+    void audioProcessorChanged (juce::AudioProcessor*,
+                               const juce::AudioProcessorListener::ChangeDetails&) override
+    {
+        if (onChanged)
+            onChanged();
+    }
 
     // Serialise this chain's slots: paths, bypass flags, and each
     // plugin's internal state (base64). Used by getStateInformation.
