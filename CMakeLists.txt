@@ -65,6 +65,28 @@ target_link_libraries(BluePrinter PRIVATE
     juce::juce_gui_basics
     juce::juce_gui_extra)
 
+# Emit PDBs in Release builds too. The crash handler writes backtraces as
+# module+offset (see setCrashOp / bluePrinterCrashHandler); without a PDB
+# only dumpbin could chase those offsets. With /Zi + /DEBUG the offset can
+# be mapped straight back to a function (scripts/symbolize-crash.ps1 or the
+# .map below).
+if(MSVC)
+    foreach(tgt BluePrinter BluePrinter_Standalone BluePrinter_VST3)
+        if(TARGET ${tgt})
+            target_compile_options(${tgt} PRIVATE $<$<CONFIG:Release>:/Zi>)
+            target_link_options(${tgt} PRIVATE $<$<CONFIG:Release>:/DEBUG>)
+        endif()
+    endforeach()
+
+    # A linker /MAP file as well: plain-text symbol table (every public
+    # symbol + its RVA), greppable without WinDbg/DIA. `dumpbin /headers`
+    # gives the image base; a crash-info.txt "module + 0x..." offset maps
+    # to the nearest function by scanning the map's executable-section
+    # entries. The map lands next to the exe as BluePrinter.map.
+    target_link_options(BluePrinter_Standalone PRIVATE
+        $<$<CONFIG:Release>:/MAP:${CMAKE_CURRENT_BINARY_DIR}/BluePrinter_artefacts/Release/Standalone/BluePrinter.map>)
+endif()
+
 # ==============================================================================
 # Install rules
 #

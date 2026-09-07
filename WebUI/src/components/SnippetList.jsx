@@ -150,7 +150,7 @@ export function SnippetList({ snippets, tagNames, onRenameTag, playingSnippetId,
 
   return (
     <section className="snippet-list">
-      <header className="section-header">
+      <header className="section-header section-header--minor">
         <div className="section-title">
           <h2>Takes</h2>
           <span className="section-count">

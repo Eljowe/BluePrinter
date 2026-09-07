@@ -10,6 +10,7 @@
 #include "PluginEditor.h"
 #include "WebViewEditor.h"
 
+#include <algorithm>
 #include <set>
 #include <thread>
 
@@ -35,6 +36,112 @@ void BluePrinterAudioProcessor::setCrashOp (const char* op, const char* detail)
 const char* BluePrinterAudioProcessor::getCrashOp()
 {
     return crashOpBuffer;
+}
+
+std::atomic<bool> BluePrinterAudioProcessor::devicePrepared { false };
+
+bool BluePrinterAudioProcessor::isDevicePrepared()
+{
+    return devicePrepared.load (std::memory_order_acquire);
+}
+
+//==============================================================================
+// Plugin UI apartment (see the class comment in PluginProcessor.h).
+// Windows-only: the pump is Win32-specific (the project is Windows-only
+// per WebView2; the fallbacks below keep it compiling elsewhere).
+#ifdef JUCE_WINDOWS
+#include <windows.h>
+#endif
+
+PluginUiApartment& getPluginUiApartment()
+{
+    // Deliberately leaked: the apartment's thread lives for the whole
+    // process. Destroying a running juce::Thread at process exit would
+    // be UB; the OS reclaims everything when the process dies.
+    static PluginUiApartment* const instance = new PluginUiApartment();
+    return *instance;
+}
+
+PluginUiApartment::PluginUiApartment() : juce::Thread ("Plugin UI Apartment")
+{
+    startThread();
+}
+
+PluginUiApartment::~PluginUiApartment()
+{
+    // Never reached (process-lifetime singleton); kept for completeness.
+}
+
+void PluginUiApartment::post (std::function<void()> fn)
+{
+    {
+        const juce::ScopedLock sl (tasksLock);
+        tasks.push_back (std::move (fn));
+    }
+
+   #ifdef JUCE_WINDOWS
+    // Wake the pump only once the thread's message queue exists (the
+    // queue is created by the first user32 call inside run()); before
+    // that the thread will simply notice the task when it starts
+    // looping. PostThreadMessageW on a queue-less thread fails, so the
+    // gate matters.
+    if (queueReady.load (std::memory_order_acquire))
+        PostThreadMessageW (static_cast<DWORD> (reinterpret_cast<intptr_t> (getThreadId())),
+                            WM_APP + 1, 0, 0);
+   #endif
+}
+
+void PluginUiApartment::run()
+{
+   #ifdef JUCE_WINDOWS
+    // The first user32 call creates this thread's message queue; every
+    // window a plugin creates from a task below is owned by this
+    // thread and only ever pumped right here.
+    MSG msg;
+    PeekMessageW (&msg, nullptr, WM_USER, WM_USER, PM_NOREMOVE);
+    queueReady.store (true, std::memory_order_release);
+   #else
+    queueReady.store (true, std::memory_order_release);
+   #endif
+
+    for (;;)
+    {
+        std::function<void()> fn;
+        {
+            const juce::ScopedLock sl (tasksLock);
+            if (! tasks.empty())
+            {
+                fn = std::move (tasks.front());
+                tasks.pop_front();
+            }
+        }
+
+        if (fn)
+        {
+            fn();
+            continue;
+        }
+
+       #ifdef JUCE_WINDOWS
+        // Park until a thread message arrives (task wake-ups come as
+        // WM_APP+1). Window messages for plugin windows are dispatched
+        // here — never by the app's main message loop.
+        const DWORD waitResult = MsgWaitForMultipleObjectsEx (0, nullptr, INFINITE,
+                                                              QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+        if (waitResult == WAIT_FAILED)
+            break;
+
+        while (PeekMessageW (&msg, nullptr, 0, 0, PM_REMOVE))
+        {
+            if (msg.message == WM_QUIT)
+                return;
+            TranslateMessage (&msg);
+            DispatchMessage (&msg);
+        }
+       #else
+        juce::Thread::sleep (5);
+       #endif
+    }
 }
 
 #ifdef JUCE_WINDOWS
@@ -437,6 +544,11 @@ void BluePrinterAudioProcessor::changeProgramName (int index, const juce::String
 //==============================================================================
 void BluePrinterAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
+    // The real device configuration is now known; plugin loads from
+    // here on eagerly prepare with the actual values (see
+    // isDevicePrepared in the header).
+    devicePrepared.store (true, std::memory_order_release);
+
     const int channels = juce::jmax (1, getTotalNumInputChannels());
     const auto maxSamples = static_cast<int> (sampleRate * maxRecordingSeconds);
 
@@ -556,6 +668,10 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     // of them run but the MIDI clock is enabled, we advance it
     // ourselves so the clock free-runs without recording.
     const int64_t blockStartMetronomePos = metronomePosition.load (std::memory_order_acquire);
+    // Set when any step below advances the beat clock this block, so the
+    // count-in-into-capture transition (two drivers fire back-to-back in
+    // the same block) advances exactly once per block.
+    bool clockAdvancedThisBlock = false;
 
     // Apply gain. This is the post-DSP signal we want to record and the
     // pass-through signal when nothing else is happening.
@@ -817,6 +933,7 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         }
         metronomePosition.store (newPos, std::memory_order_release);
         transportPosition.store (newPos, std::memory_order_release);
+        clockAdvancedThisBlock = true;
     }
 
     // 9. Pre-roll (count-in) for the take recorder: add the click to the
@@ -846,12 +963,14 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             preRollActive.store (false, std::memory_order_release);
             transportPosition.store (0, std::memory_order_release);
             metronomePosition.store (newPos, std::memory_order_release);
+            clockAdvancedThisBlock = true;
             beginActualRecording();
         }
         else
         {
             transportPosition.store (newPos, std::memory_order_release);
             metronomePosition.store (newPos, std::memory_order_release);
+            clockAdvancedThisBlock = true;
         }
     }
 
@@ -862,7 +981,8 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     //    the metronome is muted, so toggling the metronome back on
     //    doesn't shift the beat grid. clickDuringCapture off = the
     //    click only plays during the count-in, never through the take.
-    if (recordingRequested.load (std::memory_order_acquire))
+    if (recordingRequested.load (std::memory_order_acquire)
+        && ! clockAdvancedThisBlock)
     {
         const int64_t startPos = metronomePosition.load (std::memory_order_acquire);
         if (metronomeEnabled.load (std::memory_order_acquire)
@@ -872,6 +992,7 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         const int64_t newPos = startPos + numSamples;
         metronomePosition.store (newPos, std::memory_order_release);
         transportPosition.store (newPos, std::memory_order_release);
+        clockAdvancedThisBlock = true;
     }
 
     // 11. Click during looper capture. Same beat clock, so the looper's
@@ -879,7 +1000,8 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     //    Mixed after the capture tap so the click never lands in the loop.
     //    The same header-level clickDuringCapture gates the click — off
     //    means count-in only, never through the capture itself.
-    if (looperCaptureArmed.load (std::memory_order_acquire))
+    if (looperCaptureArmed.load (std::memory_order_acquire)
+        && ! clockAdvancedThisBlock)
     {
         const int64_t startPos = metronomePosition.load (std::memory_order_acquire);
         if (metronomeEnabled.load (std::memory_order_acquire)
@@ -889,6 +1011,7 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         const int64_t newPos = startPos + numSamples;
         metronomePosition.store (newPos, std::memory_order_release);
         transportPosition.store (newPos, std::memory_order_release);
+        clockAdvancedThisBlock = true;
     }
 
     // 12. MIDI clock output. Clock pulses (0xF8) are generated at
@@ -916,6 +1039,7 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         {
             metronomePosition.store (blockStartMetronomePos + numSamples,
                                      std::memory_order_release);
+            clockAdvancedThisBlock = true;
 
             // Sound the click for the free-running clock so the beats
             // are audible without recording or looping. The header-level
@@ -964,6 +1088,39 @@ void BluePrinterAudioProcessor::writeRecording (const juce::AudioBuffer<float>& 
     }
 }
 
+void BluePrinterAudioProcessor::renderClickTail (juce::AudioBuffer<float>& buffer,
+                                                 ActiveClick& ac,
+                                                 int64_t startPos,
+                                                 int64_t endPos,
+                                                 int numChannels)
+{
+    if (ac.buffer == nullptr || ac.readPos >= static_cast<int> (ac.buffer->size()))
+        return;
+
+    // Where this click's unplayed samples would land.
+    const int64_t head = juce::jmax (startPos, ac.nextSample);
+    const int64_t tailEnd = ac.nextSample
+                        + (static_cast<int> (ac.buffer->size()) - ac.readPos);
+    if (tailEnd <= startPos)
+        return;
+
+    const int64_t inBlockEnd = juce::jmin (endPos, tailEnd);
+    if (inBlockEnd <= head)
+        return;
+
+    const int blockOff = static_cast<int> (head - startPos);
+    const int count    = static_cast<int> (inBlockEnd - head);
+    for (int j = 0; j < count; ++j)
+    {
+        const float sample = (*ac.buffer)[static_cast<size_t> (ac.readPos + j)];
+        for (int ch = 0; ch < numChannels; ++ch)
+            buffer.addSample (ch, blockOff + j, sample);
+    }
+
+    ac.readPos    += count;
+    ac.nextSample += count;
+}
+
 void BluePrinterAudioProcessor::renderMetronomeInBlock (juce::AudioBuffer<float>& buffer,
                                                         int64_t startPos,
                                                         int numSamples)
@@ -973,9 +1130,6 @@ void BluePrinterAudioProcessor::renderMetronomeInBlock (juce::AudioBuffer<float>
     // invalidate the buffers mid-render.
     const auto normalClick = clickBuffer;
     const auto accentClick = accentClickBuffer;
-    if ((normalClick == nullptr || normalClick->empty())
-     && (accentClick == nullptr || accentClick->empty()))
-        return;
 
     const double bpmValue = bpm.load (std::memory_order_acquire);
     if (bpmValue <= 0.0 || currentSampleRate <= 0.0)
@@ -986,6 +1140,38 @@ void BluePrinterAudioProcessor::renderMetronomeInBlock (juce::AudioBuffer<float>
         return;
 
     const int numChannels = buffer.getNumChannels();
+    if (numChannels <= 0)
+        return;
+
+    // A backward jump in the render position means the clock was reset
+    // (a new count-in / capture): drop any click that is still ringing
+    // out from the old clock so it can't land on the new beat grid.
+    if (startPos < lastMetronomeStartPos)
+        activeClicks.clear();
+    lastMetronomeStartPos = startPos;
+
+    const int64_t endPos = startPos + numSamples;
+
+    // 1. Ring out clicks that started in earlier blocks. A click burst
+    //    outlives one block, so the tail must continue here instead of
+    //    being truncated at the block boundary — truncation made beats
+    //    near the end of a block sound short and quiet, and the long
+    //    accents varied the most.
+    for (auto& ac : activeClicks)
+        renderClickTail (buffer, ac, startPos, endPos, numChannels);
+
+    activeClicks.erase (std::remove_if (activeClicks.begin(), activeClicks.end(),
+                                        [](const ActiveClick& ac)
+                                        {
+                                            return ac.buffer == nullptr
+                                                || ac.readPos
+                                                    >= static_cast<int> (ac.buffer->size());
+                                        }),
+                        activeClicks.end());
+
+    if ((normalClick == nullptr || normalClick->empty())
+     && (accentClick == nullptr || accentClick->empty()))
+        return;
 
     // Accent the first beat of every bar — beats whose index is a
     // multiple of countInBeats (default 4). Falls back to 4-beat bars
@@ -995,31 +1181,29 @@ void BluePrinterAudioProcessor::renderMetronomeInBlock (juce::AudioBuffer<float>
     const int beatsPerBar = juce::jmax (1, countInBeats.load (std::memory_order_acquire));
 
     // Beat boundaries that fall inside [startPos, startPos + numSamples).
-    const int64_t endPos = startPos + numSamples;
     const int firstBeat  = static_cast<int> (std::ceil (static_cast<double> (startPos) / samplesPerBeat));
     const int lastBeat   = static_cast<int> (std::floor (static_cast<double> (endPos)   / samplesPerBeat));
 
     for (int beat = firstBeat; beat <= lastBeat; ++beat)
     {
         const int64_t beatSample = static_cast<int64_t> (beat * samplesPerBeat);
-        const int blockOffset = static_cast<int> (beatSample - startPos);
-        if (blockOffset < 0 || blockOffset >= numSamples)
+        if (beatSample < startPos || beatSample >= endPos)
             continue;
 
-        const std::vector<float>* click = normalClick.get();
-        if (beat % beatsPerBar == 0 && accentClick != nullptr && ! accentClick->empty())
-            click = accentClick.get();
-        if (click == nullptr || click->empty())
+        const bool isAccent = (beat % beatsPerBar == 0)
+            && accentClick != nullptr && ! accentClick->empty();
+        if (isAccent     == false
+         && (normalClick == nullptr || normalClick->empty()))
             continue;
 
-        const int clickLen = static_cast<int> (click->size());
-        const int remaining = juce::jmin (clickLen, numSamples - blockOffset);
-        for (int j = 0; j < remaining; ++j)
-        {
-            const float sample = (*click)[static_cast<size_t> (j)];
-            for (int ch = 0; ch < numChannels; ++ch)
-                buffer.addSample (ch, blockOffset + j, sample);
-        }
+        // Start the click at the beat. Render the in-block portion now
+        // and keep the ActiveClick so following blocks ring out the rest.
+        ActiveClick ac;
+        ac.buffer     = isAccent ? accentClick : normalClick;
+        ac.nextSample = beatSample;
+        ac.readPos    = 0;
+        renderClickTail (buffer, ac, startPos, endPos, numChannels);
+        activeClicks.push_back (ac);
     }
 }
 
@@ -2322,6 +2506,79 @@ juce::var BluePrinterAudioProcessor::makeChainState() const
 //
 // Returns a (possibly empty) human-readable error string listing any
 // plugins that were skipped; the caller surfaces it to the UI.
+
+namespace
+{
+    // The crash handler (bluePrinterCrashHandler) writes
+    // %APPDATA%/Retrokielto/crash-info.txt — keep the path in sync with
+    // it. Returns the trailing plugin detail of the "Operation:" line,
+    // e.g. "Operation: preparing plugin (finalizeAsyncLoad) Archetype
+    // Tim Henson X.vst3" → "Archetype Tim Henson X.vst3". Only trusts
+    // the file when it is fresher than propsMtimeBefore (the properties
+    // file's state before this session wrote anything): the app is the
+    // only writer of both files, so a newer crash-info was written by
+    // the launch that just crashed, while an older one is stale
+    // diagnostics from some previous incident and must not drive the
+    // quarantine. Returns an empty string when the file is missing,
+    // stale, or its op line names no plugin.
+    juce::String readFreshCrashOpDetail (const juce::Time& propsMtimeBefore)
+    {
+        const auto crashFile = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+                                   .getChildFile ("Retrokielto")
+                                   .getChildFile ("crash-info.txt");
+        if (! crashFile.existsAsFile())
+            return {};
+        if (crashFile.getLastModificationTime() <= propsMtimeBefore)
+            return {};
+
+        const auto text = crashFile.loadFileAsString();
+        for (const auto& line : juce::StringArray::fromLines (text))
+        {
+            if (! line.trim().startsWith ("Operation: "))
+                continue;
+            const auto op = line.trim().substring (juce::String ("Operation: ").length()).trim();
+            // The op reads "<human step> (<api>) <plugin detail>"; split
+            // at the last ") " so plugin names containing parens survive.
+            const int split = op.lastIndexOf (") ");
+            return split >= 0 ? op.substring (split + 2).trim() : juce::String();
+        }
+        return {};
+    }
+
+    // The lastPluginLoadOp property ("<epoch millis>:<file name>") is
+    // written by notifyPluginLoadStarting before every plugin load and
+    // cleared on load completion / restore drain. Unlike crash-info.txt
+    // it also records fail-fast crashes (0xC0000409) that bypass the
+    // unhandled-exception filter entirely and never touch crash-info.
+    // Trusted under the same anchor rule as readFreshCrashOpDetail:
+    // only when newer than the last clean exit (or, failing that, the
+    // properties mtime at launch), so an op left over from a healthy
+    // previous session can't quarantine an innocent plugin.
+    juce::String readFreshLoadOpDetail (juce::PropertiesFile* props, const juce::Time& anchor)
+    {
+        if (props == nullptr)
+            return {};
+
+        const auto raw = props->getValue ("lastPluginLoadOp");
+        if (raw.isEmpty())
+            return {};
+
+        const int colon = raw.indexOfChar (':');
+        if (colon <= 0 || colon == raw.length() - 1)
+            return {};
+
+        const auto name = raw.substring (colon + 1).trim();
+        if (name.isEmpty())
+            return {};
+
+        const auto writtenAt = juce::Time (raw.substring (0, colon).getLargeIntValue());
+        if (writtenAt.toMilliseconds() <= 0 || writtenAt <= anchor)
+            return {};
+
+        return name;
+    }
+}
+
 void BluePrinterAudioProcessor::applyChainState (const juce::var& state, juce::String& outError)
 {
     auto* obj = state.getDynamicObject();
@@ -2337,10 +2594,99 @@ void BluePrinterAudioProcessor::applyChainState (const juce::var& state, juce::S
     bool restoreStateBlobs = true;
     if (auto* props = getUserState())
     {
-        restoreStateBlobs = ! props->getBoolValue ("chainRestoreCrashed", false);
+        // The chainRestoreCrashed marker is written at EVERY restore
+        // start and cleared only when the deferred restore drains, so
+        // it cannot distinguish a crashed session from a plain quit
+        // mid-restore — quitting before the slow (heavy amp-sim)
+        // restore finished leaves it set, and trusting it next launch
+        // would skip every state blob and load all plugins with
+        // DEFAULTS (the "plugin states lost on close" wipe). The
+        // settings file is only ever written by a clean exit (the
+        // standalone's closeButtonPressed -> savePluginState), so a
+        // marker OLDER than its mtime is stale: the session that set it
+        // ended cleanly and the on-disk blobs were never corrupted
+        // (persistence is suppressed for the whole restore). DAW hosts
+        // have no settings file; there the marker is honored as before.
+        // Decided once per process: the standalone can run
+        // applyChainState twice in one launch (settings-file restore in
+        // setStateInformation, then the editor's
+        // restoreSavedPluginChains), and the second call must not
+        // re-evaluate the marker the first call just wrote.
+        if (! chainRestoreDecisionMade)
+        {
+            chainRestoreDecisionMade = true;
+            const bool markerWasSet = props->getBoolValue ("chainRestoreCrashed", false);
+            // Stored as a string: epoch millis exceed PropertiesFile's
+            // 32-bit getIntValue.
+            const auto markerSetAt = juce::Time (props->getValue ("chainRestoreMarkerTime").getLargeIntValue());
+            chainRestoreBlobsAllowed = ! markerWasSet;
+            if (markerWasSet && markerSetAt.toMilliseconds() > 0)
+            {
+                const auto settingsFile = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+                                              .getChildFile ("BluePrinter")
+                                              .getChildFile ("BluePrinter.settings");
+                if (settingsFile.existsAsFile()
+                    && settingsFile.getLastModificationTime() > markerSetAt)
+                    chainRestoreBlobsAllowed = true; // clean exit since the marker was written
+            }
+        }
+        restoreStateBlobs = chainRestoreBlobsAllowed;
+        // Fallback freshness anchor: the file's mtime right now, before
+        // this session's marker write. (restoreUserState captured a
+        // better one — userStateMtimeAtLaunch — before ANY write this
+        // session; on startup persistLibraryFolder has usually already
+        // bumped the file by the time we get here.)
+        const auto propsMtimeBefore = props->getFile().getLastModificationTime();
         props->setValue ("chainRestoreCrashed", true);
+        props->setValue ("chainRestoreMarkerTime",
+                         juce::String (juce::Time::currentTimeMillis()));
         props->saveIfNeeded();
+
+        // ---- Crash diagnostics (read on EVERY launch, not just when
+        // the marker was set). A crash that happens outside a deferred
+        // restore — a manual plugin add, or a plugin dying after the
+        // restore drained — leaves the marker clear, and those crashes
+        // need the quarantine to engage just as much as mid-restore
+        // ones do (the Archetype "X" heap faults happen in manual adds
+        // too). Trust anchor: the LAST CLEAN EXIT (BluePrinter.settings
+        // mtime) rather than the properties mtime — a crashed session
+        // writes the marker into the properties AFTER its own crash
+        // diagnostics landed, so comparing against the properties made
+        // the very crash we just suffered look stale. The settings file
+        // is only ever written by a clean exit, so any crash-info newer
+        // than it belongs to the session that just died. In DAW hosts
+        // the settings file doesn't exist; fall back to the launch-time
+        // properties mtime.
+        const auto settingsFile = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+                                      .getChildFile ("BluePrinter")
+                                      .getChildFile ("BluePrinter.settings");
+        const auto anchor = settingsFile.existsAsFile()
+                                ? settingsFile.getLastModificationTime()
+                                : (userStateMtimeAtLaunch != juce::Time()
+                                       ? userStateMtimeAtLaunch
+                                       : propsMtimeBefore);
+
+        // Parse the crash diagnostics now; the restore driver below
+        // quarantines whatever they name instead of instantiating it
+        // again.
+        crashedPluginDetail = readFreshCrashOpDetail (anchor);
+        // Fail-fast crashes (0xC0000409) never reach the exception
+        // filter, so crash-info.txt can stay frozen at an older crash
+        // while a later, unrecorded one is the real killer. The
+        // lastPluginLoadOp property (written on the message thread
+        // before every plugin load) closes that gap.
+        loadOpCrashDetail = readFreshLoadOpDetail (props, anchor);
+
+        // Self-heal mode: either the blobs were skipped or a plugin was
+        // quarantined, so the in-memory chains hold defaults. While
+        // true, getStateInformation omits pluginChains (see there);
+        // cleared on the first real user mutation (persistPluginChain).
+        stateRestoreSkippedThisLaunch.store (! restoreStateBlobs
+                                     || crashedPluginDetail.isNotEmpty()
+                                     || loadOpCrashDetail.isNotEmpty(),
+                                     std::memory_order_relaxed);
     }
+    quarantinedSkippedThisRestore.clear();
     // Shared by all chains (setChainState reads it via the library), so
     // chains created later in this restore inherit the setting.
     vst3Library.setSkipStateRestore (! restoreStateBlobs);
@@ -2484,6 +2830,16 @@ void BluePrinterAudioProcessor::applyChainState (const juce::var& state, juce::S
     if (! isChainRestoreInProgress())
     {
         restoreRequestedThisSession = false;
+        // The crash op names the last restore step; once the restore has
+        // drained it is stale — a crash later in the session (device
+        // start, plugin audio) would otherwise be misattributed to a
+        // restore slot and quarantine an innocent plugin on the next
+        // launch. Reset it with the restore.
+        BluePrinterAudioProcessor::setCrashOp ("no chain operation in progress");
+        // Same for the persisted load-op: nothing is loading anymore, so
+        // a crash later in the session must not quarantine the last
+        // successfully loaded slot.
+        notifyPluginLoadFinished();
         if (auto* props = getUserState())
         {
             props->setValue ("chainRestoreCrashed", false);
@@ -2499,6 +2855,95 @@ void BluePrinterAudioProcessor::applyChainState (const juce::var& state, juce::S
 void BluePrinterAudioProcessor::clearLastChainRestoreError()
 {
     lastChainRestoreError.clear();
+}
+
+//==============================================================================
+// Plugin quarantine (see isPluginQuarantined in the header).
+
+void BluePrinterAudioProcessor::loadPluginQuarantine()
+{
+    if (pluginQuarantineLoaded)
+        return;
+    pluginQuarantineLoaded = true;
+
+    auto* props = getUserState();
+    if (props == nullptr)
+        return;
+    const auto arr = juce::JSON::parse (props->getValue ("pluginQuarantine"));
+    if (const auto* a = arr.getArray())
+        for (const auto& v : *a)
+            if (v.toString().trim().isNotEmpty())
+                pluginQuarantine.addIfNotAlreadyThere (v.toString().trim());
+}
+
+void BluePrinterAudioProcessor::savePluginQuarantine()
+{
+    auto* props = getUserState();
+    if (props == nullptr)
+        return;
+    juce::Array<juce::var> arr;
+    for (const auto& n : pluginQuarantine)
+        arr.add (juce::var (n));
+    props->setValue ("pluginQuarantine", juce::JSON::toString (juce::var (arr)));
+    props->saveIfNeeded();
+}
+
+bool BluePrinterAudioProcessor::isPluginQuarantined (const juce::String& fileName)
+{
+    loadPluginQuarantine();
+    return pluginQuarantine.contains (fileName);
+}
+
+void BluePrinterAudioProcessor::clearPluginQuarantineForFile (const juce::String& fileName)
+{
+    loadPluginQuarantine();
+    if (! pluginQuarantine.contains (fileName))
+        return;
+    while (pluginQuarantine.contains (fileName))
+        pluginQuarantine.removeString (fileName);
+    savePluginQuarantine();
+}
+
+// Persist "lastPluginLoadOp" ("<epoch millis>:<plugin file name>")
+// before a plugin load starts. A crash during the load — including the
+// fail-fast class (STATUS_STACK_BUFFER_OVERRUN: the Neural DSP "X"
+// stack-cookie deaths) that never reaches SetUnhandledExceptionFilter
+// and so never updates crash-info.txt — leaves this as the only
+// nameable suspect on disk, and the next launch's quarantine
+// (readFreshLoadOpDetail) consumes it. Message thread only; the load
+// drivers all run there.
+void BluePrinterAudioProcessor::notifyPluginLoadStarting (const juce::String& fileName)
+{
+    if (auto* props = getUserState())
+    {
+        props->setValue ("lastPluginLoadOp",
+                         juce::String (juce::Time::currentTimeMillis()) + ":" + fileName);
+        props->saveIfNeeded();
+    }
+}
+
+void BluePrinterAudioProcessor::notifyPluginLoadFinished()
+{
+    // Empty detail (just the timestamp) marks "no load in flight".
+    if (auto* props = getUserState())
+    {
+        props->setValue ("lastPluginLoadOp",
+                         juce::String (juce::Time::currentTimeMillis()) + ":");
+        props->saveIfNeeded();
+    }
+}
+
+// Fold a skipped (quarantined) plugin into the restore error the UI
+// shows, with the remedy spelled out.
+void BluePrinterAudioProcessor::recordQuarantinedSkip (const juce::String& fileName, const juce::String& pluginName)
+{
+    const auto shown = pluginName.isNotEmpty() ? pluginName : fileName;
+    if (! quarantinedSkippedThisRestore.contains (shown))
+        quarantinedSkippedThisRestore.add (shown);
+
+    lastChainRestoreError = "Skipped "
+        + quarantinedSkippedThisRestore.joinIntoString (", ")
+        + " — it crashed BluePrinter on a previous launch. Re-add it from a chain's plugin list to try again.";
 }
 
 //==============================================================================
@@ -2561,20 +3006,53 @@ void BluePrinterAudioProcessor::timerCallback()
         if (target != nullptr)
         {
             auto slot = target->popPendingSlot();
+            // Copy the file BEFORE any lambda capture moves the slot
+            // (see the MSVC evaluation-order note below).
+            const auto slotFile = slot.file;
+
+            // Quarantine: a plugin that crashed the app on a previous
+            // launch is never instantiated again until the user re-adds
+            // it manually (addVst3FromPath clears the entry first). The
+            // chainRestoreCrashed marker alone can't defuse this crash
+            // class — it skips state blobs, but the Neural DSP "X" heap
+            // faults happen in createPluginInstance/prepareToPlay,
+            // before any state is applied. On a crash launch the
+            // plugins named in crash-info.txt AND in the persisted
+            // lastPluginLoadOp (covers fail-fast crashes that never
+            // reach the exception filter) join the quarantine here, so
+            // the very next pop can't re-run them either.
+            const auto slotFileName = slotFile.getFileName();
+            const auto matchDetail = [&slotFileName, &slot] (const juce::String& detail)
+            {
+                return detail.isNotEmpty()
+                    && (detail.equalsIgnoreCase (slotFileName)
+                        || (slot.name.isNotEmpty() && detail.equalsIgnoreCase (slot.name)));
+            };
+            const bool matchesLastCrash = matchDetail (crashedPluginDetail)
+                                       || matchDetail (loadOpCrashDetail);
+            if (isPluginQuarantined (slotFileName) || matchesLastCrash)
+            {
+                if (matchesLastCrash && ! isPluginQuarantined (slotFileName))
+                {
+                    pluginQuarantine.addIfNotAlreadyThere (slotFileName);
+                    savePluginQuarantine();
+                }
+                recordQuarantinedSkip (slotFileName, slot.name);
+                listeners.call ([this] (Listener& l) { l.pluginChainChanged(); });
+                // Slot intentionally dropped — the next tick pops the
+                // next pending one and the restore drains without it.
+            }
             // exists() (not existsAsFile()): a saved slot may reference
             // a .vst3 bundle directory (its binary lives under
             // Contents/x86_64-win/) rather than a loose binary file.
-            if (slot.file.exists())
+            else if (slotFile.exists())
             {
                 pendingPluginLoads.store (1, std::memory_order_release);
                 const auto chainId = target->getChainId();
-                // Copy the file BEFORE the lambda capture below moves
-                // the slot: argument evaluation order on MSVC makes the
-                // capture-init (std::move (slot)) run before the
-                // slot.file argument, so passing slot.file directly
-                // here handed the loader a moved-from (empty) path and
-                // the deferred restore silently loaded nothing.
-                const auto slotFile = slot.file;
+                // Record the plugin about to load in the properties file
+                // so even an unrecorded fail-fast mid-load leaves a
+                // quarantinable suspect for the next launch.
+                notifyPluginLoadStarting (slotFileName);
                 // 30 s per slot: heavy amp sims (Neural DSP "X" etc.)
                 // can take a long time to instantiate on a cold start,
                 // and a timeout here silently drops the plugin.
@@ -2585,6 +3063,10 @@ void BluePrinterAudioProcessor::timerCallback()
                                                               bool) mutable
                     {
                         pendingPluginLoads.store (0, std::memory_order_release);
+                        // The load really finished (timeouts leave the
+                        // worker running and are NOT cleared).
+                        if (slotIndex >= 0)
+                            notifyPluginLoadFinished();
                         auto* chain = getChainById (chainId);
                         if (chain == nullptr || slotIndex < 0)
                             return;
@@ -2602,9 +3084,15 @@ void BluePrinterAudioProcessor::timerCallback()
                         // with a heap fault (Neural DSP "X" amp sims).
                         // One idle loop turn puts the pump between the
                         // window's creation and the state poke.
-                        // Bypassed slots and self-healing mode (a
-                        // previous launch crashed mid-restore) skip it.
-                        if (! slot.bypassed && slot.stateBase64.isNotEmpty()
+                        // Self-healing mode (a previous launch crashed
+                        // mid-restore) skips the saved blobs. Bypass is
+                        // BluePrinter's own per-slot audio-routing flag,
+                        // not the plugin's state — a slot saved bypassed
+                        // still holds a state worth restoring, and
+                        // skipping it made every bypassed slot come back
+                        // in DEFAULTS every launch (the X amp sims'
+                        // "state lost on close" wipe).
+                        if (slot.stateBase64.isNotEmpty()
                             && ! vst3Library.getSkipStateRestore())
                         {
                             juce::MemoryBlock stateData;
@@ -2627,6 +3115,10 @@ void BluePrinterAudioProcessor::timerCallback()
     if (restoreRequestedThisSession && ! isChainRestoreInProgress())
     {
         restoreRequestedThisSession = false;
+        // Same stale-op reset as above (this is the no-deferred-loads
+        // path inside applyChainState itself).
+        BluePrinterAudioProcessor::setCrashOp ("no chain operation in progress");
+        notifyPluginLoadFinished();
         if (auto* props = getUserState())
         {
             props->setValue ("chainRestoreCrashed", false);
@@ -2841,8 +3333,15 @@ void BluePrinterAudioProcessor::getStateInformation (juce::MemoryBlock& destData
     // bundle, and the next launch would restore that instead of the
     // last good state. Omitting the property makes the next launch
     // fall back to the properties file, which still holds the good
-    // chains.
-    if (! isChainRestoreInProgress())
+    // chains. The same applies for the whole self-heal launch
+    // (stateRestoreSkippedThisLaunch): blobs were skipped and/or a
+    // crashed plugin quarantined, so the in-memory chains hold DEFAULT
+    // plugin states — capturing them at exit would overwrite the good
+    // on-disk states (the "plugin state lost on close" wipe). The first
+    // real user mutation (persistPluginChain) clears the flag, at which
+    // point the defaults are user-accepted and capture resumes.
+    if (! isChainRestoreInProgress()
+        && ! stateRestoreSkippedThisLaunch.load (std::memory_order_relaxed))
         state.setProperty ("pluginChains", juce::JSON::toString (makeChainState(), true), nullptr);
     std::unique_ptr<juce::XmlElement> xml (state.createXml());
     copyXmlToBinary (*xml, destData);
@@ -3027,6 +3526,12 @@ void BluePrinterAudioProcessor::restoreUserState()
     if (props == nullptr)
         return;
 
+    // Freshness anchor for the crash diagnostics (readFreshCrashOpDetail):
+    // the properties file's mtime before this session writes anything.
+    // The app is the only writer of both files, so a crash-info.txt
+    // newer than this was written by the launch that just crashed.
+    userStateMtimeAtLaunch = props->getFile().getLastModificationTime();
+
     // 1. Library folder. Setting it auto-loads any .wav sidecars.
     const auto folderPath = props->getValue ("libraryFolder");
     if (folderPath.isNotEmpty())
@@ -3138,6 +3643,11 @@ void BluePrinterAudioProcessor::persistPluginChain()
     // the message thread in flushPendingChainPersist (via timerCallback).
     if (persistingPluginChain.load (std::memory_order_acquire))
         return; // restore in progress, don't echo back
+    // A real mutation means the user has seen and accepted the current
+    // chain state (which may hold default plugin states after a self-
+    // heal launch); from here on the exit capture includes the chains
+    // again (see stateRestoreSkippedThisLaunch / getStateInformation).
+    stateRestoreSkippedThisLaunch.store (false, std::memory_order_relaxed);
     // Debounced: the actual save (serializing every plugin's state and
     // writing the file) happens once, 500 ms after the last mutation —
     // see flushPendingChainPersist and timerCallback. Arming is safe

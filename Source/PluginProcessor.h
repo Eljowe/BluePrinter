@@ -15,6 +15,44 @@
 #include "KeyDetector.h"
 
 //==============================================================================
+// A dedicated thread that owns every VST3 instantiation so every
+// plugin's windows are created on — and pumped by — ONE thread that
+// belongs to the plugins, never to the app's main message loop.
+// Third-party factories create windows at instantiation time, and a
+// window created from a pump-less worker thread is a window nobody
+// pumps; its messages ended up dispatched reentrantly by OUR message
+// loop, which is how a second Neural DSP "X" instance died with a
+// -1-pointer deref inside its own window code while still inside its
+// factory. On the apartment, plugin windows only ever pump here, the
+// main loop never sees them, and the plugins get a stable
+// Ableton-style UI home. See getPluginUiApartment().
+class PluginUiApartment : private juce::Thread
+{
+public:
+    PluginUiApartment();
+    ~PluginUiApartment() override;
+
+    // Queue fn to run on the apartment thread. Non-blocking; results
+    // travel back through whatever the caller captured. Tasks run in
+    // FIFO order and never interleave with the apartment's window
+    // pump (messages queue up and are dispatched only after a task
+    // returns), so no window-message reentrancy can happen while a
+    // plugin factory is executing.
+    void post (std::function<void()> fn);
+
+private:
+    void run() override;
+
+    juce::CriticalSection tasksLock;
+    std::deque<std::function<void()>> tasks;
+    std::atomic<bool> queueReady { false };
+};
+
+// Process-wide singleton: ALL plugin instantiations (chain loads AND
+// the VST3 folder scanner) must go through here.
+PluginUiApartment& getPluginUiApartment();
+
+//==============================================================================
 /**
 */
 class BluePrinterAudioProcessor  : public juce::AudioProcessor, private juce::Timer
@@ -273,12 +311,47 @@ public:
     static void setCrashOp (const char* op, const char* detail = "");
     static const char* getCrashOp();
 
+    // True once the host called prepareToPlay with the REAL device
+    // configuration (standalone device open / DAW transport prepare).
+    // Plugin loads (restore at construction, manual adds) happen before
+    // that — the chain's currentSampleRate/currentBlockSize still hold
+    // the 44100/512 defaults, and calling plugin->prepareToPlay with
+    // them would prepare every plugin twice (defaults, then the real
+    // config): a full DSP teardown + rebuild with a block-size change
+    // that some plugins — Neural DSP "X" heap faults — crash on. Until
+    // the device is prepared, loads skip the eager prepare; the host's
+    // prepareToPlay covers them (and any plugin that loads AFTER the
+    // device started gets the eager prepare with the real values).
+    static bool isDevicePrepared();
+    static std::atomic<bool> devicePrepared;
+
     // Set by setStateInformation when the saved VST3 chain couldn't be
     // fully restored (e.g. a plugin's license expired). Read by the UI
     // so the user knows what was skipped. Cleared explicitly.
     juce::String getLastChainRestoreError() const;
     void clearLastChainRestoreError();
     void restoreSavedPluginChains();
+
+    // Plugin quarantine. A VST3 whose instantiation/prepare crashed the
+    // app during a previous deferred restore is quarantined (persisted
+    // file-name list): the restore skips it entirely — the plugin is
+    // never instantiated — until the user re-adds it from the chain UI
+    // (a manual add clears the entry first, giving the plugin a fresh
+    // chance). The chainRestoreCrashed marker alone can't prevent this
+    // crash class: it only skips state blobs, but the Neural DSP "X"
+    // heap faults happen in createPluginInstance/prepareToPlay, before
+    // any state is applied.
+    bool isPluginQuarantined (const juce::String& fileName);
+    void clearPluginQuarantineForFile (const juce::String& fileName);
+
+    // Record the plugin file currently being loaded in the properties
+    // file ("lastPluginLoadOp", timestamped) so a crash during the load
+    // — even a fail-fast that never reaches the exception filter —
+    // leaves a nameable suspect for the next launch's quarantine.
+    // Message thread only. Call before the load starts and after it
+    // completes (notifyPluginLoadStarting/Finished).
+    void notifyPluginLoadStarting (const juce::String& fileName);
+    void notifyPluginLoadFinished();
 
     // Arm the debounced plugin-chain bundle save (all chains + the
     // blocklist + the cached scan result). Also wired into every
@@ -494,6 +567,26 @@ private:
     std::shared_ptr<const std::vector<float>> clickBuffer;
     std::shared_ptr<const std::vector<float>> accentClickBuffer;
 
+    // Audio-thread-only metronome click carry-over. A click burst is
+    // longer than the block it starts in; truncating it at the block
+    // boundary made beats near the end of a block sound short and
+    // quiet while beats near the start rang out — and the accent, the
+    // longest burst, varied the most. renderMetronomeInBlock now rings
+    // each click out across every block it spans: on-beat it schedules
+    // an ActiveClick (renders the in-block portion), and later blocks
+    // append the remainder before scheduling new beats. Never touched
+    // by the message thread.
+    struct ActiveClick
+    {
+        std::shared_ptr<const std::vector<float>> buffer;
+        int64_t nextSample = 0;  // absolute sample: buffer[readPos] goes here
+        int     readPos     = 0;
+    };
+    std::vector<ActiveClick> activeClicks;
+    int64_t lastMetronomeStartPos = 0;  // detects clock resets (backward jump)
+    void renderClickTail (juce::AudioBuffer<float>& buffer, ActiveClick& ac,
+                          int64_t startPos, int64_t endPos, int numChannels);
+
     // Click sound parameters (message-thread only). Persisted in host
     // state like the other metronome settings. Tuned via the "Click
     // sound" popup in the transport.
@@ -600,6 +693,46 @@ private:
     // crash in one of those loads (e.g. Archetype "X" dying in
     // setStateInformation) recur on every launch. Message-thread only.
     bool restoreRequestedThisSession = false;
+    // Staleness decision for the chainRestoreCrashed marker (see
+    // applyChainState): the marker is written at every restore start
+    // and cleared only when the restore drains, so a plain quit
+    // mid-restore leaves it set too. It is honored only when NO clean
+    // exit (BluePrinter.settings mtime — written exclusively by clean
+    // exits) postdates it. Decided once per process because the
+    // standalone can run applyChainState twice in one launch
+    // (settings-file restore + the editor's restoreSavedPluginChains).
+    // Message-thread only.
+    bool chainRestoreDecisionMade = false;
+    bool chainRestoreBlobsAllowed = true;
+    // Plugin detail parsed from crash-info.txt's "Operation:" line on a
+    // crash launch (file name for instantiate/prepare crashes,
+    // plugin name for setStateInformation crashes). Read on every
+    // launch, freshness-gated against the last clean exit; empty when
+    // the diagnostics are missing, stale, or don't name a plugin.
+    juce::String crashedPluginDetail;
+    // Plugin detail from the lastPluginLoadOp property (written by
+    // notifyPluginLoadStarting before every plugin load). Unlike
+    // crash-info.txt this also survives fail-fast crashes
+    // (STATUS_STACK_BUFFER_OVERRUN, e.g. Neural DSP "X" dying in its own
+    // code) that bypass the unhandled-exception filter and never get
+    // recorded. Timestamp-gated like crashedPluginDetail; empty when
+    // nothing was loading recently.
+    juce::String loadOpCrashDetail;
+    // Properties-file modification time captured before this session
+    // writes anything (restoreUserState entry). A crash-info.txt newer
+    // than this was written by the launch that just crashed; anything
+    // older is stale diagnostics and must not drive quarantine.
+    juce::Time userStateMtimeAtLaunch;
+    // True while this launch is in self-heal mode: state blobs skipped
+    // (marker was set) or a crashed plugin quarantined. The in-memory
+    // plugins are defaults at that point, so getStateInformation omits
+    // pluginChains until the user actually mutates a chain
+    // (persistPluginChain clears this) — otherwise the standalone's
+    // exit capture would write the defaults into BluePrinter.settings
+    // and the next launch would restore them (the "plugin state lost on
+    // close" wipe). Atomic: cleared from persistPluginChain, which can
+    // run on a hosted plugin's audio thread.
+    std::atomic<bool> stateRestoreSkippedThisLaunch { false };
     // Saved state blob of the most recently loaded deferred slot. The
     // load callback only queues it here; the NEXT message-loop turn
     // (timerCallback, before the next slot pops) applies it. The idle
@@ -657,6 +790,19 @@ private:
     // chain plugins (e.g. expired-license VST3s). Read by the UI on
     // open so the user knows what was skipped.
     juce::String lastChainRestoreError;
+
+    // Quarantined plugin file names (see isPluginQuarantined).
+    // Persisted in user state as the "pluginQuarantine" property (JSON
+    // array). Loaded lazily; message-thread only.
+    juce::StringArray pluginQuarantine;
+    bool pluginQuarantineLoaded = false;
+    // Plugin names skipped by the current restore because they are
+    // quarantined; folded into lastChainRestoreError for the UI.
+    juce::StringArray quarantinedSkippedThisRestore;
+
+    void loadPluginQuarantine();
+    void savePluginQuarantine();
+    void recordQuarantinedSkip (const juce::String& fileName, const juce::String& pluginName);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BluePrinterAudioProcessor)
 };
