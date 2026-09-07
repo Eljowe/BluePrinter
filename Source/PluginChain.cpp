@@ -133,8 +133,20 @@ int PluginChain::addPlugin (const juce::File& vst3File, juce::String& outError)
     // message thread; removed before the plugin is destroyed.
     instance->addListener (this);
 
-    BluePrinterAudioProcessor::setCrashOp ("preparing plugin (prepareToPlay)", vst3File.getFileName().toRawUTF8());
-    instance->prepareToPlay (currentSampleRate, currentBlockSize);
+    // Eager prepare only when the host already knows the real device
+    // configuration (isDevicePrepared). Before that the chain's rate /
+    // block size still hold the 44100/512 defaults, which are NOT the
+    // config the plugin will actually run with — preparing twice (fake
+    // defaults, then the host's real values) tears the DSP graph down
+    // and rebuilds it at a new block size, one of the things that makes
+    // Neural DSP "X" amp sims die with a heap fault. The host's own
+    // prepareToPlay covers every loaded chain (and a plugin that loads
+    // after the device started gets the eager prepare with real values).
+    if (BluePrinterAudioProcessor::isDevicePrepared())
+    {
+        BluePrinterAudioProcessor::setCrashOp ("preparing plugin (prepareToPlay)", vst3File.getFileName().toRawUTF8());
+        instance->prepareToPlay (currentSampleRate, currentBlockSize);
+    }
 
     auto slot = std::make_unique<ChainSlot>();
     slot->plugin.reset (instance);
@@ -177,8 +189,18 @@ int PluginChain::finalizeAsyncLoad (std::unique_ptr<juce::AudioPluginInstance> i
     // message thread; removed before the plugin is destroyed.
     instance->addListener (this);
 
-    BluePrinterAudioProcessor::setCrashOp ("preparing plugin (finalizeAsyncLoad)", file.getFileName().toRawUTF8());
-    instance->prepareToPlay (currentSampleRate, currentBlockSize);
+    // Same eager-prepare gate as addPlugin: before the host's own
+    // prepareToPlay the chain's currentSampleRate/currentBlockSize are
+    // the 44100/512 defaults, which are not the config this plugin will
+    // actually run with. Preparing twice with a block-size change
+    // crashed Neural DSP "X" amp sims (heap fault / stack-cookie
+    // fail-fast at load); the host's prepareToPlay (device open / DAW
+    // transport start) prepares every chain once, with real values.
+    if (BluePrinterAudioProcessor::isDevicePrepared())
+    {
+        BluePrinterAudioProcessor::setCrashOp ("preparing plugin (finalizeAsyncLoad)", file.getFileName().toRawUTF8());
+        instance->prepareToPlay (currentSampleRate, currentBlockSize);
+    }
 
     auto slot = std::make_unique<ChainSlot>();
     slot->plugin = std::move (instance);
@@ -249,20 +271,34 @@ bool PluginChain::addPluginAsync (const juce::File& vst3File,
     auto promise = std::make_shared<std::promise<LoadResult>>();
     pending->future = promise->get_future();
 
-    // Run the synchronous createInstance on a worker thread. The
-    // createInstance helper writes into juce::String references; we
-    // adapt by writing into a juce::String and copying the contents
-    // into std::string before setting the promise value. The
-    // std::string crosses the thread boundary safely via the promise.
-    std::thread ([this, vst3File, promise]() mutable
+    // Run the synchronous createInstance on the plugin UI apartment
+    // (see getPluginUiApartment in PluginProcessor.h), not a bare
+    // detached worker. Third-party factories create windows during
+    // instantiation (Neural DSP "X" amp sims show UI even at load);
+    // windows created from a pump-less worker belong to a thread
+    // nobody pumps, and their queued messages ended up dispatched
+    // reentrantly by the app's main loop — a second X instance died
+    // with a -1-pointer deref inside its own window code while still
+    // inside its factory. On the apartment, plugin windows only ever
+    // pump there; the main loop never sees them.
+    getPluginUiApartment().post ([this, vst3File, promise]() mutable
     {
         LoadResult r;
         juce::String name, error;
         r.instance.reset (createInstance (vst3File, name, error));
         r.name  = name.toStdString();
         r.error = error.toStdString();
-        promise->set_value (std::move (r));
-    }).detach();
+        try
+        {
+            promise->set_value (std::move (r));
+        }
+        catch (...)
+        {
+            // The waiter gave up (timeout) and destroyed the future;
+            // abandon the instance instead of terminating on the
+            // broken promise (std::future_error).
+        }
+    });
 
     // Polling timer on the message thread. Fires every 50 ms to check
     // whether the worker finished, and bails out with timedOut=true if

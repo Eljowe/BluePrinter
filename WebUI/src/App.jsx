@@ -432,6 +432,29 @@ export default function App() {
     .filter((chain) => Number(chain.pending ?? 0) > 0)
     .map((chain) => ({ id: chain.id, name: chain.name, pending: Number(chain.pending) }));
 
+  // Restore ETA: the deferred restore is strictly serial (one slot per
+  // message-loop turn), so a forward projection from observed throughput
+  // is a fair "Xs left" while slots are still queued. When pendingTotal
+  // hits 0 the last slot's saved state is being applied — a single
+  // black-box operation with no progress source (C++ blocks inside the
+  // plugin) — so the splash switches to an honest "applying saved state"
+  // phase with a renderer-side elapsed clock instead of fake progress.
+  const restoreStartedAt = useRef(null);
+  useEffect(() => {
+    if (vst3.restoring && restoreStartedAt.current === null)
+      restoreStartedAt.current = Date.now();
+    if (!vst3.restoring)
+      restoreStartedAt.current = null;
+  }, [vst3.restoring]);
+
+  const restoredDone = Math.max(0, totalPlugins - pendingTotal);
+  const etaSec = useMemo(() => {
+    if (pendingTotal <= 0 || restoreStartedAt.current === null || restoredDone <= 0)
+      return 0;
+    const elapsedMs = Date.now() - restoreStartedAt.current;
+    return Math.max(0, Math.round((elapsedMs / restoredDone) * pendingTotal / 1000));
+  }, [pendingTotal, restoredDone, vst3.restoring]);
+
   return (
     <main className="app">
       <header className="app-header">
@@ -442,89 +465,106 @@ export default function App() {
             <p>Record a take, name it, note what to work on.</p>
           </div>
         </div>
-        <HeaderControls
-          gain={gain}
-          onGainChange={handleGainChange}
-          playbackVolume={playbackVolume}
-          onPlaybackVolumeChange={handlePlaybackVolumeChange}
-          dryLevel={transport.dryLevel}
-          onDryLevelChange={handleDryLevelChange}
-          bpm={transport.bpm}
-          onBpmChange={handleBpmChange}
-        />
       </header>
 
-      <div className="record-tools">
-        <div
-          className="recording-tabs"
-          role="tablist"
-          aria-label="Recording approach"
-          onKeyDown={handleRecordingTabsKeyDown}
-        >
-          <button
-            type="button"
-            role="tab"
-            id="recording-tab-take"
-            aria-selected={recordingMode === "take"}
-            aria-controls="recording-panel-take"
-            tabIndex={recordingMode === "take" ? 0 : -1}
-            className={`recording-tab ${recordingMode === "take" ? "is-active" : ""}`}
-            onClick={() => handleRecordingModeChange("take")}
-          >
-            Take
-            {transport.takePending ? (
-              <span className="recording-tab-badge" title="Unsaved take — review it" aria-label="Unsaved take pending" />
-            ) : null}
-          </button>
-          <button
-            type="button"
-            role="tab"
-            id="recording-tab-loop"
-            aria-selected={recordingMode === "loop"}
-            aria-controls="recording-panel-loop"
-            tabIndex={recordingMode === "loop" ? 0 : -1}
-            className={`recording-tab ${recordingMode === "loop" ? "is-active" : ""}`}
-            onClick={() => handleRecordingModeChange("loop")}
-          >
-            Loop
-          </button>
+      <section className="bp-section control-deck" aria-label="Monitoring controls">
+        <div className="bp-section-head">
+          <span className="section-index" aria-hidden="true">01</span>
+          <h2 className="bp-section-title">Monitor</h2>
         </div>
-
-        <SyncControls
-          metronomeEnabled={transport.metronomeEnabled !== false}
-          onMetronomeChange={handleMetronomeChange}
-          clickDuringCapture={transport.clickDuringCapture !== false}
-          onClickDuringCaptureChange={handleClickDuringCaptureChange}
-          clickParams={transport}
-          midiClockEnabled={Boolean(transport.midiClockEnabled)}
-          onMidiClockChange={handleMidiClockChange}
-          midiClockOnRecord={Boolean(transport.midiClockOnRecord)}
-          onMidiClockOnRecordChange={handleMidiClockOnRecordChange}
-          midiOutputDevice={transport.midiOutputDevice}
-          midiOutputDeviceList={transport.midiOutputDeviceList}
-          onMidiDeviceChange={handleMidiDeviceChange}
-        />
-      </div>
-
-      {recordingMode === "take" ? (
-        <div id="recording-panel-take" role="tabpanel" aria-labelledby="recording-tab-take">
-          <Transport
-            transport={transport}
+        <div className="bp-section-body">
+          <HeaderControls
+            gain={gain}
+            onGainChange={handleGainChange}
+            playbackVolume={playbackVolume}
+            onPlaybackVolumeChange={handlePlaybackVolumeChange}
+            dryLevel={transport.dryLevel}
+            onDryLevelChange={handleDryLevelChange}
             bpm={transport.bpm}
-            countInBeats={transport.countInBeats}
-            onCountInBeatsChange={handleCountInBeatsChange}
+            onBpmChange={handleBpmChange}
           />
+        </div>
+      </section>
 
-          <TakeReview transport={transport} />
+      <section className="bp-section recording-section" aria-label="Recording">
+        <div className="bp-section-head recording-section-head">
+          <span className="section-index" aria-hidden="true">02</span>
+          <h2 className="bp-section-title">Record</h2>
+          <div className="record-tools">
+            <div
+              className="recording-tabs"
+              role="tablist"
+              aria-label="Recording approach"
+              onKeyDown={handleRecordingTabsKeyDown}
+            >
+              <button
+                type="button"
+                role="tab"
+                id="recording-tab-take"
+                aria-selected={recordingMode === "take"}
+                aria-controls="recording-panel-take"
+                tabIndex={recordingMode === "take" ? 0 : -1}
+                className={`recording-tab ${recordingMode === "take" ? "is-active" : ""}`}
+                onClick={() => handleRecordingModeChange("take")}
+              >
+                Take
+                {transport.takePending ? (
+                  <span className="recording-tab-badge" title="Unsaved take — review it" aria-label="Unsaved take pending" />
+                ) : null}
+              </button>
+              <button
+                type="button"
+                role="tab"
+                id="recording-tab-loop"
+                aria-selected={recordingMode === "loop"}
+                aria-controls="recording-panel-loop"
+                tabIndex={recordingMode === "loop" ? 0 : -1}
+                className={`recording-tab ${recordingMode === "loop" ? "is-active" : ""}`}
+                onClick={() => handleRecordingModeChange("loop")}
+              >
+                Loop
+              </button>
+            </div>
+
+            <SyncControls
+              metronomeEnabled={transport.metronomeEnabled !== false}
+              onMetronomeChange={handleMetronomeChange}
+              clickDuringCapture={transport.clickDuringCapture !== false}
+              onClickDuringCaptureChange={handleClickDuringCaptureChange}
+              clickParams={transport}
+              midiClockEnabled={Boolean(transport.midiClockEnabled)}
+              onMidiClockChange={handleMidiClockChange}
+              midiClockOnRecord={Boolean(transport.midiClockOnRecord)}
+              onMidiClockOnRecordChange={handleMidiClockOnRecordChange}
+              midiOutputDevice={transport.midiOutputDevice}
+              midiOutputDeviceList={transport.midiOutputDeviceList}
+              onMidiDeviceChange={handleMidiDeviceChange}
+            />
+          </div>
         </div>
-      ) : (
-        <div id="recording-panel-loop" role="tabpanel" aria-labelledby="recording-tab-loop">
-          <Looper
-            transport={transport}
-            onOverdubChange={handleLooperOverdubChange}
-          />
+
+        <div className="bp-section-body">
+          {recordingMode === "take" ? (
+            <div id="recording-panel-take" className="recording-panel" role="tabpanel" aria-labelledby="recording-tab-take">
+              <Transport
+                transport={transport}
+                bpm={transport.bpm}
+                countInBeats={transport.countInBeats}
+                onCountInBeatsChange={handleCountInBeatsChange}
+              />
+
+              <TakeReview transport={transport} />
+            </div>
+          ) : (
+            <div id="recording-panel-loop" className="recording-panel" role="tabpanel" aria-labelledby="recording-tab-loop">
+              <Looper
+                transport={transport}
+                onOverdubChange={handleLooperOverdubChange}
+              />
+            </div>
+          )}
         </div>
-      )}
+      </section>
 
       <PluginChain
         chainState={{ chains: vst3.chains, openEditors: vst3.openEditors }}
@@ -535,24 +575,30 @@ export default function App() {
         scanState={scanState}
       />
 
-      <div className="library-section">
-        <ErrorBoundary>
-          <LibraryFolderRow
-            folder={transport.libraryFolder}
-            error={transport.lastSaveError}
-          />
-        </ErrorBoundary>
+      <section className="bp-section library-section" aria-label="Library">
+        <div className="bp-section-head">
+          <span className="section-index" aria-hidden="true">04</span>
+          <h2 className="bp-section-title">Library</h2>
+        </div>
+        <div className="bp-section-body">
+          <ErrorBoundary>
+            <LibraryFolderRow
+              folder={transport.libraryFolder}
+              error={transport.lastSaveError}
+            />
+          </ErrorBoundary>
 
-        <ErrorBoundary>
-          <SnippetList
-            snippets={snippets}
-            tagNames={tagNames}
-            onRenameTag={handleRenameTag}
-            playingSnippetId={transport.playingSnippetId}
-            playPositionSeconds={playPositionSeconds}
-          />
-        </ErrorBoundary>
-      </div>
+          <ErrorBoundary>
+            <SnippetList
+              snippets={snippets}
+              tagNames={tagNames}
+              onRenameTag={handleRenameTag}
+              playingSnippetId={transport.playingSnippetId}
+              playPositionSeconds={playPositionSeconds}
+            />
+          </ErrorBoundary>
+        </div>
+      </section>
 
       <Notification
         notification={notification}
@@ -567,6 +613,7 @@ export default function App() {
         progress={restoreProgress}
         remaining={pendingTotal}
         total={totalPlugins}
+        etaSec={etaSec}
         chains={restoringChains}
         error={vst3.restoreError}
       />

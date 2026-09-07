@@ -1,4 +1,5 @@
 #include "Vst3Library.h"
+#include "PluginProcessor.h"
 
 #include <future>
 #include <functional>
@@ -159,7 +160,12 @@ void Vst3Library::describeVst3FileAsync (const juce::File& file,
     auto promise = std::make_shared<std::promise<DescribeResult>>();
     pending->future = promise->get_future();
 
-    std::thread ([this, file, promise]() mutable
+    // Same apartment routing as PluginChain::addPluginAsync: the
+    // factory call (findAllTypesForFile) instantiates the plugin, and
+    // plugins create windows during instantiation — those windows
+    // belong to the apartment and are pumped there, never reentrantly
+    // by the app's message loop.
+    getPluginUiApartment().post ([this, file, promise]() mutable
     {
         DescribeResult r;
         try
@@ -171,8 +177,15 @@ void Vst3Library::describeVst3FileAsync (const juce::File& file,
             // r.descriptions is already default-constructed empty.
             r.error = "Exception escaping describeVst3File for " + file.getFileName();
         }
-        promise->set_value (std::move (r));
-    }).detach();
+        try
+        {
+            promise->set_value (std::move (r));
+        }
+        catch (...)
+        {
+            // The waiter timed out and dropped the future.
+        }
+    });
 
     // Polling timer on the message thread. Fires every 50 ms to check
     // whether the worker finished; bails out with timedOut=true if the

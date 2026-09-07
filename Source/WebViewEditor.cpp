@@ -1589,6 +1589,15 @@ void BluePrinterWebViewEditor::addVst3FromPath (const juce::String& chain, const
     // VST3 factory call (which can pop up a modal license dialog
     // for expired-license plugins), so the message thread stays
     // responsive and we can bail out if the plugin hangs.
+    // A manual add also lifts any quarantine on this plugin: the user
+    // is explicitly asking for a fresh try. If it crashes again, the
+    // next restore quarantines it anew (the failed add was never
+    // persisted).
+    audioProcessor.clearPluginQuarantineForFile (vst3File.getFileName());
+    // Record the plugin about to load (message thread; the load drivers
+    // run there) so even a fail-fast crash mid-load leaves a nameable
+    // suspect for the next launch's quarantine.
+    audioProcessor.notifyPluginLoadStarting (vst3File.getFileName());
     constexpr int kLoadTimeoutMs = 10000;
     target->addPluginAsync (
         vst3File, kLoadTimeoutMs,
@@ -1599,6 +1608,9 @@ void BluePrinterWebViewEditor::addVst3FromPath (const juce::String& chain, const
         {
             if (timedOut)
             {
+                // The worker thread may still be creating the instance
+                // after a timeout, so the load-op stays set: a crash
+                // from that abandoned worker must still be nameable.
                 auto* payload = new juce::DynamicObject();
                 payload->setProperty ("path",   vst3File.getFullPathName());
                 payload->setProperty ("name",   vst3File.getFileName());
@@ -1613,6 +1625,9 @@ void BluePrinterWebViewEditor::addVst3FromPath (const juce::String& chain, const
 
             if (slotIndex < 0)
             {
+                // Real load failure: the worker returned, nothing is in
+                // flight anymore.
+                audioProcessor.notifyPluginLoadFinished();
                 auto* payload = new juce::DynamicObject();
                 payload->setProperty ("path",   vst3File.getFullPathName());
                 payload->setProperty ("name",   vst3File.getFileName());
@@ -1625,6 +1640,7 @@ void BluePrinterWebViewEditor::addVst3FromPath (const juce::String& chain, const
             }
 
             sendNotification ("Added " + vst3File.getFileName() + " (" + name + ")", "ok");
+            audioProcessor.notifyPluginLoadFinished();
             emitVst3ChainSnapshot();
         });
 }

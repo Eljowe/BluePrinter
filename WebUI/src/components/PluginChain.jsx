@@ -507,7 +507,8 @@ export function PluginChain({ chainState, inputChannels, chainLevels, availableP
     <section className="fx-chain">
       <header className="section-header">
         <div className="section-title">
-          <h2>Plugin chains</h2>
+          <span className="section-index" aria-hidden="true">03</span>
+          <h2>FX chains</h2>
           <p
             className={`fx-chain-folder ${scanning ? "is-scanning" : ""}`}
             title={scanning ? scanState?.folder || defaultFolder || "" : defaultFolder || ""}
