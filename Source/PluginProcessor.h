@@ -538,13 +538,21 @@ private:
     std::atomic<int64_t> audioLoopStart   { 0 };
     std::atomic<int64_t> audioLoopLength  { 0 };
     std::atomic<int64_t> audioLoopPosition { 0 };
+    // Full captured (grid-trimmed) loop extent — the reference the crop
+    // beats are measured against. Crops derive audioLoopStart/Length from
+    // this every time, so cropping is reversible: moving the start crop
+    // back to 0 restores the region exactly instead of shrinking the
+    // window further (the old code folded the previous crop into the
+    // loop length and every adjustment silently chopped the tail).
+    std::atomic<int64_t> audioLoopFullLength { 0 };
     std::atomic<bool> audioLoopRecording { false };
     std::atomic<bool> audioLoopPlaying   { false };
     int looperCropStartBeats = 0;
     int looperCropEndBeats   = 0;
     int loopCrossfadeSamples = 0;
-    // Message-thread only: downsampled waveform of the cropped loop,
-    // rebuilt by refreshLooperPeaks() after capture/trim/crop.
+    // Message-thread only: downsampled waveform of the FULL loop (crop
+    // regions included, so the UI's crop shading can overlay the greyed
+    // beat ranges on top), rebuilt by refreshLooperPeaks().
     std::vector<float> looperPeaks;
 
     void refreshLooperPeaks();

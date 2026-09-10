@@ -91,6 +91,7 @@ export function Looper({ transport, onOverdubChange }) {
   const countInBeats = Number(transport?.looperCountInBeats ?? 0);
   const cropStartBeats = Number(transport?.looperCropStartBeats ?? 0);
   const cropEndBeats = Number(transport?.looperCropEndBeats ?? 0);
+  const loopStart = Number(transport?.audioLoopStart ?? 0);
 
   // Fresh-capture progress: the timeline fills as the capture grows
   // toward the record buffer's capacity.
@@ -104,13 +105,21 @@ export function Looper({ transport, onOverdubChange }) {
   const beatSamples = Number(transport?.bpm ?? 120) > 0 && Number(transport?.recordingSampleRate ?? 0) > 0
     ? (60.0 / Number(transport.bpm)) * Number(transport.recordingSampleRate)
     : 0;
+  // The cropped window + the cropped-off beats are the FULL loop, which
+  // is what the crop beats are measured against in the backend — so the
+  // stepper ranges and the crop overlays stay anchored and moving a crop
+  // handle back toward 0 restores the region it cut off instead of
+  // shrinking the window further.
   const totalBeats = beatSamples > 0 && loopLength > 0
-    ? Math.max(1, Math.round(loopLength / beatSamples))
+    ? Math.max(1, Math.round(loopLength / beatSamples) + cropStartBeats + cropEndBeats)
     : 0;
   const croppedBeats = totalBeats > 0 ? Math.max(0, totalBeats - cropStartBeats - cropEndBeats) : 0;
 
-  const loopProgress = loopLength > 0
-    ? Math.min(100, Math.max(0, (Number(transport.audioLoopPosition ?? 0) / loopLength) * 100))
+  // The waveform shows the FULL loop, so the playhead maps the absolute
+  // window position onto the full sample range.
+  const fullSamples = beatSamples > 0 && totalBeats > 0 ? totalBeats * beatSamples : loopLength;
+  const loopProgress = fullSamples > 0
+    ? Math.min(100, Math.max(0, ((loopStart + Number(transport.audioLoopPosition ?? 0)) / fullSamples) * 100))
     : 0;
   const cropStartPct = totalBeats > 0 ? (cropStartBeats / totalBeats) * 100 : 0;
   const cropEndPct = totalBeats > 0 ? (cropEndBeats / totalBeats) * 100 : 0;
