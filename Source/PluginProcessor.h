@@ -326,6 +326,15 @@ public:
     std::map<juce::String, juce::String> getTagNames() const;
     void setTagName (const juce::String& colorKey, const juce::String& name);
 
+    // Editor window size, persisted in the properties file so a resized
+    // window is restored on the next launch (the JUCE standalone wrapper
+    // only remembers the window position, not its size). The editor keeps
+    // the aspect ratio locked, so the width is authoritative. Returns 0
+    // when nothing has been saved. Message thread only.
+    int  getSavedEditorWidth();
+    int  getSavedEditorHeight();
+    void saveEditorSize (int width, int height);
+
     // Crash diagnostics (Windows only): the chain-restore step currently
     // running, recorded so the unhandled-exception filter can attribute a
     // crash (e.g. one inside a hosted VST3 DLL) to the exact step. The op

@@ -79,6 +79,96 @@ html, body {
   overflow-x: clip;
 }
 
+/* ============================================================
+   Fixed-design scaling shell
+   The whole UI is laid out at DESIGN_WIDTH px and scaled to fill the
+   (aspect-locked) window — see components/UiScale.jsx. Uses CSS `zoom`
+   (layout-aware, and it doesn't trap position: fixed), so the scroll
+   container sees the real scaled height and the splash stays viewport-
+   anchored.
+   ============================================================ */
+
+.ui-viewport {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.ui-scroll {
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  /* Reserve the scrollbar gutter so the measured client width is stable
+     whether or not the content currently scrolls. */
+  scrollbar-gutter: stable;
+}
+
+.ui-content {
+  width: 960px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.ui-content > .app {
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Corner resize grip — the only resize affordance (the native window has
+   no OS/host resize border). Large hit area, small diagonal hatch. */
+.bp-resize-handle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  width: 44px;
+  height: 44px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--ink-3);
+  appearance: none;
+  cursor: nwse-resize;
+  touch-action: none;
+  z-index: 60;
+}
+
+.bp-resize-handle:hover,
+.bp-resize-handle:active {
+  color: var(--ink);
+}
+
+.bp-resize-grip {
+  width: 20px;
+  height: 20px;
+  margin: 5px;
+  background-image: repeating-linear-gradient(
+    135deg,
+    currentColor 0 2px,
+    transparent 2px 6px
+  );
+  opacity: 0.55;
+}
+
+.bp-resize-handle:hover .bp-resize-grip,
+.bp-resize-handle:active .bp-resize-grip {
+  opacity: 0.95;
+}
+
+/* No scroll while the splash is up (scrolling lives on .ui-scroll, and the
+   splash is portaled to <body>, so match from html). */
+html:has(.bp-splash) .ui-scroll {
+  overflow: hidden;
+}
+
 ::selection {
   background: var(--line);
   color: var(--on-ink);
@@ -291,7 +381,10 @@ button {
   margin: 0;
   font-family: var(--font-display);
   font-weight: 400;
-  font-size: clamp(1.9rem, 4.5vw, 3rem);
+  /* Fixed design size: viewport units would drift the base layout with the
+     window, which the scaling shell relies on staying constant. 2.7rem is
+     the previous clamp's value at the 960px design width. */
+  font-size: 2.7rem;
   line-height: 0.95;
   letter-spacing: -0.01em;
   text-transform: uppercase;
@@ -2789,56 +2882,15 @@ button {
 }
 
 /* ============================================================
-   Responsive fallbacks (window is ~960px but can resize)
+   Fixed-design layout
+   The UI is laid out once at a fixed 960px design width and scaled as a
+   whole (see .ui-content / components/UiScale.jsx), so viewport-based
+   reflow breakpoints would fight the scaling. The layout stays at the
+   previous 960px default: single-row masthead, brand tagline hidden.
    ============================================================ */
 
-@media (max-width: 920px) {
-  .app-header {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .recording-section-head {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .recording-section-head .record-tools {
-    margin-left: 0;
-  }
-
-  .transport {
-    grid-template-columns: 1fr 1fr;
-    row-gap: 18px;
-  }
-
-  .transport-group {
-    border-left: none;
-    padding-left: 0;
-  }
-
-  .looper-header {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
-  .take-review-header {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
-  .header-knobs {
-    gap: 16px;
-    padding: 12px 14px;
-  }
-}
-
-/* Mid-size windows: drop the brand tagline so the masthead keeps its
-   single-row rhythm instead of wrapping awkwardly. */
-@media (max-width: 1240px) {
-  .app-brand-text p {
-    display: none;
-  }
+.app-brand-text p {
+  display: none;
 }
 
 /* ============ startup splash ============
@@ -2871,9 +2923,9 @@ html:has(.bp-splash) {
 .bp-splash__paper {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  min-height: 100%;
   overflow-x: clip;
-  padding: clamp(22px, 5vw, 48px);
+  padding: 48px;
 }
 
 .bp-splash__masthead {
@@ -2915,7 +2967,9 @@ html:has(.bp-splash) {
   margin: 0;
   font-family: var(--font-display);
   font-weight: 400;
-  font-size: clamp(2rem, 6vw, 3.6rem);
+  /* Fixed design size — see .app-brand-text h1. 3.6rem was the previous
+     clamp's value at the 960px design width. */
+  font-size: 3.6rem;
   letter-spacing: -0.01em;
   line-height: 1;
   text-transform: uppercase;

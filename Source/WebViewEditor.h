@@ -22,6 +22,18 @@ public:
     // compatibility; it is now the master monitor Output gain (dB).
     static constexpr const char* paramOutput = "PlaybackVolume";
 
+    // Fixed design size the React UI is laid out at. The editor window is
+    // resizable with this aspect ratio locked; the WebView scales the whole
+    // interface to fill the window (see UiScale.jsx). Limits allow 0.7x-2x.
+    static constexpr int designWidth  = 960;
+    static constexpr int designHeight = 700;
+    static constexpr int minDesignWidth  = 672;   // 0.7x
+    static constexpr int minDesignHeight = 490;   // 0.7x
+    static constexpr int maxDesignWidth  = 1920;  // 2x
+    static constexpr int maxDesignHeight = 1400;  // 2x
+    static constexpr double designAspect = static_cast<double> (designWidth)
+                                         / static_cast<double> (designHeight);
+
     static constexpr const char* frontendSetParameterEvent     = "frontendSetParameter";
     static constexpr const char* frontendStartRecordingEvent   = "frontendStartRecording";
     static constexpr const char* frontendStopRecordingEvent    = "frontendStopRecording";
@@ -99,6 +111,10 @@ public:
     static constexpr const char* frontendSetChainMonitorSoloEvent = "frontendSetChainMonitorSolo";
     static constexpr const char* frontendSetChainMonitorMuteEvent = "frontendSetChainMonitorMute";
     static constexpr const char* frontendSetChainMidiChannelsEvent = "frontendSetChainMidiChannels";
+    // { dWidth } — device-pixel width delta from the WebUI's corner resize
+    // grip (the window has no OS/host resize border). The editor applies
+    // the locked aspect ratio + size limits and resizes its window.
+    static constexpr const char* frontendResizeEditorEvent     = "frontendResizeEditor";
 
     static constexpr const char* backendVst3ChainEvent        = "backendVst3Chain";
     static constexpr const char* backendVst3ScanProgressEvent = "backendVst3ScanProgress";
@@ -137,6 +153,9 @@ public:
     void handleSetChainMute (const juce::var& data);
     void handleSetChainMonitorSolo (const juce::var& data);
     void handleSetChainMonitorMute (const juce::var& data);
+    // { dWidth } — resize the editor by a device-pixel width delta from
+    // the WebUI corner grip, preserving the locked aspect ratio.
+    void handleResizeEditor (const juce::var& data);
     void handleSetChainMidiChannels (const juce::var& data);
     // (Re)wire the per-chain onSlotRemoved callbacks and drop editor
     // windows for chains that no longer exist. Called after the chain
@@ -214,6 +233,15 @@ private:
     std::atomic<bool> libraryUpdatePending   { false };
     std::atomic<bool> transportUpdatePending { false };
     std::atomic<bool> chainUpdatePending     { false };
+
+    // Debounced editor-size persist. Dragging the window corner fires
+    // many resized() calls; the properties-file write runs from
+    // timerCallback once resizing has settled. Message thread only.
+    int  pendingEditorWidth  = 0;
+    int  pendingEditorHeight = 0;
+    bool editorSizePersistPending = false;
+    int64_t editorSizePersistDeadline = 0;
+    void flushEditorSizePersist();
 
     // Held by the FileChooser callbacks. Reset once the dialog closes.
     std::unique_ptr<juce::FileChooser> activeFileChooser;
