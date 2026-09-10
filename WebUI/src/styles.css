@@ -1396,7 +1396,7 @@ button {
   box-shadow: 0 0 6px var(--rec);
 }
 
-.level-meter.is-clipped .level-meter-fill {
+.level-meter.is-hot .level-meter-fill {
   background: var(--rec);
 }
 
