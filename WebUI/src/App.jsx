@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Transport } from "./components/Transport";
 import { HeaderControls } from "./components/HeaderControls";
 import { SyncControls } from "./components/SyncControls";
@@ -673,18 +674,21 @@ export default function App() {
         onDismiss={() => setNotification(null)}
       />
 
-      <SplashScreen
-        visible={splashPhase !== "hidden"}
-        leaving={splashPhase === "leaving"}
-        restoring={Boolean(vst3.restoring)}
-        snapshotReceived={chainSnapshotReceived}
-        progress={restoreProgress}
-        remaining={pendingTotal}
-        total={totalPlugins}
-        etaSec={etaSec}
-        chains={restoringChains}
-        error={vst3.restoreError}
-      />
+      {createPortal(
+        <SplashScreen
+          visible={splashPhase !== "hidden"}
+          leaving={splashPhase === "leaving"}
+          restoring={Boolean(vst3.restoring)}
+          snapshotReceived={chainSnapshotReceived}
+          progress={restoreProgress}
+          remaining={pendingTotal}
+          total={totalPlugins}
+          etaSec={etaSec}
+          chains={restoringChains}
+          error={vst3.restoreError}
+        />,
+        document.body,
+      )}
 
       <footer className="app-footer">
         Takes stay in memory until you save or discard them — pick a library folder so saves have a destination.

@@ -589,6 +589,11 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
             if (owner != nullptr)
                 owner->handleSetChainMidiChannels (data);
         })
+        .withEventListener(BluePrinterWebViewEditor::frontendResizeEditorEvent, [owner](juce::var data)
+        {
+            if (owner != nullptr)
+                owner->handleResizeEditor (data);
+        })
         .withEventListener(BluePrinterWebViewEditor::frontendScanVst3FolderEvent, [owner](juce::var)
         {
             if (owner != nullptr)
@@ -694,7 +699,22 @@ BluePrinterWebViewEditor::BluePrinterWebViewEditor(BluePrinterAudioProcessor& p)
 
     startTimerHz (audioProcessor.transportTimerHz);
 
-    setSize(960, 700);
+    // No OS/host resize border and no built-in corner: the WebUI draws its
+    // own Neural-DSP-style grip in the bottom-right (ResizeHandle.jsx) which
+    // sends frontendResizeEditor. The constrainer still encodes the locked
+    // aspect ratio + size limits that handleResizeEditor clamps to.
+    setResizeLimits (minDesignWidth, minDesignHeight, maxDesignWidth, maxDesignHeight);
+    if (auto* constrainer = getConstrainer())
+        constrainer->setFixedAspectRatio (designAspect);
+    // After setResizeLimits (which sets resizableByHost true), so the
+    // standalone window has no draggable border — the grip is the only way.
+    setResizable (false, false);
+
+    auto savedWidth = audioProcessor.getSavedEditorWidth();
+    if (savedWidth <= 0)
+        savedWidth = designWidth;
+    savedWidth = juce::jlimit (minDesignWidth, maxDesignWidth, savedWidth);
+    setSize (savedWidth, juce::roundToInt (static_cast<double> (savedWidth) / designAspect));
 }
 
 BluePrinterWebViewEditor::~BluePrinterWebViewEditor()
@@ -708,6 +728,10 @@ BluePrinterWebViewEditor::~BluePrinterWebViewEditor()
     // editor.
     aliveToken.reset();
     disposed.store (true, std::memory_order_release);
+
+    // Persist the final window size in case the app is closed before the
+    // debounce fired.
+    flushEditorSizePersist();
 
     cancelPendingUpdate();
     stopTimer();
@@ -727,6 +751,25 @@ void BluePrinterWebViewEditor::resized()
 {
     webView.setBounds(getLocalBounds());
     fallbackLabel.setBounds(getLocalBounds().reduced(20));
+
+    // Arm the debounced persist of the (aspect-locked) window size.
+    if (getWidth() > 0 && getHeight() > 0)
+    {
+        pendingEditorWidth  = getWidth();
+        pendingEditorHeight = getHeight();
+        editorSizePersistPending = true;
+        editorSizePersistDeadline = juce::Time::currentTimeMillis() + 400;
+    }
+}
+
+void BluePrinterWebViewEditor::flushEditorSizePersist()
+{
+    if (! editorSizePersistPending)
+        return;
+
+    editorSizePersistPending = false;
+    if (pendingEditorWidth > 0 && pendingEditorHeight > 0)
+        audioProcessor.saveEditorSize (pendingEditorWidth, pendingEditorHeight);
 }
 
 juce::String BluePrinterWebViewEditor::resolveWebUiUrl() const
@@ -790,6 +833,11 @@ void BluePrinterWebViewEditor::timerCallback()
     // the VST3 module is only touched from the right thread.
     if (activeScan != nullptr)
         runScanStep();
+
+    // Persist the window size once a resize has settled.
+    if (editorSizePersistPending
+        && juce::Time::currentTimeMillis() >= editorSizePersistDeadline)
+        flushEditorSizePersist();
 }
 
 void BluePrinterWebViewEditor::libraryChanged()
@@ -1487,6 +1535,26 @@ void BluePrinterWebViewEditor::handleSetChainMidiChannels (const juce::var& data
     }
     if (chainId.isNotEmpty())
         audioProcessor.setChainMidiChannels (chainId, mask);
+}
+
+void BluePrinterWebViewEditor::handleResizeEditor (const juce::var& data)
+{
+    if (data.getDynamicObject() == nullptr)
+        return;
+
+    // dWidth is a device-pixel delta from the corner grip. Apply it to the
+    // current width, clamp to the design limits and re-derive the height
+    // from the locked aspect ratio, then resize (the standalone wrapper
+    // resizes its window to contain the editor; a DAW may ignore it).
+    const auto delta = static_cast<int> (std::lround (static_cast<double> (data["dWidth"])));
+    if (delta == 0)
+        return;
+
+    const auto newWidth = juce::jlimit (minDesignWidth, maxDesignWidth, getWidth() + delta);
+    const auto newHeight = juce::roundToInt (static_cast<double> (newWidth) / designAspect);
+
+    if (newWidth != getWidth() || newHeight != getHeight())
+        setSize (newWidth, newHeight);
 }
 
 void BluePrinterWebViewEditor::scanVst3Folder (const juce::File& folder)

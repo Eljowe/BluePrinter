@@ -2688,6 +2688,30 @@ void BluePrinterAudioProcessor::flushTagNamePersist()
     }
 }
 
+int BluePrinterAudioProcessor::getSavedEditorWidth()
+{
+    if (auto* props = getUserState())
+        return props->getIntValue ("editorWidth", 0);
+    return 0;
+}
+
+int BluePrinterAudioProcessor::getSavedEditorHeight()
+{
+    if (auto* props = getUserState())
+        return props->getIntValue ("editorHeight", 0);
+    return 0;
+}
+
+void BluePrinterAudioProcessor::saveEditorSize (int width, int height)
+{
+    if (auto* props = getUserState())
+    {
+        props->setValue ("editorWidth", width);
+        props->setValue ("editorHeight", height);
+        props->saveIfNeeded();
+    }
+}
+
 juce::String BluePrinterAudioProcessor::getLastChainRestoreError() const
 {
     return lastChainRestoreError;

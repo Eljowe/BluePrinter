@@ -109,6 +109,8 @@ export const FRONTEND_EVENTS = {
   setChainMonitorSolo: "frontendSetChainMonitorSolo",
   setChainMonitorMute: "frontendSetChainMonitorMute",
   setChainMidiChannels: "frontendSetChainMidiChannels",
+  // { dWidth } — device-pixel width delta from the corner resize grip.
+  resizeEditor: "frontendResizeEditor",
 };
 
 export const BACKEND_EVENTS = {
