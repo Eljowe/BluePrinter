@@ -10,12 +10,12 @@ Audio plugin (VST3 + Standalone) for recording guitar takes, saving WAV + JSON s
 ## Architecture
 
 ```
-Audio input -> Gain (APVTS param) -> +-> [chain 0] ----> sum -> + -> Metronome mix -> Output
+Audio input -> Input trim (APVTS Gain, dB) -> +-> [chain 0] ----> sum -> + -> Metronome mix -> Output
                                     |  \-> [chain 1] -----/     |
                                     \-> [chain N] -------------/  Recording capture = dry + selected chains (when armed)
 ```
 
-- **Processor** (`Source/PluginProcessor.h/.cpp`): owns all state — APVTS (only `Gain` + `PlaybackVolume`), the chain list, takes/looper recording + playback, metronome, MIDI clock, persistence. The editor is a listener/view; the frontend mirrors state.
+- **Processor** (`Source/PluginProcessor.h/.cpp`): owns all state — APVTS (`Gain` → Input, `PlaybackVolume` → Output, both dB), the chain list, takes/looper recording + playback, metronome, MIDI clock, persistence. The editor is a listener/view; the frontend mirrors state.
 - **UI bridge** (`Source/WebViewEditor.h/.cpp`): WebView2 editor, all frontend↔backend events. The React side never talks to C++ directly except through `bridge.js`.
 - **React UI** (`WebUI/src/`): `App.jsx` subscribes to backend events and passes state down; components emit mutations.
 - **Chains**: parallel VST3 FX chains in `std::vector<std::unique_ptr<PluginChain>>` (guarded by `chainLock`; the audio thread iterates a raw-pointer snapshot). Stable ids, per-chain input mask / MIDI / record / volume / mute. Full model: AGENTS.md "VST3 Chains".

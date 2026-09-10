@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { FRONTEND_EVENTS, emit } from "../bridge";
+import { Knob } from "./controls";
 import { IconPlay, IconSave, IconStop, IconTrash } from "./icons";
 import { LevelMeter } from "./LevelMeter";
 import { Waveform } from "./Waveform";
@@ -74,7 +75,7 @@ function formatBeats(beats) {
   return `${beats} beats`;
 }
 
-export function Looper({ transport, onOverdubChange }) {
+export function Looper({ transport, onOverdubChange, onLoopLevelChange, onOverdubLevelChange, onResetClip }) {
   const recording = Boolean(transport?.looperRecording);
   const preRoll = Boolean(transport?.looperPreRoll);
   const isRecording = recording || preRoll;
@@ -84,6 +85,15 @@ export function Looper({ transport, onOverdubChange }) {
 
   const loopLength = Number(transport?.audioLoopLength ?? 0);
   const hasLoop = loopLength > 0;
+
+  // Playhead animation state: the marker is interpolated on a rAF clock
+  // between the 30 Hz transport pushes (see the effect below), so it never
+  // re-renders React at frame rate. `deadband` refs keep it from nudging
+  // backwards on push latency; the timer drives the seam fade.
+  const playheadRef = useRef(null);
+  const clockRef = useRef({ pos: 0, at: 0 });
+  const lastPosRef = useRef(0);
+  const seamTimerRef = useRef(null);
 
   // A capture layers over the loop when overdub is on, looping is on and
   // a loop exists — matches the backend's condition at capture start.
@@ -115,12 +125,24 @@ export function Looper({ transport, onOverdubChange }) {
     : 0;
   const croppedBeats = totalBeats > 0 ? Math.max(0, totalBeats - cropStartBeats - cropEndBeats) : 0;
 
+  // X-axis ruler: a tick per beat with the bar boundaries emphasised, and a
+  // number under each bar. Long loops thin the numbers out so they never
+  // collide, and drop the per-beat ticks once they'd read as noise.
+  const totalBars = totalBeats > 0 ? Math.ceil(totalBeats / 4) : 0;
+  const showBeatTicks = totalBeats > 0 && totalBeats <= 32;
+  const barLabelStep = totalBars > 24 ? 4 : totalBars > 12 ? 2 : 1;
+  const barNumberLabels = [];
+  for (let bar = 0; bar < totalBars; bar += barLabelStep) {
+    const centerBeat = bar * 4 + 2;
+    if (centerBeat > totalBeats) break;
+    const pct = (centerBeat / totalBeats) * 100;
+    if (pct > 97) break;
+    barNumberLabels.push({ bar: bar + 1, pct });
+  }
+
   // The waveform shows the FULL loop, so the playhead maps the absolute
   // window position onto the full sample range.
   const fullSamples = beatSamples > 0 && totalBeats > 0 ? totalBeats * beatSamples : loopLength;
-  const loopProgress = fullSamples > 0
-    ? Math.min(100, Math.max(0, ((loopStart + Number(transport.audioLoopPosition ?? 0)) / fullSamples) * 100))
-    : 0;
   const cropStartPct = totalBeats > 0 ? (cropStartBeats / totalBeats) * 100 : 0;
   const cropEndPct = totalBeats > 0 ? (cropEndBeats / totalBeats) * 100 : 0;
 
@@ -134,6 +156,71 @@ export function Looper({ transport, onOverdubChange }) {
     const currentBeat = Math.floor((Number(transport.transportPosition ?? 0)) / samplesPerBeat);
     countdown = Math.max(1, countInBeats - currentBeat);
   }
+
+  // Animate the playhead by extrapolating from the last transport push at
+  // the known sample rate. The old `left` CSS transition trailed the audio
+  // by ~80 ms; the rAF clock tracks it smoothly and resets straight to the
+  // window start at the seam (no backwards sweep). The position is written
+  // straight to the DOM so React doesn't re-render at frame rate.
+  useLayoutEffect(() => {
+    const node = playheadRef.current;
+    if (!node || !hasLoop) return undefined;
+
+    const sampleRate = Number(transport?.recordingSampleRate ?? 0);
+    const snapshotPos = Number(transport?.audioLoopPosition ?? 0);
+    const toPct = (pos) => (fullSamples > 0
+      ? Math.min(100, Math.max(0, ((loopStart + pos) / fullSamples) * 100))
+      : 0);
+
+    if (!playing || sampleRate <= 0 || loopLength <= 0) {
+      node.style.left = `${toPct(snapshotPos)}%`;
+      node.classList.remove("is-seam");
+      return undefined;
+    }
+
+    // Re-seed the clock baseline only when the push disagrees with our
+    // extrapolation by more than the deadband — a few ms of push latency
+    // would otherwise pull the marker a hair backwards every tick.
+    const now = performance.now();
+    const clock = clockRef.current;
+    let elapsed = clock.at > 0 ? ((now - clock.at) / 1000) * sampleRate : 0;
+    const deadband = sampleRate * 0.02;
+    if (clock.at === 0 || Math.abs(clock.pos + elapsed - snapshotPos) > deadband) {
+      clock.pos = snapshotPos;
+      clock.at = now;
+      elapsed = 0;
+    }
+    lastPosRef.current = looping
+      ? (clock.pos + elapsed) % loopLength
+      : Math.min(clock.pos + elapsed, loopLength);
+
+    let raf = 0;
+    const tick = () => {
+      const c = clockRef.current;
+      let pos = c.pos + ((performance.now() - c.at) / 1000) * sampleRate;
+      if (looping) {
+        pos %= loopLength;
+        // A drop of more than half the loop means the phase wrapped; fade
+        // the marker briefly so the reset reads as a cycle, not a glitch.
+        if (lastPosRef.current - pos > loopLength * 0.5) {
+          node.classList.add("is-seam");
+          window.clearTimeout(seamTimerRef.current);
+          seamTimerRef.current = window.setTimeout(
+            () => node.classList.remove("is-seam"), 80);
+        }
+      } else {
+        pos = Math.min(pos, loopLength);
+      }
+      lastPosRef.current = pos;
+      node.style.left = `${toPct(pos)}%`;
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [playing, hasLoop, looping, loopLength, loopStart, fullSamples, transport?.audioLoopPosition, transport?.recordingSampleRate]);
+
+  // Clear a pending seam-fade timer if the component goes away.
+  useEffect(() => () => window.clearTimeout(seamTimerRef.current), []);
 
   const setRecording = (enabled) => emit(FRONTEND_EVENTS.setLooperRecording, { enabled });
   const setPlaying = (enabled) => emit(FRONTEND_EVENTS.setLooperPlaying, { enabled });
@@ -153,7 +240,13 @@ export function Looper({ transport, onOverdubChange }) {
       </div>
 
       <div className={`looper-timeline ${preRoll ? "is-counting-in" : ""}`} aria-label={`${formatBeats(croppedBeats)} loop`}>
-        <div className="looper-grid-lines"><i /><i /><i /><i /><i /><i /><i /><i /></div>
+        <div
+          className="looper-ruler"
+          style={hasLoop && totalBeats > 0 ? {
+            "--beat-width": showBeatTicks ? `${100 / totalBeats}%` : `${400 / totalBeats}%`,
+            "--bar-width": `${400 / totalBeats}%`,
+          } : undefined}
+        />
         {isRecording && !isOverdubbing && capturePct > 0 ? (
           <div className="looper-capture-progress" style={{ width: `${capturePct}%` }} />
         ) : null}
@@ -169,7 +262,14 @@ export function Looper({ transport, onOverdubChange }) {
         ) : null}
         {hasLoop ? <div className="looper-crop-left" style={{ width: `${cropStartPct}%` }} /> : null}
         {hasLoop ? <div className="looper-crop-right" style={{ width: `${cropEndPct}%` }} /> : null}
-        {hasLoop ? <div className="looper-playhead" style={{ left: `${loopProgress}%` }} /> : null}
+        {hasLoop ? <div ref={playheadRef} className="looper-playhead" /> : null}
+        {hasLoop ? (
+          <div className="looper-ruler-labels" aria-hidden="true">
+            {barNumberLabels.map((b) => (
+              <span key={b.bar} className="looper-ruler-label" style={{ left: `${b.pct}%` }}>{b.bar}</span>
+            ))}
+          </div>
+        ) : null}
         <div className="looper-timeline-caption">
           <span>{hasLoop ? formatBeats(croppedBeats) : "No loop captured yet"}</span>
           <span>{looping ? "LOOP" : "ONE SHOT"}</span>
@@ -189,7 +289,13 @@ export function Looper({ transport, onOverdubChange }) {
             <span className="looper-record-dot" aria-hidden="true" />
           </button>
           <div className="looper-meter" aria-hidden={!isRecording}>
-            <LevelMeter level={transport?.inputLevel ?? 0} peak={transport?.inputPeak ?? 0} />
+            <LevelMeter
+              label="Input level"
+              level={transport?.inputLevel ?? 0}
+              peak={transport?.inputPeak ?? 0}
+              clipped={Boolean(transport?.inputClipped)}
+              onResetClip={onResetClip ? () => onResetClip("input") : undefined}
+            />
           </div>
           <button type="button" className="btn btn-primary btn-sm" disabled={!hasLoop} onClick={() => setPlaying(!playing)}>
             {playing ? <IconStop size={13} /> : <IconPlay size={13} />} {playing ? "Stop loop" : "Play loop"}
@@ -209,59 +315,102 @@ export function Looper({ transport, onOverdubChange }) {
         </div>
 
         <div className="looper-settings">
-          <label className="count-in-control">
-            <span className="count-in-label">Count-in</span>
-            <NumberInput
-              className="count-in-field"
+          <div className="looper-setting looper-setting--levels">
+            <div className="looper-level-cell">
+              <Knob
+                label="Loop"
+                min={-60}
+                max={12}
+                value={Number(transport?.loopLevel ?? 0)}
+                onChange={onLoopLevelChange}
+                step="0.5"
+                decimals={1}
+                unit="dB"
+                className="looper-level-knob"
+                title="Loop playback level (monitor only) — pull it down during an overdub to hear your new layer"
+              />
+              <LevelMeter
+                label="Loop playback level"
+                level={transport?.loopPlayLevel ?? 0}
+                peak={transport?.loopPlayPeak ?? 0}
+                clipped={Boolean(transport?.loopClipped)}
+                onResetClip={onResetClip ? () => onResetClip("loop") : undefined}
+              />
+            </div>
+
+            <Knob
+              label="Dub"
+              min={-60}
+              max={0}
+              value={Number(transport?.overdubLevel ?? 0)}
+              onChange={onOverdubLevelChange}
+              step="0.5"
+              decimals={1}
+              unit="dB"
+              className="looper-level-knob"
+              title="Overdub trim — attenuates each new layer before it is mixed into the loop (0 dB = no change)"
+            />
+          </div>
+
+          <div className="looper-setting">
+            <label className="count-in-control">
+              <span className="count-in-label">Count-in</span>
+              <NumberInput
+                className="count-in-field"
+                min={0}
+                max={8}
+                step={1}
+                value={countInBeats}
+                onChange={(beats) => emit(FRONTEND_EVENTS.setLooperCountIn, { beats })}
+                suffix="beats"
+                title="Beats of click before the loop capture starts (0 = off)"
+              />
+            </label>
+          </div>
+
+          <div className="looper-setting looper-setting--toggles">
+            <label className={`looper-loop-switch ${!looping ? "is-disabled" : ""}`}>
+              <input type="checkbox" checked={looping} onChange={(e) => emit(FRONTEND_EVENTS.setLooperLooping, { enabled: e.target.checked })} />
+              <span className="looper-switch" />
+              <span>{looping ? "Loop" : "One shot"}</span>
+            </label>
+
+            <label
+              className={`looper-loop-switch ${!looping ? "is-disabled" : ""}`}
+              title={looping
+                ? (overdub ? "Overdub on — record layers over the loop" : "Overdub off — record replaces the loop. Turn on to layer.")
+                : "Overdub needs loop mode"}
+            >
+              <input
+                type="checkbox"
+                checked={overdub}
+                disabled={!looping}
+                onChange={(e) => onOverdubChange(e.target.checked)}
+              />
+              <span className="looper-switch" />
+              <span>Overdub</span>
+            </label>
+          </div>
+
+          <div className="looper-setting looper-setting--crop">
+            <Stepper
+              label="Crop start"
+              value={cropStartBeats}
               min={0}
-              max={8}
-              step={1}
-              value={countInBeats}
-              onChange={(beats) => emit(FRONTEND_EVENTS.setLooperCountIn, { beats })}
-              suffix="beats"
-              title="Beats of click before the loop capture starts (0 = off)"
+              max={!recording && totalBeats > 0 ? Math.max(0, totalBeats - 1 - cropEndBeats) : 0}
+              onChange={(beats) => emitCrop(beats, cropEndBeats)}
+              title="Beats to trim off the start of the loop (4 beats per bar)"
             />
-          </label>
 
-          <label className={`looper-loop-switch ${!looping ? "is-disabled" : ""}`}>
-            <input type="checkbox" checked={looping} onChange={(e) => emit(FRONTEND_EVENTS.setLooperLooping, { enabled: e.target.checked })} />
-            <span className="looper-switch" />
-            <span>{looping ? "Loop" : "One shot"}</span>
-          </label>
-
-          <label
-            className={`looper-loop-switch ${!looping ? "is-disabled" : ""}`}
-            title={looping
-              ? (overdub ? "Overdub on — record layers over the loop" : "Overdub off — record replaces the loop. Turn on to layer.")
-              : "Overdub needs loop mode"}
-          >
-            <input
-              type="checkbox"
-              checked={overdub}
-              disabled={!looping}
-              onChange={(e) => onOverdubChange(e.target.checked)}
+            <Stepper
+              label="Crop end"
+              value={cropEndBeats}
+              min={0}
+              max={!recording && totalBeats > 0 ? Math.max(0, totalBeats - 1 - cropStartBeats) : 0}
+              onChange={(beats) => emitCrop(cropStartBeats, beats)}
+              title="Beats to trim off the end of the loop (4 beats per bar)"
             />
-            <span className="looper-switch" />
-            <span>Overdub</span>
-          </label>
-
-          <Stepper
-            label="Crop start"
-            value={cropStartBeats}
-            min={0}
-            max={!recording && totalBeats > 0 ? Math.max(0, totalBeats - 1 - cropEndBeats) : 0}
-            onChange={(beats) => emitCrop(beats, cropEndBeats)}
-            title="Beats to trim off the start of the loop (4 beats per bar)"
-          />
-
-          <Stepper
-            label="Crop end"
-            value={cropEndBeats}
-            min={0}
-            max={!recording && totalBeats > 0 ? Math.max(0, totalBeats - 1 - cropStartBeats) : 0}
-            onChange={(beats) => emitCrop(cropStartBeats, beats)}
-            title="Beats to trim off the end of the loop (4 beats per bar)"
-          />
+          </div>
         </div>
       </div>
     </section>

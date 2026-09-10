@@ -97,6 +97,16 @@ public:
     void setMuted (bool m) { muted.store (m); }
     bool isMuted() const { return muted.load (std::memory_order_acquire); }
 
+    // Monitor-only solo/mute. These change what is HEARD but never the
+    // capture: recordingMixBuffer follows the hard Mute + Record flags
+    // only. If any chain is soloed, the monitor mix is only the soloed
+    // chains (and the direct dry pass-through is muted, for true
+    // isolation); monitorMuted removes just this chain from the monitor.
+    void setMonitorSolo (bool s) { monitorSolo.store (s); }
+    bool isMonitorSolo() const { return monitorSolo.load (std::memory_order_acquire); }
+    void setMonitorMuted (bool m) { monitorMuted.store (m); }
+    bool isMonitorMuted() const { return monitorMuted.load (std::memory_order_acquire); }
+
     // Per-chain output level meter (post-volume, 0..1). Written by the
     // audio thread via computeLevelsInto in the processor, read by the
     // message thread for the 30 Hz transport push.
@@ -283,6 +293,8 @@ private:
     std::atomic<bool>    recordOnCapture { true };
     std::atomic<float>   volumeDb { 0.0f };
     std::atomic<bool>    muted { false };
+    std::atomic<bool>    monitorSolo { false };
+    std::atomic<bool>    monitorMuted { false };
     std::atomic<uint16_t> midiChannelsMask { 0xFFFF };
 
     mutable juce::CriticalSection lock;

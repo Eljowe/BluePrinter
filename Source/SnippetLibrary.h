@@ -32,6 +32,10 @@ struct Snippet
     // "purple", "pink"). Empty string = no colour. Persisted in the
     // sidecar JSON.
     juce::String color;
+    // Non-destructive playback trim (dB, -24..+24, 0 = unity). Applied to
+    // the monitored/played-back audio only — it is never baked into the
+    // saved WAV. Persisted in the sidecar JSON.
+    float gainDb = 0.0f;
 };
 
 class SnippetLibrary
@@ -50,6 +54,9 @@ public:
     // Set the organisational colour tag on a snippet. `color` should be
     // one of the 8 palette keys the UI offers, or empty to clear it.
     bool updateColor (int id, const juce::String& color);
+
+    // Set the non-destructive playback trim (dB, clamped to -24..+24).
+    bool updateGain (int id, float gainDb);
 
     bool markSaved (int id, const juce::String& path);
 

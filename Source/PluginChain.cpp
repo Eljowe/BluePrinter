@@ -510,6 +510,8 @@ juce::var PluginChain::getChainState() const
     obj->setProperty ("recordOnCapture", recordOnCapture.load (std::memory_order_acquire));
     obj->setProperty ("volume", volumeDb.load (std::memory_order_acquire));
     obj->setProperty ("muted", muted.load (std::memory_order_acquire));
+    obj->setProperty ("monitorSolo", monitorSolo.load (std::memory_order_acquire));
+    obj->setProperty ("monitorMuted", monitorMuted.load (std::memory_order_acquire));
 
     juce::Array<juce::var> midiChannels;
     const uint16_t midiMask = midiChannelsMask.load (std::memory_order_acquire);
@@ -585,6 +587,12 @@ void PluginChain::setChainState (const juce::var& state, juce::String& outError)
     if (obj->hasProperty ("muted"))
         muted.store (static_cast<bool> (obj->getProperty ("muted")),
                      std::memory_order_release);
+    if (obj->hasProperty ("monitorSolo"))
+        monitorSolo.store (static_cast<bool> (obj->getProperty ("monitorSolo")),
+                           std::memory_order_release);
+    if (obj->hasProperty ("monitorMuted"))
+        monitorMuted.store (static_cast<bool> (obj->getProperty ("monitorMuted")),
+                            std::memory_order_release);
     if (obj->hasProperty ("midiChannels"))
     {
         uint16_t midiMask = 0;

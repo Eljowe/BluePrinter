@@ -18,7 +18,9 @@ public:
 
     // Event names shared with the React frontend.
     static constexpr const char* paramGain = "Gain";
-    static constexpr const char* paramPlaybackVolume = "PlaybackVolume";
+    // The output param ID is retained as "PlaybackVolume" for saved-state
+    // compatibility; it is now the master monitor Output gain (dB).
+    static constexpr const char* paramOutput = "PlaybackVolume";
 
     static constexpr const char* frontendSetParameterEvent     = "frontendSetParameter";
     static constexpr const char* frontendStartRecordingEvent   = "frontendStartRecording";
@@ -30,6 +32,10 @@ public:
     static constexpr const char* frontendStopPlaybackEvent     = "frontendStopPlayback";
     static constexpr const char* frontendUpdateSnippetEvent    = "frontendUpdateSnippetMeta";
     static constexpr const char* frontendSetSnippetColorEvent  = "frontendSetSnippetColor";
+    // { id, gainDb } — non-destructive playback trim (-24..+24 dB).
+    static constexpr const char* frontendSetSnippetGainEvent   = "frontendSetSnippetGain";
+    // { id } — set the trim so the snippet peak lands at -1 dBFS.
+    static constexpr const char* frontendNormalizeSnippetEvent = "frontendNormalizeSnippet";
     static constexpr const char* frontendDeleteSnippetEvent    = "frontendDeleteSnippet";
     static constexpr const char* frontendDetectSnippetKeyEvent = "frontendDetectSnippetKey";
     static constexpr const char* frontendSaveSnippetEvent      = "frontendSaveSnippet";
@@ -53,6 +59,12 @@ public:
     static constexpr const char* frontendSetBpmEvent           = "frontendSetBpm";
     static constexpr const char* frontendSetCountInBeatsEvent  = "frontendSetCountInBeats";
     static constexpr const char* frontendSetDryLevelEvent      = "frontendSetDryLevel";
+    static constexpr const char* frontendSetLoopLevelEvent     = "frontendSetLoopLevel";
+    // { level } — overdub trim in dB (-60..0) applied to each new layer.
+    static constexpr const char* frontendSetOverdubLevelEvent  = "frontendSetOverdubLevel";
+    // { target } — clear a latched clip indicator ("input" | "record" |
+    // "output" | "loop" | "all").
+    static constexpr const char* frontendResetClipEvent         = "frontendResetClip";
     static constexpr const char* frontendSetClickParamsEvent   = "frontendSetClickParams";
     static constexpr const char* frontendSetMidiClockEvent     = "frontendSetMidiClock";
     static constexpr const char* frontendSetMidiClockOnRecordEvent = "frontendSetMidiClockOnRecord";
@@ -83,6 +95,9 @@ public:
     static constexpr const char* frontendSetChainRecordEvent   = "frontendSetChainRecord";
     static constexpr const char* frontendSetChainVolumeEvent   = "frontendSetChainVolume";
     static constexpr const char* frontendSetChainMuteEvent     = "frontendSetChainMute";
+    // Monitor-only solo/mute: { chain, solo } / { chain, muted }.
+    static constexpr const char* frontendSetChainMonitorSoloEvent = "frontendSetChainMonitorSolo";
+    static constexpr const char* frontendSetChainMonitorMuteEvent = "frontendSetChainMonitorMute";
     static constexpr const char* frontendSetChainMidiChannelsEvent = "frontendSetChainMidiChannels";
 
     static constexpr const char* backendVst3ChainEvent        = "backendVst3Chain";
@@ -120,6 +135,8 @@ public:
     void handleSetChainRecord (const juce::var& data);
     void handleSetChainVolume (const juce::var& data);
     void handleSetChainMute (const juce::var& data);
+    void handleSetChainMonitorSolo (const juce::var& data);
+    void handleSetChainMonitorMute (const juce::var& data);
     void handleSetChainMidiChannels (const juce::var& data);
     // (Re)wire the per-chain onSlotRemoved callbacks and drop editor
     // windows for chains that no longer exist. Called after the chain

@@ -137,6 +137,8 @@ function ChainPanel({
   recordOnCapture,
   volume,
   muted,
+  monitorSolo,
+  monitorMuted,
   midiChannels,
   slots,
   pending,
@@ -164,6 +166,8 @@ function ChainPanel({
   // pushes.
   const [volumeDraft, setVolumeDraft] = useState(volume);
   const [mutedDraft, setMutedDraft] = useState(muted);
+  const [soloDraft, setSoloDraft] = useState(monitorSolo);
+  const [monitorMutedDraft, setMonitorMutedDraft] = useState(monitorMuted);
 
   // Keep the drafts in sync when the backend pushes a snapshot, unless
   // the user is actively interacting.
@@ -176,6 +180,12 @@ function ChainPanel({
   useEffect(() => {
     setMutedDraft(muted);
   }, [muted]);
+  useEffect(() => {
+    setSoloDraft(monitorSolo);
+  }, [monitorSolo]);
+  useEffect(() => {
+    setMonitorMutedDraft(monitorMuted);
+  }, [monitorMuted]);
 
   const toggleMidi = (enabled) => emit(FRONTEND_EVENTS.setVst3MidiPass, { chain, enabled });
   const toggleRecord = (enabled) => emit(FRONTEND_EVENTS.setChainRecord, { chain, enabled });
@@ -186,6 +196,14 @@ function ChainPanel({
   const changeVolume = (next) => {
     setVolumeDraft(next);
     emit(FRONTEND_EVENTS.setChainVolume, { chain, volume: next });
+  };
+  const toggleSolo = (nextSolo) => {
+    setSoloDraft(nextSolo);
+    emit(FRONTEND_EVENTS.setChainMonitorSolo, { chain, solo: nextSolo });
+  };
+  const toggleMonitorMute = (nextMuted) => {
+    setMonitorMutedDraft(nextMuted);
+    emit(FRONTEND_EVENTS.setChainMonitorMute, { chain, muted: nextMuted });
   };
 
   const toggleInput = (ch) => {
@@ -347,11 +365,27 @@ function ChainPanel({
         />
         <label
           className={`fx-midi-toggle ${mutedDraft ? "is-on" : ""}`}
-          title="Mute this chain's output"
+          title="Hard mute: the chain is excluded from both the monitor and the capture"
         >
           <input type="checkbox" checked={mutedDraft} onChange={(e) => toggleMute(e.target.checked)} />
           <span className="fx-midi-toggle-box" aria-hidden="true" />
           Mute
+        </label>
+        <label
+          className={`fx-midi-toggle fx-solo-toggle ${soloDraft ? "is-on" : ""}`}
+          title="Solo for monitoring: the monitor mix becomes only the soloed chains and the dry input is muted. The capture is unchanged."
+        >
+          <input type="checkbox" checked={soloDraft} onChange={(e) => toggleSolo(e.target.checked)} />
+          <span className="fx-midi-toggle-box" aria-hidden="true" />
+          Solo
+        </label>
+        <label
+          className={`fx-midi-toggle fx-monmute-toggle ${monitorMutedDraft ? "is-on" : ""}`}
+          title="Monitor mute: this chain is silenced in the monitor only. The capture is unchanged."
+        >
+          <input type="checkbox" checked={monitorMutedDraft} onChange={(e) => toggleMonitorMute(e.target.checked)} />
+          <span className="fx-midi-toggle-box" aria-hidden="true" />
+          Mon
         </label>
         <div className="fx-chain-meter">
           <LevelMeter level={levels?.level ?? 0} peak={levels?.peak ?? 0} />
@@ -359,7 +393,13 @@ function ChainPanel({
       </div>
 
       <p className="fx-chain-subtitle">
-        {inputLabel} · {midiLabel} · {mutedDraft ? "muted" : pluginLabel}
+        {inputLabel} · {midiLabel} ·{" "}
+        {[
+          mutedDraft ? "muted" : null,
+          soloDraft ? "solo" : null,
+          monitorMutedDraft ? "mon-muted" : null,
+          !mutedDraft && !soloDraft && !monitorMutedDraft ? pluginLabel : null,
+        ].filter(Boolean).join(" · ")}
       </p>
 
       {slots.length === 0 ? (
@@ -561,6 +601,8 @@ export function PluginChain({ chainState, inputChannels, chainLevels, availableP
               recordOnCapture={chain.recordOnCapture !== false}
               volume={Number.isFinite(Number(chain.volume)) ? Number(chain.volume) : 0}
               muted={Boolean(chain.muted)}
+              monitorSolo={Boolean(chain.monitorSolo)}
+              monitorMuted={Boolean(chain.monitorMuted)}
               midiChannels={Array.isArray(chain.midiChannels) ? chain.midiChannels : ALL_MIDI_CHANNELS}
               slots={Array.isArray(chain.slots) ? chain.slots : []}
               pending={Number(chain.pending) || 0}

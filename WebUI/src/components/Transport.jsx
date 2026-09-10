@@ -50,6 +50,7 @@ export function Transport({
   bpm,
   countInBeats,
   onCountInBeatsChange,
+  onResetClip,
 }) {
   const isPreRoll = Boolean(transport?.preRollActive);
   const isRecording = Boolean(transport?.recording) || isPreRoll;
@@ -107,7 +108,13 @@ export function Transport({
       </div>
 
       <div className="transport-meter">
-        <LevelMeter level={transport?.inputLevel ?? 0} peak={transport?.inputPeak ?? 0} />
+        <LevelMeter
+          label="Input level"
+          level={transport?.inputLevel ?? 0}
+          peak={transport?.inputPeak ?? 0}
+          clipped={Boolean(transport?.inputClipped)}
+          onResetClip={onResetClip ? () => onResetClip("input") : undefined}
+        />
         {isPlaying ? (
           <button type="button" className="btn btn-ghost btn-sm stop-playback" onClick={stopPlayback}>
             <IconStop size={12} />

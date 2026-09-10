@@ -443,6 +443,35 @@ button {
   flex-wrap: wrap;
 }
 
+/* Knob + meter pairs (Input/IN, Output/OUT) and the standalone REC meter.
+   The meters sit beside their knob so a glance covers both the setting and
+   the resulting level. */
+.monitor-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.monitor-meter {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  width: 116px;
+  padding-top: 8px;
+}
+
+.monitor-meter-label {
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  color: var(--ink-3);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-weight: 700;
+  text-align: center;
+}
+
 /* ============================================================
    Recording approach tabs (Take / Loop) + sync strip
    ============================================================ */
@@ -976,8 +1005,8 @@ button {
 .looper-controls {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 14px;
+  align-items: stretch;
+  gap: 16px;
 }
 
 .looper-header h2 {
@@ -1052,14 +1081,39 @@ button {
   background: var(--panel-2);
 }
 
-.looper-grid-lines {
+/* Beat/bar ruler behind the waveform. The two gradient layers are a 1px
+   line repeated at the beat and bar spacing (percentages of the timeline
+   width, set inline), so long loops cost nothing to draw. */
+.looper-ruler {
   position: absolute;
   inset: 0;
-  display: flex;
-  justify-content: space-around;
+  z-index: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(to right, rgba(16, 16, 16, 0.3) 0 1px, transparent 1px),
+    linear-gradient(to right, var(--line-soft) 0 1px, transparent 1px);
+  background-size: var(--bar-width, 100%) 100%, var(--beat-width, 100%) 100%;
+  background-repeat: repeat-x;
 }
 
-.looper-grid-lines i { width: 1px; background: var(--line-soft); }
+.looper-ruler-labels {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.looper-ruler-label {
+  position: absolute;
+  top: 3px;
+  transform: translateX(-50%);
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-size: 0.54rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+}
 .looper-waveform { position: absolute; inset: 0; padding: 14px 12px 26px; }
 .looper-waveform .waveform { height: 100%; }
 .looper-waveform .waveform-trace { stroke: var(--line); opacity: 1; }
@@ -1074,7 +1128,11 @@ button {
 }
 .looper-crop-left { left: 0; border-right: 2px solid var(--line); }
 .looper-crop-right { right: 0; border-left: 2px solid var(--line); }
-.looper-playhead { position: absolute; top: 0; bottom: 0; width: 3px; background: var(--accent); transition: left 0.08s linear; z-index: 2; }
+/* Positioned by the rAF playhead effect in Looper.jsx (not a CSS
+   transition): it tracks the audio without lag and snaps forward at the
+   seam. The brief is-seam dip marks the wrap. */
+.looper-playhead { position: absolute; top: 0; bottom: 0; width: 3px; background: var(--accent); transition: opacity 0.07s linear; will-change: left; z-index: 2; }
+.looper-playhead.is-seam { opacity: 0.3; }
 .looper-timeline-caption { position: absolute; right: 11px; bottom: 7px; left: 11px; display: flex; justify-content: space-between; color: var(--ink-3); font-family: var(--mono); font-size: 0.6rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; z-index: 3; }
 
 .looper-primary-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
@@ -1116,7 +1174,28 @@ button {
   animation: status-blink 1s steps(2, jump-none) infinite;
 }
 
-.looper-settings { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 16px; }
+.looper-settings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 18px 24px;
+  padding-top: 16px;
+  border-top: 2px solid var(--line-soft);
+}
+
+/* Logical clusters in the settings strip (levels, count-in, mode, crop).
+   A hairline rule trails each cluster; on narrow widths the strip wraps
+   and the new line starts cleanly. */
+.looper-setting { display: flex; align-items: flex-start; gap: 18px; }
+.looper-setting:not(:last-child) {
+  padding-right: 24px;
+  border-right: 2px solid var(--line-soft);
+}
+.looper-setting--toggles { flex-direction: column; gap: 10px; }
+.looper-setting--crop { gap: 10px; }
+
+/* Loop level knob + its playback meter (with clip latch). */
+.looper-level-cell { display: flex; flex-direction: column; align-items: stretch; gap: 6px; width: 110px; }
 
 .looper-loop-switch { display: inline-flex; align-items: center; gap: 8px; color: var(--ink-2); font-family: var(--mono); font-size: 0.64rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer; }
 .looper-loop-switch input { position: absolute; opacity: 0; pointer-events: none; }
@@ -1282,10 +1361,43 @@ button {
   overflow: hidden;
 }
 
+.level-meter-headroom {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(225, 6, 0, 0.14);
+  pointer-events: none;
+}
+
 .level-meter-fill {
   height: 100%;
   background: var(--line);
   transition: width 0.05s linear;
+}
+
+.level-meter-clip {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  bottom: 1px;
+  width: 9px;
+  padding: 0;
+  border: 0;
+  background: var(--line-soft);
+  opacity: 0.3;
+  cursor: default;
+}
+
+.level-meter-clip.is-on {
+  background: var(--rec);
+  opacity: 1;
+  cursor: pointer;
+  box-shadow: 0 0 6px var(--rec);
+}
+
+.level-meter.is-clipped .level-meter-fill {
+  background: var(--rec);
 }
 
 .level-meter-peak {
@@ -1494,6 +1606,27 @@ button {
 .fx-midi-toggle.is-on .fx-midi-toggle-box {
   background: var(--accent);
   border-color: var(--accent);
+}
+
+/* Monitor-only solo/mute read differently from the hard Mute/Record
+   toggles: Solo is cobalt, monitor-mute is amber. */
+.fx-solo-toggle.is-on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-ink);
+}
+.fx-solo-toggle.is-on .fx-midi-toggle-box {
+  background: var(--on-ink);
+  border-color: var(--on-ink);
+}
+.fx-monmute-toggle.is-on {
+  background: var(--warn);
+  border-color: var(--warn);
+  color: var(--on-ink);
+}
+.fx-monmute-toggle.is-on .fx-midi-toggle-box {
+  background: var(--on-ink);
+  border-color: var(--on-ink);
 }
 
 /* Chain identity input in the panel header. */
@@ -2414,6 +2547,18 @@ button {
   border-color: var(--accent);
 }
 
+/* Per-snippet playback trim: a compact knob plus the Normalize action. */
+.snippet-gain-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.snippet-gain-knob .knob-shell {
+  width: 44px;
+  height: 44px;
+}
+
 /* Organisational colour tags. The waveform wash is applied inline from
    `SNIPPET_COLORS` in utils.js (the single source for the tag palette —
    the dot and the swatches read the same values), so the tag colours
@@ -2634,6 +2779,11 @@ button {
 }
 
 .fx-volume-knob .knob-shell {
+  width: 46px;
+  height: 46px;
+}
+
+.looper-level-knob .knob-shell {
   width: 46px;
   height: 46px;
 }
