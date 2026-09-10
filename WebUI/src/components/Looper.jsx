@@ -369,7 +369,7 @@ export function Looper({ transport, onOverdubChange, onLoopLevelChange, onOverdu
           </div>
 
           <div className="looper-setting looper-setting--toggles">
-            <label className={`looper-loop-switch ${!looping ? "is-disabled" : ""}`}>
+            <label className="looper-loop-switch">
               <input type="checkbox" checked={looping} onChange={(e) => emit(FRONTEND_EVENTS.setLooperLooping, { enabled: e.target.checked })} />
               <span className="looper-switch" />
               <span>{looping ? "Loop" : "One shot"}</span>

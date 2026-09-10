@@ -27,10 +27,14 @@ export function LevelMeter({
   const safePeak = Math.min(1, Math.max(0, Number(peak) || 0));
   const levelPct = dbToPct(toDb(safeLevel));
   const peakPct = dbToPct(toDb(safePeak));
+  // The fill reads red only while the live signal is in the headroom zone —
+  // the latched `clipped` flag colours the clip LED, not the bar, so a past
+  // peak doesn't keep a quiet signal looking hot forever.
+  const hot = toDb(safeLevel) >= HEADROOM_DB;
 
   return (
     <div
-      className={`level-meter ${clipped ? "is-clipped" : ""} ${className}`.trim()}
+      className={`level-meter ${clipped ? "is-clipped" : ""} ${hot ? "is-hot" : ""} ${className}`.trim()}
       role="meter"
       aria-label={label}
       aria-valuemin={MIN_DB}
