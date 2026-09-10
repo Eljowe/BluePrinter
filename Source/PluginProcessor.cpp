@@ -845,40 +845,61 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     //    processed loop audio isn't re-processed (it was captured
     //    post-chain). Mixed over the live input rather than replacing
     //    it, so you can play over the loop. Reads the cropped window
-    //    [audioLoopStart, audioLoopStart + audioLoopLength).
+    //    [audioLoopStart, audioLoopStart + audioLoopLength). The whole
+    //    block is filled from the loop — it keeps playing across its
+    //    wrap instead of leaving the block's remainder as silent
+    //    live-through (a "goes silent" hole at every loop cycle).
     if (audioLoopPlaying.load (std::memory_order_acquire))
     {
         const auto start = audioLoopStart.load (std::memory_order_acquire);
         const auto length = audioLoopLength.load (std::memory_order_acquire);
-        auto position = audioLoopPosition.load (std::memory_order_acquire);
         if (length > 0 && recordBuffer != nullptr)
         {
-            const auto toCopy = juce::jmin (numSamples, static_cast<int> (length - position));
-            const auto channels = juce::jmin (numChannels, recordBuffer->getNumChannels());
-            const auto crossfade = juce::jmin (loopCrossfadeSamples, static_cast<int> (length / 2));
-            for (int ch = 0; ch < channels; ++ch)
+            const int channels = juce::jmin (numChannels, recordBuffer->getNumChannels());
+            const int crossfade = juce::jmin (loopCrossfadeSamples, static_cast<int> (length / 2));
+            const bool looping = looperLooping.load (std::memory_order_acquire);
+            auto position = audioLoopPosition.load (std::memory_order_acquire);
+
+            int blockOffset = 0;
+            while (blockOffset < numSamples && position < length)
             {
-                buffer.addFrom (ch, 0, *recordBuffer, ch, static_cast<int> (start + position), toCopy);
-                if (crossfade > 0 && position + toCopy >= length)
+                const int runLen = static_cast<int> (juce::jmin<int64_t> (
+                    numSamples - blockOffset, length - position));
+                for (int ch = 0; ch < channels; ++ch)
+                    buffer.addFrom (ch, blockOffset, *recordBuffer, ch,
+                                    static_cast<int> (start + position), runLen);
+
+                blockOffset += runLen;
+                position    += runLen;
+
+                if (position >= length)
                 {
-                    const auto fadeStart = juce::jmax<int64_t> (0, length - crossfade);
-                    const auto overlapStart = juce::jmax<int64_t> (0, position - fadeStart);
-                    const auto overlapLength = juce::jmin (crossfade - static_cast<int> (overlapStart), toCopy);
-                    for (int i = 0; i < overlapLength; ++i)
-                    {
-                        const auto loopIndex = position + i;
-                        const auto fade = static_cast<float> (loopIndex - fadeStart) / static_cast<float> (crossfade);
-                        const auto endSample = recordBuffer->getSample (ch, static_cast<int> (start + loopIndex));
-                        const auto startSample = recordBuffer->getSample (ch, static_cast<int> (start + i));
-                        buffer.addSample (ch, i, (startSample - endSample) * fade);
-                    }
+                    // Wrap point crossed inside this block. Blend the loop
+                    // tail's last samples into the loop head's first
+                    // samples across the seam (classic looper crossfade)
+                    // and restart the phase at 0, so the cycle continues
+                    // seamlessly into the head without any block-remainder
+                    // silence.
+                    const int fadeLen = juce::jmin (crossfade, runLen);
+                    const int blendStart = blockOffset - fadeLen;
+                    for (int ch = 0; ch < channels; ++ch)
+                        for (int k = 0; k < fadeLen; ++k)
+                        {
+                            const auto tail = buffer.getSample (ch, blendStart + k);
+                            const auto head = recordBuffer->getSample (
+                                ch, static_cast<int> (start) + k);
+                            const float fade = static_cast<float> (k + 1)
+                                             / static_cast<float> (fadeLen + 1);
+                            buffer.addSample (ch, blendStart + k, (head - tail) * fade);
+                        }
+                    position = looping ? 0 : length;
+                    if (! looping)
+                        break;
                 }
             }
-            position += toCopy;
-            if (position >= length)
-                position = looperLooping.load (std::memory_order_acquire) ? 0 : length;
+
             audioLoopPosition.store (position, std::memory_order_release);
-            if (! looperLooping.load (std::memory_order_acquire) && position >= length)
+            if (! looping && position >= length)
                 audioLoopPlaying.store (false, std::memory_order_release);
         }
     }
@@ -1519,6 +1540,7 @@ void BluePrinterAudioProcessor::setLooperRecording (bool enabled)
             overdubWritePos.store (0, std::memory_order_release);
             audioLoopStart.store (0, std::memory_order_release);
             audioLoopLength.store (0, std::memory_order_release);
+            audioLoopFullLength.store (0, std::memory_order_release);
             audioLoopPosition.store (0, std::memory_order_release);
             looperCropStartBeats = 0;
             looperCropEndBeats = 0;
@@ -1583,18 +1605,17 @@ void BluePrinterAudioProcessor::refreshLooperPeaks()
 {
     looperPeaks.clear();
 
-    const auto start = audioLoopStart.load (std::memory_order_acquire);
-    const auto length = audioLoopLength.load (std::memory_order_acquire);
-    if (recordBuffer == nullptr || length <= 0)
+    const auto full = audioLoopFullLength.load (std::memory_order_acquire);
+    if (recordBuffer == nullptr || full <= 0)
         return;
 
-    // Copy the cropped window out under the lock (guards against the take
-    // recorder writing concurrently) and downsample for the UI.
-    juce::AudioBuffer<float> region (recordBuffer->getNumChannels(), static_cast<int> (length));
+    // Peaks cover the FULL loop (crop regions included) so the UI's crop
+    // shading can grey the cropped beat ranges over the actual audio.
+    juce::AudioBuffer<float> region (recordBuffer->getNumChannels(), static_cast<int> (full));
     {
         const juce::ScopedLock sl (recordLock);
         for (int ch = 0; ch < region.getNumChannels(); ++ch)
-            region.copyFrom (ch, 0, *recordBuffer, ch, static_cast<int> (start), static_cast<int> (length));
+            region.copyFrom (ch, 0, *recordBuffer, ch, 0, static_cast<int> (full));
     }
     looperPeaks = SnippetLibrary::computePeaks (region, 256);
 }
@@ -1613,6 +1634,9 @@ void BluePrinterAudioProcessor::trimLooperToMusicalGrid()
     target = juce::jlimit<int64_t> (1, captured, target);
     audioLoopStart.store (0, std::memory_order_release);
     audioLoopLength.store (target, std::memory_order_release);
+    // The grid-trimmed capture is the reference every future crop is
+    // measured against (see setLoopCrop) so crop changes stay reversible.
+    audioLoopFullLength.store (target, std::memory_order_release);
     looperCropStartBeats = 0;
     looperCropEndBeats = 0;
     refreshLooperPeaks();
@@ -1740,12 +1764,17 @@ void BluePrinterAudioProcessor::setLooperCountInBeats (int beats)
 
 void BluePrinterAudioProcessor::setLoopCrop (int startBeats, int endBeats)
 {
-    const auto length = audioLoopLength.load (std::memory_order_acquire);
-    if (length <= 0 || currentSampleRate <= 0.0)
+    const auto full = audioLoopFullLength.load (std::memory_order_acquire);
+    if (full <= 0 || currentSampleRate <= 0.0)
         return;
 
     const auto beat = 60.0 * currentSampleRate / juce::jmax (1.0f, bpm.load());
-    const auto loopBeats = juce::jmax (1, static_cast<int> (std::llround (static_cast<double> (length) / beat)));
+    // Total beats of the FULL loop — crops are measured against this, never
+    // against the already-cropped window, so moving a crop handle back
+    // toward 0 restores the region it cut off (the old code re-derived the
+    // total from the shrunken window and every adjustment deleted more of
+    // the take).
+    const auto loopBeats = juce::jmax (1, static_cast<int> (std::llround (static_cast<double> (full) / beat)));
 
     startBeats = juce::jlimit (0, loopBeats - 1, startBeats);
     endBeats = juce::jlimit (0, loopBeats - 1 - startBeats, endBeats);
@@ -1755,7 +1784,7 @@ void BluePrinterAudioProcessor::setLoopCrop (int startBeats, int endBeats)
     const auto trimStart = static_cast<int64_t> (startBeats * beat);
     const auto trimEnd = static_cast<int64_t> (endBeats * beat);
     audioLoopStart.store (trimStart, std::memory_order_release);
-    audioLoopLength.store (length - trimStart - trimEnd, std::memory_order_release);
+    audioLoopLength.store (full - trimStart - trimEnd, std::memory_order_release);
 
     // Keep the playhead inside the cropped window.
     const auto remaining = audioLoopLength.load (std::memory_order_acquire);
@@ -1765,7 +1794,6 @@ void BluePrinterAudioProcessor::setLoopCrop (int startBeats, int endBeats)
     if (remaining <= 0)
         audioLoopPlaying.store (false, std::memory_order_release);
 
-    refreshLooperPeaks();
     listeners.call ([](Listener& l) { l.transportChanged(); });
 }
 
@@ -1779,6 +1807,7 @@ void BluePrinterAudioProcessor::clearLoop()
     audioLoopPlaying.store (false, std::memory_order_release);
     audioLoopStart.store (0, std::memory_order_release);
     audioLoopLength.store (0, std::memory_order_release);
+    audioLoopFullLength.store (0, std::memory_order_release);
     audioLoopPosition.store (0, std::memory_order_release);
     looperCropStartBeats = 0;
     looperCropEndBeats = 0;
@@ -2971,28 +3000,16 @@ void BluePrinterAudioProcessor::timerCallback()
     // messages to fire safely before the next plugin is created.
     if (pendingPluginLoads.load (std::memory_order_acquire) == 0 && ! restoreActive)
     {
-        // Apply the previous slot's saved state one message-loop turn
-        // after its plugin finished loading — never inside the load
-        // callback (see the addPluginAsync lambda below). The gap lets
-        // the plugin's queued window messages be dispatched by the
-        // normal pump first: dispatching them reentrantly from inside
-        // setStateInformation killed some plugins (Neural DSP "X" amp
-        // sims — heap fault in the first instance's window proc).
-        if (pendingStateApply != nullptr)
-        {
-            auto apply = std::move (pendingStateApply);
-            if (auto* chain = getChainById (apply->chainId))
-            {
-                if (auto* plugin = chain->getPlugin (apply->slotIndex))
-                {
-                    BluePrinterAudioProcessor::setCrashOp ("restoring plugin state (setStateInformation)",
-                                                           plugin->getName().toRawUTF8());
-                    plugin->setStateInformation (apply->state.getData(),
-                                                 static_cast<int> (apply->state.getSize()));
-                }
-            }
-        }
-
+        // Kick the NEXT pending slot's load off first. addPluginAsync
+        // posts the createInstance to the plugin UI apartment and
+        // returns immediately, so its heavy instantiation overlaps with
+        // the previous slot's setStateInformation below on this (main)
+        // thread — two distinct plugin instances on two distinct
+        // threads — instead of running strictly back-to-back. This hides
+        // every saved-state apply behind the next plugin's load, leaving
+        // only the LAST slot's state poke exposed as the restore tail.
+        // The state poke itself is applied one message-loop turn after
+        // its plugin finished loading (see below).
         PluginChain* target = nullptr;
         for (auto& chain : chains)
         {
@@ -3105,6 +3122,34 @@ void BluePrinterAudioProcessor::timerCallback()
                     });
             }
         }
+
+        // Apply the previous slot's saved state now — one message-loop
+        // turn after its plugin finished loading (the load callback
+        // queued it into pendingStateApply), never inside the load
+        // callback. The gap lets the plugin's queued window messages be
+        // dispatched by the normal pump first: dispatching them
+        // reentrantly from inside setStateInformation killed some
+        // plugins (Neural DSP "X" amp sims — heap fault in the first
+        // instance's window proc). It runs on the main thread, NOT the
+        // plugin's apartment, so the apartment keeps pumping the
+        // plugin's windows during the poke while this thread blocks.
+        // With the next slot's load already started above, the poke
+        // overlaps that load on the apartment thread instead of
+        // stalling the whole restore.
+        if (pendingStateApply != nullptr)
+        {
+            auto apply = std::move (pendingStateApply);
+            if (auto* chain = getChainById (apply->chainId))
+            {
+                if (auto* plugin = chain->getPlugin (apply->slotIndex))
+                {
+                    BluePrinterAudioProcessor::setCrashOp ("restoring plugin state (setStateInformation)",
+                                                           plugin->getName().toRawUTF8());
+                    plugin->setStateInformation (apply->state.getData(),
+                                                 static_cast<int> (apply->state.getSize()));
+                }
+            }
+        }
     }
 
     // Crash-marker lifecycle (see applyChainState): the marker stays
@@ -3124,6 +3169,15 @@ void BluePrinterAudioProcessor::timerCallback()
             props->setValue ("chainRestoreCrashed", false);
             props->saveIfNeeded();
         }
+
+        // The deferred restore has fully drained: push a fresh chain
+        // snapshot so the frontend learns restoring == false and the
+        // splash can leave the "Applying saved state" tail. Nothing else
+        // fires pluginChainChanged after the last slot's state is
+        // applied, so without this the UI is left holding a stale
+        // restoring == true snapshot and the splash lingers even though
+        // the restore is actually done.
+        listeners.call ([](Listener& l) { l.pluginChainChanged(); });
     }
 
     if (recordingFinalizePending.exchange (false, std::memory_order_acq_rel))
