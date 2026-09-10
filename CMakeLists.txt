@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(BluePrinter VERSION 1.0.0)
+project(BluePrinter VERSION 1.1.0)
 
 # CMake 4.x normalizes install() DESTINATION paths; with this policy set,
 # backslashes in -DBLUEPRINTER_VST3_DIR="C:\Users\...\VST3" are treated as

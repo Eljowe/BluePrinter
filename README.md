@@ -13,7 +13,7 @@ Windows 10/11 only. Grab the latest installer from the
 [Releases page](../../releases):
 
 ```
-BluePrinterSetup-1.0.0.exe
+BluePrinterSetup-1.1.0.exe
 SHA256SUMS.txt
 ```
 
@@ -37,7 +37,7 @@ program files and shortcuts but **keeps your settings and snippet library**.
 Verify the download before running (optional):
 
 ```powershell
-Get-FileHash .\BluePrinterSetup-1.0.0.exe -Algorithm SHA256
+Get-FileHash .\BluePrinterSetup-1.1.0.exe -Algorithm SHA256
 # compare against SHA256SUMS.txt
 ```
 

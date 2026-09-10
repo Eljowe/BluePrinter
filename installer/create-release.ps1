@@ -3,7 +3,9 @@
 # an asset. Draft by default; pass -Published to publish immediately.
 #
 # Needs a GitHub token with "Contents: read and write" (fine-grained PAT)
-# or the classic "repo" scope:
+# or the classic "repo" scope. Provide it either via $env:GH_TOKEN, the
+# -Token parameter, or a file at "$HOME\.blueprinter-gh-token" (readable
+# from both Windows and WSL as /mnt/c/Users/<you>/.blueprinter-gh-token):
 #   $env:GH_TOKEN = "ghp_..."
 # No gh CLI or local git credentials are required - everything goes
 # through the REST API (including tag creation).
@@ -17,8 +19,13 @@ $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
 
+$tokenFile = Join-Path $HOME ".blueprinter-gh-token"
+if ([string]::IsNullOrWhiteSpace($Token) -and (Test-Path -LiteralPath $tokenFile)) {
+    $Token = (Get-Content -LiteralPath $tokenFile -Raw).Trim()
+}
+
 if ([string]::IsNullOrWhiteSpace($Token)) {
-    throw "No GitHub token. Set env var GH_TOKEN (classic 'repo' or fine-grained 'Contents: read and write' scope)."
+    throw "No GitHub token. Set env var GH_TOKEN, pass -Token, or put it in $tokenFile (classic 'repo' or fine-grained 'Contents: read and write' scope)."
 }
 
 $cmakeLists = Get-Content (Join-Path $root "CMakeLists.txt") -Raw
@@ -54,12 +61,22 @@ try {
 }
 catch {
     if ($_.Exception.Response.StatusCode.value__ -eq 422) {
-        Write-Host "Tag $tag already exists"
+        $existingRef = Invoke-RestMethod -Method Get -Headers $headers -Uri "$api/repos/$repo/git/ref/tags/$tag"
+        if ($existingRef.object.sha -ne $branchInfo.commit.sha) {
+            throw "Tag $tag already exists but points at $($existingRef.object.sha), not the $defaultBranch head ($($branchInfo.commit.sha)). Delete the tag or bump the version in CMakeLists.txt."
+        }
+        Write-Host "Tag $tag already exists at the $defaultBranch head"
     }
     else { throw }
 }
 
-# 2. Create the release
+# 2. Refuse to create a duplicate release for this tag
+$allReleases = Invoke-RestMethod -Method Get -Headers $headers -Uri "$api/repos/$repo/releases?per_page=100"
+if ($allReleases | Where-Object { $_.tag_name -eq $tag }) {
+    throw "A release for $tag already exists. Publish or delete it (or bump the version in CMakeLists.txt) before creating another."
+}
+
+# 3. Create the release
 $releaseBody = @{
     tag_name         = $tag
     target_commitish = $defaultBranch
@@ -71,7 +88,7 @@ $release = Invoke-RestMethod -Method Post -Headers $headers -Uri "$api/repos/$re
     -ContentType "application/json" -Body $releaseBody
 Write-Host ("Created release: " + $release.html_url + " (draft: " + $draft + ")")
 
-# 3. Upload every file in the bundle as an asset
+# 4. Upload every file in the bundle as an asset
 $uploadBase = $release.upload_url -replace "\{\?name,label\}", ""
 foreach ($file in Get-ChildItem $releaseDir -File) {
     Invoke-RestMethod -Method Post -Headers $headers `
