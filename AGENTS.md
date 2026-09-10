@@ -17,7 +17,7 @@ See `.vscode/tasks.json` for 11 pre-configured tasks:
 - Run BluePrinter (Debug/Release)
 - Build + Install + Run (Release, per-user)
 - Install VST3 to Program Files (elevated — UAC copy of the built bundle; script: `cmake/install-vst3.ps1`)
-- Build Installer (Inno Setup — compiles `installer/BluePrinter.iss` into `build/installer/BluePrinterSetup-1.0.0.exe`; requires Inno Setup 6.3+, installed via `winget install JRSoftware.InnoSetup`)
+- Build Installer (Inno Setup — compiles `installer/BluePrinter.iss` into `build/installer/BluePrinterSetup-1.1.0.exe`; requires Inno Setup 6.3+, installed via `winget install JRSoftware.InnoSetup`)
 - Build Release Bundle (script: `installer/build-release.ps1` — builds WebUI + Release targets, compiles the installer with the version parsed from CMakeLists.txt passed as `/DMyAppVersion`, then assembles `build/release/BluePrinter-<version>/` containing the installer, LICENSE, README.md and SHA256SUMS.txt)
 - Create GitHub Release (script: `installer/create-release.ps1` — creates the `v<version>` tag at the default-branch head and a **draft** release with every bundle file as an asset, all via the REST API; needs `$env:GH_TOKEN` with classic `repo` or fine-grained `Contents: read and write` scope; pass `-Published` to skip the draft)
 

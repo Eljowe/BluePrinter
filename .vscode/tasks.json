@@ -94,8 +94,10 @@
       "command": "powershell",
       "args": [
         "-NoProfile",
-        "-Command",
-        "cmake --build build --config Release --target BluePrinter_VST3; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; Start-Process powershell -Verb RunAs -Wait -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','${workspaceFolder}\\cmake\\install-vst3.ps1'"
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}\\cmake\\build-install-vst3.ps1"
       ],
       "isBackground": false,
       "problemMatcher": [],
