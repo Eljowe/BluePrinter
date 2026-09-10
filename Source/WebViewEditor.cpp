@@ -141,6 +141,7 @@ juce::var snippetToVar (const Snippet& s)
     obj->setProperty ("key", s.key);
     obj->setProperty ("keyConfidence", s.keyConfidence);
     obj->setProperty ("color", s.color);
+    obj->setProperty ("gainDb", s.gainDb);
 
     juce::Array<juce::var> notesVar;
     notesVar.ensureStorageAllocated (s.detectedNotes.size());
@@ -281,6 +282,17 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
                 }
             }
         })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetSnippetGainEvent, [&processor](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+                processor.setSnippetGain (static_cast<int> (obj->getProperty ("id")),
+                                          static_cast<float> (obj->getProperty ("gainDb")));
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendNormalizeSnippetEvent, [&processor](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+                processor.normalizeSnippet (static_cast<int> (obj->getProperty ("id")));
+        })
         .withEventListener(BluePrinterWebViewEditor::frontendDeleteSnippetEvent, [&processor, owner](juce::var data)
         {
             if (auto* obj = data.getDynamicObject())
@@ -366,10 +378,25 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
             if (auto* obj = data.getDynamicObject())
                 processor.setCountInBeats (static_cast<int> (obj->getProperty ("beats")));
         })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetLoopLevelEvent, [&processor](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+                processor.setLoopLevel (static_cast<float> (obj->getProperty ("level")));
+        })
         .withEventListener(BluePrinterWebViewEditor::frontendSetDryLevelEvent, [&processor](juce::var data)
         {
             if (auto* obj = data.getDynamicObject())
                 processor.setDryLevel (static_cast<float> (obj->getProperty ("level")));
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendResetClipEvent, [&processor](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+                processor.resetClip (obj->getProperty ("target").toString());
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetOverdubLevelEvent, [&processor](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+                processor.setOverdubLevel (static_cast<float> (obj->getProperty ("level")));
         })
         .withEventListener(BluePrinterWebViewEditor::frontendSetClickParamsEvent, [&processor](juce::var data)
         {
@@ -547,6 +574,16 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
             if (owner != nullptr)
                 owner->handleSetChainMute (data);
         })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetChainMonitorSoloEvent, [owner](juce::var data)
+        {
+            if (owner != nullptr)
+                owner->handleSetChainMonitorSolo (data);
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetChainMonitorMuteEvent, [owner](juce::var data)
+        {
+            if (owner != nullptr)
+                owner->handleSetChainMonitorMute (data);
+        })
         .withEventListener(BluePrinterWebViewEditor::frontendSetChainMidiChannelsEvent, [owner](juce::var data)
         {
             if (owner != nullptr)
@@ -652,7 +689,7 @@ BluePrinterWebViewEditor::BluePrinterWebViewEditor(BluePrinterAudioProcessor& p)
     }
 
     audioProcessor.apvts.addParameterListener(paramGain, this);
-    audioProcessor.apvts.addParameterListener(paramPlaybackVolume, this);
+    audioProcessor.apvts.addParameterListener(paramOutput, this);
     audioProcessor.addListener (this);
 
     startTimerHz (audioProcessor.transportTimerHz);
@@ -676,7 +713,7 @@ BluePrinterWebViewEditor::~BluePrinterWebViewEditor()
     stopTimer();
     activeScan.reset();
     audioProcessor.apvts.removeParameterListener(paramGain, this);
-    audioProcessor.apvts.removeParameterListener(paramPlaybackVolume, this);
+    audioProcessor.apvts.removeParameterListener(paramOutput, this);
     audioProcessor.removeListener (this);
     closeAllVst3Editors();
 }
@@ -718,7 +755,7 @@ void BluePrinterWebViewEditor::parameterChanged(const juce::String& parameterID,
 {
     juce::ignoreUnused(newValue);
 
-    if (parameterID != paramGain && parameterID != paramPlaybackVolume)
+    if (parameterID != paramGain && parameterID != paramOutput)
         return;
 
     parameterUpdatePending.store(true, std::memory_order_release);
@@ -800,8 +837,8 @@ void BluePrinterWebViewEditor::emitLibraryToFrontend()
 juce::var BluePrinterWebViewEditor::makeParameterSnapshot() const
 {
     auto* obj = new juce::DynamicObject();
-    obj->setProperty("gain", audioProcessor.apvts.getRawParameterValue(paramGain)->load());
-    obj->setProperty("playbackVolume", audioProcessor.apvts.getRawParameterValue(paramPlaybackVolume)->load());
+    obj->setProperty("input",  audioProcessor.apvts.getRawParameterValue(paramGain)->load());
+    obj->setProperty("output", audioProcessor.apvts.getRawParameterValue(paramOutput)->load());
     return juce::var(obj);
 }
 
@@ -833,12 +870,24 @@ juce::var BluePrinterWebViewEditor::makeTransportSnapshot() const
     obj->setProperty ("playingPosition", audioProcessor.getPlaybackPositionSamples());
     obj->setProperty ("inputLevel", juce::jlimit (0.0f, 1.0f, audioProcessor.getCurrentInputLevel()));
     obj->setProperty ("inputPeak",  juce::jlimit (0.0f, 1.0f, audioProcessor.getCurrentInputPeak()));
+    obj->setProperty ("recordLevel", juce::jlimit (0.0f, 1.0f, audioProcessor.getCurrentRecordLevel()));
+    obj->setProperty ("recordPeak",  juce::jlimit (0.0f, 1.0f, audioProcessor.getCurrentRecordPeak()));
+    obj->setProperty ("outputLevel", juce::jlimit (0.0f, 1.0f, audioProcessor.getCurrentOutputLevel()));
+    obj->setProperty ("outputPeak",  juce::jlimit (0.0f, 1.0f, audioProcessor.getCurrentOutputPeak()));
+    obj->setProperty ("loopPlayLevel", juce::jlimit (0.0f, 1.0f, audioProcessor.getCurrentLoopPlayLevel()));
+    obj->setProperty ("loopPlayPeak",  juce::jlimit (0.0f, 1.0f, audioProcessor.getCurrentLoopPlayPeak()));
+    obj->setProperty ("inputClipped",  audioProcessor.isInputClipped());
+    obj->setProperty ("recordClipped", audioProcessor.isRecordClipped());
+    obj->setProperty ("outputClipped", audioProcessor.isOutputClipped());
+    obj->setProperty ("loopClipped",   audioProcessor.isLoopPlayClipped());
     obj->setProperty ("libraryFolder", audioProcessor.getLibraryFolder());
     obj->setProperty ("lastSaveError", audioProcessor.getLastSaveError());
     obj->setProperty ("metronomeEnabled", audioProcessor.getMetronomeEnabled());
     obj->setProperty ("bpm",              audioProcessor.getBpm());
     obj->setProperty ("countInBeats",     audioProcessor.getCountInBeats());
+    obj->setProperty ("loopLevel",        audioProcessor.getLoopLevel());
     obj->setProperty ("dryLevel",         audioProcessor.getDryLevel());
+    obj->setProperty ("overdubLevel",     audioProcessor.getOverdubLevel());
     obj->setProperty ("clickPitch",        audioProcessor.getClickPitch());
     obj->setProperty ("clickAccentPitch",  audioProcessor.getClickAccentPitch());
     obj->setProperty ("clickDecay",        audioProcessor.getClickDecay());
@@ -1405,6 +1454,22 @@ void BluePrinterWebViewEditor::handleSetChainMute (const juce::var& data)
     const bool muted = static_cast<bool> (data["muted"]);
     if (chainId.isNotEmpty())
         audioProcessor.setChainMute (chainId, muted);
+}
+
+void BluePrinterWebViewEditor::handleSetChainMonitorSolo (const juce::var& data)
+{
+    const auto chainId = getStringProp (data, "chain", {});
+    const bool solo = static_cast<bool> (data["solo"]);
+    if (chainId.isNotEmpty())
+        audioProcessor.setChainMonitorSolo (chainId, solo);
+}
+
+void BluePrinterWebViewEditor::handleSetChainMonitorMute (const juce::var& data)
+{
+    const auto chainId = getStringProp (data, "chain", {});
+    const bool muted = static_cast<bool> (data["muted"]);
+    if (chainId.isNotEmpty())
+        audioProcessor.setChainMonitorMute (chainId, muted);
 }
 
 void BluePrinterWebViewEditor::handleSetChainMidiChannels (const juce::var& data)

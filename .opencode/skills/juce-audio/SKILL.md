@@ -18,7 +18,8 @@ BluePrinter uses JUCE for audio processing, VST3 hosting, and WebView2 UI integr
 ## Audio Path (`processBlock`)
 
 ```
-1. Apply gain parameter (apvts.getRawParameterValue("Gain")->load())
+1. Apply the Input trim — the "Gain" param is stored in dB, converted with
+   Decibels::decibelsToGain; this is the record level for everything below
 2. Chains: copy the post-gain buffer into chainInputBuffer (pristine dry
    snapshot), then run every chain in parallel on the shared
    chainScratchBuffer — each copies its selected channels from
@@ -26,7 +27,10 @@ BluePrinter uses JUCE for audio processing, VST3 hosting, and WebView2 UI integr
    each other. Each chain's output is summed into the main mix × its
    volume gain (unless muted). Chains with no active (non-bypassed)
    plugins are skipped entirely (hasActivePlugins) so a transparent chain
-   doesn't double the dry signal. Each MIDI-listening chain gets its own
+   doesn't double the dry signal. The direct dry pass-through is scaled by
+   the Dry level (`dryLevel`, dB, 0 = unity) in both the main mix and
+   `recordingMixBuffer`, so at −60 dB only the chains are heard and captured.
+   Each MIDI-listening chain gets its own
    copy of the input MIDI, filtered by its channel mask; the host's
    output MIDI stays raw input (+ clock events)
 3. Looper capture tap: if the looper is armed, copy the POST-CHAIN buffer into
@@ -38,15 +42,25 @@ BluePrinter uses JUCE for audio processing, VST3 hosting, and WebView2 UI integr
    boundary never moves mid-capture); on stop, `mixOverdubLayer` wrap-mixes the
    layer into the loop on the message thread under `recordLock` (playback is
    stopped first so the mix can't race the audio thread's unlocked loop reads).
+   On capture stop `trimLooperToMusicalGrid` snaps the loop to the nearest
+   whole number of bars: the loop length is set to that snapped target (never
+   clamped back to the raw capture), audio past it is truncated and a short
+   capture is zero-padded so the wrap boundary stays on the click grid — a
+   non-grid length made every cycle's downbeat drift, heard as the second loop
+   starting late.
 4. Record the take-recorder tap (post-gain, pre-click) under recordLock
 5. Compute input levels (RMS + peak) from the clean signal
-6. Audio loop playback: addFrom the cropped window
+6. Audio loop playback: per-sample add of the cropped window
    [audioLoopStart, audioLoopStart + audioLoopLength) of recordBuffer, with a
-   precomputed crossfade at the wrap point — post-chain, mixed over the live
-   input, so the already-processed loop audio isn't double-processed
+   short seam declick (symmetrical fade in/out) and the phase wrapping to 0 so
+   every cycle starts exactly at audioLoopStart (an earlier tail-into-head
+   crossfade pre-played the loop head and made cropped loops seem to restart
+   late). Added on top of the live input, so the already-processed loop audio
+   isn't double-processed and the live monitor isn't ducked at the seam. Scaled
+   by the looper's monitor-only Loop level (loopGain) — never by the capture.
 7. Snippet playback: substitute the recorded buffer in place of live input
    (does NOT re-run the chains); pending-take review playback renders
-   similarly (renderTakePlayback, one-shot, playback-volume-scaled)
+   similarly (renderTakePlayback, one-shot, scaled by the master Output)
 8. Looper count-in pre-roll: render the click, advance the beat clock, flip
    into capture when the configured beats elapse
 9. Take-recorder pre-roll: same flow, flips into actual recording
@@ -71,6 +85,9 @@ BluePrinter uses JUCE for audio processing, VST3 hosting, and WebView2 UI integr
     silent. The click is gated header-level too: `metronomeEnabled`
     (master) AND `clickDuringCapture` (off = count-in only) for both take
     recording and looper capture.
+13. Master monitor Output: apply the "PlaybackVolume" param (display Output,
+    dB) to the whole block last — scales everything heard (live mix, loop,
+    take/snippet playback, click) but never the capture or the loop tap.
 ```
 
 The take recorder and the audio looper share `recordBuffer`; `startRecording`
@@ -147,7 +164,7 @@ The full story (why one slot per loop turn, the persist guards, the crash marker
 
 ## Parameters (APVTS)
 
-Currently the APVTS exposes **`Gain`** (`AudioParameterFloat`, range 0.0–1.0, step 0.01, default 0.7) and **`PlaybackVolume`**, defined in `createParameterLayout()` in `PluginProcessor.cpp`. The metronome, BPM, count-in, MIDI-clock, and MIDI-device settings are **not** APVTS parameters — they live in standalone user state (`juce::PropertiesFile`) and `std::atomic` audio-thread flags. Add them there, not to the APVTS.
+Currently the APVTS exposes **`Gain`** (display "Input", `AudioParameterFloat`, range −12..+24 dB, step 0.5, default 0 — the record trim, converted with `Decibels::decibelsToGain` at the top of `processBlock`) and **`PlaybackVolume`** (display "Output", range −60..+12 dB, step 0.5, default 0 — the master monitor gain applied last in `processBlock`; the ID is kept for saved-state compatibility), defined in `createParameterLayout()` in `PluginProcessor.cpp`. The monitor deck's **Dry** level (`dryLevel`, dB −60..0, default 0 = unity) and the looper's monitor-only **Loop** level (`loopLevel`, dB) are standalone atomics, not APVTS parameters; Dry scales the direct dry pass-through in both the monitor and `recordingMixBuffer`, Loop scales only loop playback. The metronome, BPM, count-in, MIDI-clock, and MIDI-device settings are **not** APVTS parameters — they live in standalone user state (`juce::PropertiesFile`) and `std::atomic` audio-thread flags. Add them there, not to the APVTS.
 
 ## Adding a New Parameter
 

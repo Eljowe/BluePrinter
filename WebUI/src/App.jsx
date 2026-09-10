@@ -14,8 +14,16 @@ import { BACKEND_EVENTS, FRONTEND_EVENTS, emit, getInitialData, subscribe } from
 import iconUrl from "./icon.svg";
 
 const PARAM_IDS = {
-  gain: "Gain",
-  playbackVolume: "PlaybackVolume",
+  input: "Gain",
+  output: "PlaybackVolume",
+};
+
+// Clip-reset target -> transport state key.
+const CLIP_KEYS = {
+  input: "inputClipped",
+  record: "recordClipped",
+  output: "outputClipped",
+  loop: "loopClipped",
 };
 
 // Splash timings: hold the branded splash for at least this long so a fast
@@ -32,11 +40,12 @@ function readInitialRecordingMode() {
 }
 
 function readInitialParameters() {
-  const first = getInitialData().parameters?.[0];
-  if (!first) return { gain: 0.7, playbackVolume: 0.8 };
+  const raw = getInitialData().parameters;
+  const first = Array.isArray(raw) ? raw[0] : raw;
+  if (!first) return { input: 0, output: 0 };
   return {
-    gain: Number(first.gain ?? 0.7),
-    playbackVolume: Number(first.playbackVolume ?? 0.8),
+    input: Number(first.input ?? 0),
+    output: Number(first.output ?? 0),
   };
 }
 
@@ -59,8 +68,12 @@ function readInitialTransport() {
     recording: false, recordingLength: 0, recordingSampleRate: 0,
     playingSnippetId: -1, playingPosition: 0,
     inputLevel: 0, inputPeak: 0,
+    recordLevel: 0, recordPeak: 0,
+    outputLevel: 0, outputPeak: 0,
+    loopPlayLevel: 0, loopPlayPeak: 0,
+    inputClipped: false, recordClipped: false, outputClipped: false, loopClipped: false,
     libraryFolder: "", lastSaveError: "",
-    metronomeEnabled: true, bpm: 120, countInBeats: 4, dryLevel: 1, clickDuringCapture: true,
+    metronomeEnabled: true, bpm: 120, countInBeats: 4, loopLevel: 0, overdubLevel: 0, dryLevel: 0, clickDuringCapture: true,
     clickPitch: 1000, clickAccentPitch: 1500, clickDecay: 90, clickVolume: 0.35, clickAccentVolume: 0.5, clickNoise: 0.1,
     midiClockEnabled: false, midiClockOnRecord: false, midiOutputDevice: "", midiOutputDeviceList: [],
      preRollActive: false, transportPosition: 0,
@@ -71,6 +84,16 @@ function readInitialTransport() {
     ...raw,
     inputLevel: Number(raw.inputLevel ?? 0),
     inputPeak: Number(raw.inputPeak ?? 0),
+    recordLevel: Number(raw.recordLevel ?? 0),
+    recordPeak: Number(raw.recordPeak ?? 0),
+    outputLevel: Number(raw.outputLevel ?? 0),
+    outputPeak: Number(raw.outputPeak ?? 0),
+    loopPlayLevel: Number(raw.loopPlayLevel ?? 0),
+    loopPlayPeak: Number(raw.loopPlayPeak ?? 0),
+    inputClipped: Boolean(raw.inputClipped),
+    recordClipped: Boolean(raw.recordClipped),
+    outputClipped: Boolean(raw.outputClipped),
+    loopClipped: Boolean(raw.loopClipped),
     recording: Boolean(raw.recording),
     recordingLength: Number(raw.recordingLength ?? 0),
     recordingSampleRate: Number(raw.recordingSampleRate ?? 0),
@@ -79,7 +102,9 @@ function readInitialTransport() {
     metronomeEnabled: raw.metronomeEnabled !== false,
     bpm: Number(raw.bpm ?? 120),
     countInBeats: Number(raw.countInBeats ?? 4),
-    dryLevel: Number(raw.dryLevel ?? 1),
+    loopLevel: Number(raw.loopLevel ?? 0),
+    overdubLevel: Number(raw.overdubLevel ?? 0),
+    dryLevel: Number(raw.dryLevel ?? 0),
     clickDuringCapture: raw.clickDuringCapture !== false,
     clickPitch: Number(raw.clickPitch ?? 1000),
     clickAccentPitch: Number(raw.clickAccentPitch ?? 1500),
@@ -104,8 +129,8 @@ function readInitialTransport() {
 
 export default function App() {
   const initial = useMemo(readInitialParameters, []);
-  const [gain, setGain] = useState(initial.gain);
-  const [playbackVolume, setPlaybackVolume] = useState(initial.playbackVolume);
+  const [input, setInput] = useState(initial.input);
+  const [output, setOutput] = useState(initial.output);
   const [snippets, setSnippets] = useState(readInitialSnippets);
   const [tagNames, setTagNames] = useState(readInitialTagNames);
   const [transport, setTransport] = useState(readInitialTransport);
@@ -165,8 +190,8 @@ export default function App() {
   useEffect(() => {
     const unsubParam = subscribe(BACKEND_EVENTS.parameters, (payload) => {
       if (typeof payload !== "object" || payload == null) return;
-      if (payload.gain !== undefined) setGain(Number(payload.gain));
-      if (payload.playbackVolume !== undefined) setPlaybackVolume(Number(payload.playbackVolume));
+      if (payload.input !== undefined) setInput(Number(payload.input));
+      if (payload.output !== undefined) setOutput(Number(payload.output));
     });
     return unsubParam;
   }, []);
@@ -220,12 +245,24 @@ export default function App() {
         playingPosition: Number(payload.playingPosition ?? 0),
         inputLevel: Number(payload.inputLevel ?? 0),
         inputPeak: Number(payload.inputPeak ?? 0),
+        recordLevel: Number(payload.recordLevel ?? prev.recordLevel ?? 0),
+        recordPeak: Number(payload.recordPeak ?? prev.recordPeak ?? 0),
+        outputLevel: Number(payload.outputLevel ?? prev.outputLevel ?? 0),
+        outputPeak: Number(payload.outputPeak ?? prev.outputPeak ?? 0),
+        loopPlayLevel: Number(payload.loopPlayLevel ?? prev.loopPlayLevel ?? 0),
+        loopPlayPeak: Number(payload.loopPlayPeak ?? prev.loopPlayPeak ?? 0),
+        inputClipped: payload.inputClipped !== undefined ? Boolean(payload.inputClipped) : prev.inputClipped,
+        recordClipped: payload.recordClipped !== undefined ? Boolean(payload.recordClipped) : prev.recordClipped,
+        outputClipped: payload.outputClipped !== undefined ? Boolean(payload.outputClipped) : prev.outputClipped,
+        loopClipped: payload.loopClipped !== undefined ? Boolean(payload.loopClipped) : prev.loopClipped,
         libraryFolder: payload.libraryFolder ?? prev.libraryFolder,
         lastSaveError: payload.lastSaveError ?? prev.lastSaveError,
         metronomeEnabled: payload.metronomeEnabled !== undefined ? Boolean(payload.metronomeEnabled) : prev.metronomeEnabled,
         bpm:              payload.bpm !== undefined              ? Number(payload.bpm)              : prev.bpm,
         countInBeats:     payload.countInBeats !== undefined     ? Number(payload.countInBeats)     : prev.countInBeats,
+        loopLevel:        payload.loopLevel !== undefined        ? Number(payload.loopLevel)        : prev.loopLevel,
         dryLevel:         payload.dryLevel !== undefined         ? Number(payload.dryLevel)         : prev.dryLevel,
+        overdubLevel:     payload.overdubLevel !== undefined     ? Number(payload.overdubLevel)     : prev.overdubLevel,
         clickDuringCapture: payload.clickDuringCapture !== undefined ? Boolean(payload.clickDuringCapture) : prev.clickDuringCapture,
         clickPitch:        payload.clickPitch        !== undefined ? Number(payload.clickPitch)        : prev.clickPitch,
         clickAccentPitch:  payload.clickAccentPitch  !== undefined ? Number(payload.clickAccentPitch)  : prev.clickAccentPitch,
@@ -289,6 +326,8 @@ export default function App() {
           recordOnCapture: base.recordOnCapture !== undefined ? Boolean(base.recordOnCapture) : true,
           volume: Number(base.volume ?? 0),
           muted: Boolean(base.muted),
+          monitorSolo: Boolean(base.monitorSolo),
+          monitorMuted: Boolean(base.monitorMuted),
           midiChannels,
           pending: Number(base.pending ?? 0),
           slots: Array.isArray(base.slots) ? base.slots : [],
@@ -344,14 +383,27 @@ export default function App() {
     return unsubScan;
   }, []);
 
-  const handleGainChange = (next) => {
-    setGain(next);
-    emit(FRONTEND_EVENTS.setParameter, { id: PARAM_IDS.gain, value: next });
+  const handleInputChange = (next) => {
+    setInput(next);
+    emit(FRONTEND_EVENTS.setParameter, { id: PARAM_IDS.input, value: next });
   };
 
-  const handlePlaybackVolumeChange = (next) => {
-    setPlaybackVolume(next);
-    emit(FRONTEND_EVENTS.setParameter, { id: PARAM_IDS.playbackVolume, value: next });
+  const handleOutputChange = (next) => {
+    setOutput(next);
+    emit(FRONTEND_EVENTS.setParameter, { id: PARAM_IDS.output, value: next });
+  };
+
+  const handleResetClip = (target) => {
+    emit(FRONTEND_EVENTS.resetClip, { target });
+    setTransport((prev) => {
+      const next = { ...prev };
+      if (target === "all") {
+        for (const key of Object.values(CLIP_KEYS)) next[key] = false;
+      } else if (CLIP_KEYS[target]) {
+        next[CLIP_KEYS[target]] = false;
+      }
+      return next;
+    });
   };
 
   const handleMetronomeChange = (enabled) => {
@@ -369,9 +421,19 @@ export default function App() {
     emit(FRONTEND_EVENTS.setCountInBeats, { beats: next });
   };
 
+  const handleLoopLevelChange = (next) => {
+    setTransport((prev) => ({ ...prev, loopLevel: next }));
+    emit(FRONTEND_EVENTS.setLoopLevel, { level: next });
+  };
+
   const handleDryLevelChange = (next) => {
     setTransport((prev) => ({ ...prev, dryLevel: next }));
     emit(FRONTEND_EVENTS.setDryLevel, { level: next });
+  };
+
+  const handleOverdubLevelChange = (next) => {
+    setTransport((prev) => ({ ...prev, overdubLevel: next }));
+    emit(FRONTEND_EVENTS.setOverdubLevel, { level: next });
   };
 
   const handleMidiClockChange = (enabled) => {
@@ -474,14 +536,16 @@ export default function App() {
         </div>
         <div className="bp-section-body">
           <HeaderControls
-            gain={gain}
-            onGainChange={handleGainChange}
-            playbackVolume={playbackVolume}
-            onPlaybackVolumeChange={handlePlaybackVolumeChange}
-            dryLevel={transport.dryLevel}
-            onDryLevelChange={handleDryLevelChange}
+            input={input}
+            onInputChange={handleInputChange}
+            output={output}
+            onOutputChange={handleOutputChange}
             bpm={transport.bpm}
             onBpmChange={handleBpmChange}
+            dryLevel={transport.dryLevel}
+            onDryLevelChange={handleDryLevelChange}
+            transport={transport}
+            onResetClip={handleResetClip}
           />
         </div>
       </section>
@@ -551,6 +615,7 @@ export default function App() {
                 bpm={transport.bpm}
                 countInBeats={transport.countInBeats}
                 onCountInBeatsChange={handleCountInBeatsChange}
+                onResetClip={handleResetClip}
               />
 
               <TakeReview transport={transport} />
@@ -560,6 +625,9 @@ export default function App() {
               <Looper
                 transport={transport}
                 onOverdubChange={handleLooperOverdubChange}
+                onLoopLevelChange={handleLoopLevelChange}
+                onOverdubLevelChange={handleOverdubLevelChange}
+                onResetClip={handleResetClip}
               />
             </div>
           )}

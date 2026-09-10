@@ -138,6 +138,13 @@ public:
     // and notifies the UI.
     bool setSnippetColor (int id, const juce::String& color);
 
+    // Non-destructive playback trim (dB, -24..+24) for one snippet.
+    // Persists to the sidecar JSON and notifies the UI.
+    bool setSnippetGain (int id, float gainDb);
+    // Set the trim so the snippet's peak lands at -1 dBFS (clamped to
+    // -24..+24). No-op if the audio is empty/silent.
+    bool normalizeSnippet (int id);
+
     // Run musical-key detection on the snippet's audio. The FFT-based
     // chroma analysis runs on a worker thread; the snippet is updated
     // and the sidecar JSON rewritten on the message thread, then
@@ -187,6 +194,9 @@ public:
     // filter (bitmask, bit n = channel n+1). All persist + notify.
     bool setChainVolume (const juce::String& chainId, float volumeDb);
     bool setChainMute (const juce::String& chainId, bool muted);
+    // Monitor-only solo/mute: change what is heard, never the capture.
+    bool setChainMonitorSolo (const juce::String& chainId, bool solo);
+    bool setChainMonitorMute (const juce::String& chainId, bool muted);
     bool setChainMidiChannels (const juce::String& chainId, uint16_t mask);
 
     // Toggle whether a chain's plugins receive the MIDI buffer ("MIDI"
@@ -210,13 +220,26 @@ public:
     void setBpm (float newBpm);
     void setCountInBeats (int beats);
 
-    // Level of the direct dry pass-through in the output (0..1, 1 =
-    // full dry as before). Independent of the chains — turn it down to
-    // hear mostly/only what the chains produce, or to zero to silence
-    // the dry when all chains are muted. The chains still receive the
-    // full input regardless.
+    // Monitor-only playback level for the looper (dB, -60..+12, 0 =
+    // unity). Scales the loop playback without touching the capture or
+    // the record bus, so a loud loop can be pulled down during an
+    // overdub to hear the new layer.
+    float getLoopLevel() const { return loopLevel.load (std::memory_order_acquire); }
+    void setLoopLevel (float levelDb);
+
+    // Direct dry pass-through level (dB, -60..0, 0 = unity). Scales the
+    // dry signal in both the monitor mix and the capture; the chains
+    // always receive the full input, so at -60 dB only the chains are
+    // heard and printed.
     float getDryLevel() const { return dryLevel.load (std::memory_order_acquire); }
-    void setDryLevel (float level);
+    void setDryLevel (float levelDb);
+
+    // Overdub trim (dB, -60..0, 0 = unity) applied by mixOverdubLayer when
+    // each new layer is summed into the loop, so repeated layers can be
+    // attenuated before they pile up. Monitor/capture-neutral: it only
+    // scales the layer before the sum.
+    float getOverdubLevel() const { return overdubLevel.load (std::memory_order_acquire); }
+    void setOverdubLevel (float levelDb);
 
     // Click sound tuning (all message-thread). Stored, re-synthesized
     // immediately, and notified via transportChanged. Persisted in host
@@ -368,6 +391,24 @@ public:
     // Meter values updated by the audio thread (peak + RMS over the last block).
     float getCurrentInputLevel() const { return inputLevel.load (std::memory_order_acquire); }
     float getCurrentInputPeak() const  { return inputPeak.load  (std::memory_order_acquire); }
+    // Record meter: the actual print (dry + recordOnCapture chains), read
+    // from recordingMixBuffer — unaffected by the master Output.
+    float getCurrentRecordLevel() const { return recordLevel.load (std::memory_order_acquire); }
+    float getCurrentRecordPeak() const  { return recordPeak.load  (std::memory_order_acquire); }
+    // Output meter: the post-master-Output monitor signal.
+    float getCurrentOutputLevel() const { return outputLevel.load (std::memory_order_acquire); }
+    float getCurrentOutputPeak() const  { return outputPeak.load  (std::memory_order_acquire); }
+    // Loop playback meter (post loop-level gain).
+    float getCurrentLoopPlayLevel() const { return loopPlayLevel.load (std::memory_order_acquire); }
+    float getCurrentLoopPlayPeak() const  { return loopPlayPeak.load  (std::memory_order_acquire); }
+    // Latched clip indicators (set by the audio thread, cleared by the UI).
+    bool isInputClipped() const     { return inputClipped.load     (std::memory_order_acquire); }
+    bool isRecordClipped() const    { return recordClipped.load    (std::memory_order_acquire); }
+    bool isOutputClipped() const    { return outputClipped.load    (std::memory_order_acquire); }
+    bool isLoopPlayClipped() const  { return loopPlayClipped.load  (std::memory_order_acquire); }
+    // Clear a latched clip flag. target is "input" | "record" | "output" |
+    // "loop" | "all" (unknown targets clear all). Message thread only.
+    void resetClip (const juce::String& target);
 
     // Snippet currently being captured (only valid while recordingRequested is true).
     int getRecordingLengthSamples() const { return static_cast<int> (recordWritePos.load (std::memory_order_acquire)); }
@@ -407,7 +448,8 @@ private:
                             int numSamples,
                             std::atomic<float>& levelAtomic,
                             std::atomic<float>& peakAtomic,
-                            float gain);
+                            float gain,
+                            std::atomic<bool>* clipAtomic = nullptr);
     void renderMetronomeInBlock (juce::AudioBuffer<float>& buffer, int64_t startPos, int numSamples);
     // Recomputes whether any source wants the MIDI clock running and
     // sends Start/Stop on the edges. Message thread only (may open/close
@@ -436,6 +478,14 @@ private:
     bool tagPersistPending = false;
     int64_t tagPersistDeadline = 0;
     void flushTagNamePersist();
+    // Debounced per-snippet gain persist: the Gain knob emits on every
+    // pointer move, so both the sidecar write and the (expensive) library
+    // snapshot push are deferred to timerCallback. The in-memory value is
+    // correct immediately; SnippetCard tracks the displayed value locally.
+    bool snippetGainPersistPending = false;
+    int  snippetGainPersistId = 0;
+    int64_t snippetGainPersistDeadline = 0;
+    void flushSnippetGainPersist();
     // The chain list. Chains are independent parallel processors of the
     // input; see the chain API comments above. Owned by the processor
     // (unique_ptr), guarded by chainLock. The audio thread iterates a
@@ -512,7 +562,9 @@ private:
     std::atomic<bool>    clickDuringCapture { true };
     std::atomic<float>   bpm              { 120.0f };
     std::atomic<int>     countInBeats     { 4 };
-    std::atomic<float>   dryLevel         { 1.0f };
+    std::atomic<float>   loopLevel        { 0.0f };
+    std::atomic<float>   dryLevel         { 0.0f };
+    std::atomic<float>   overdubLevel     { 0.0f };
     std::atomic<bool>    preRollActive    { false };
     std::atomic<int64_t> transportPosition { 0 };
     std::atomic<int64_t> metronomePosition { 0 };
@@ -561,7 +613,7 @@ private:
     // into the loop [audioLoopStart, +audioLoopLength), wrapping across
     // loop cycles pedal-style. Message thread only, run with capture
     // stopped and playback off.
-    void mixOverdubLayer (int64_t oldLoopLength, int64_t layerLength);
+    void mixOverdubLayer (int64_t oldLoopLength, int64_t layerBase, int64_t layerLength);
 
     // Pre-rendered metronome clicks. Two sounds, both synthesized by
     // resynthesizeClicks() (message thread only): a bright accent tick
@@ -635,6 +687,16 @@ private:
 
     std::atomic<float> inputLevel { 0.0f };
     std::atomic<float> inputPeak  { 0.0f };
+    std::atomic<float> recordLevel { 0.0f };
+    std::atomic<float> recordPeak  { 0.0f };
+    std::atomic<float> outputLevel { 0.0f };
+    std::atomic<float> outputPeak  { 0.0f };
+    std::atomic<float> loopPlayLevel { 0.0f };
+    std::atomic<float> loopPlayPeak  { 0.0f };
+    std::atomic<bool>  inputClipped     { false };
+    std::atomic<bool>  recordClipped    { false };
+    std::atomic<bool>  outputClipped    { false };
+    std::atomic<bool>  loopPlayClipped  { false };
 
     juce::File libraryFolder;
     juce::CriticalSection libraryFolderLock;

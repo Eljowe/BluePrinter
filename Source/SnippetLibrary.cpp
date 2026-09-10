@@ -112,6 +112,22 @@ bool SnippetLibrary::updateColor (int id, const juce::String& color)
     return false;
 }
 
+bool SnippetLibrary::updateGain (int id, float gainDb)
+{
+    const float clamped = juce::jlimit (-24.0f, 24.0f, gainDb);
+
+    const std::lock_guard<std::mutex> lock (mutex);
+    for (auto& s : snippets)
+    {
+        if (s->id == id)
+        {
+            s->gainDb = clamped;
+            return true;
+        }
+    }
+    return false;
+}
+
 bool SnippetLibrary::markSaved (int id, const juce::String& path)
 {
     const std::lock_guard<std::mutex> lock (mutex);
@@ -289,6 +305,7 @@ bool SnippetLibrary::loadFromFolder (const juce::File& folder, juce::String& out
         float keyConfidence = 0.0f;
         juce::StringArray detectedNotes;
         juce::String color;
+        float gainDb = 0.0f;
 
         auto jsonFile = audioFile.getSiblingFile (audioFile.getFileNameWithoutExtension() + ".json");
         if (jsonFile.existsAsFile())
@@ -306,6 +323,8 @@ bool SnippetLibrary::loadFromFolder (const juce::File& folder, juce::String& out
                 key = obj->getProperty ("key").toString();
                 keyConfidence = static_cast<float> (obj->getProperty ("keyConfidence"));
                 color = obj->getProperty ("color").toString();
+                // Old sidecars won't have gainDb; missing field is 0 dB.
+                gainDb = static_cast<float> (obj->getProperty ("gainDb"));
 
                 // Old sidecars won't have this; missing field is fine.
                 if (auto* notesArray = obj->getProperty ("notes").getArray())
@@ -340,6 +359,7 @@ bool SnippetLibrary::loadFromFolder (const juce::File& folder, juce::String& out
         snippet->keyConfidence = keyConfidence;
         snippet->detectedNotes = detectedNotes;
         snippet->color        = color;
+        snippet->gainDb       = juce::jlimit (-24.0f, 24.0f, gainDb);
 
         {
             const std::lock_guard<std::mutex> lock (mutex);
@@ -437,6 +457,9 @@ bool SnippetLibrary::writeMetadataFile (const Snippet& snippet, const juce::File
     }
     if (snippet.color.isNotEmpty())
         meta->setProperty ("color", snippet.color);
+
+    // Always written (including 0 dB) so the sidecar round-trips the trim.
+    meta->setProperty ("gainDb", snippet.gainDb);
 
     jsonFile.deleteFile();
     juce::FileOutputStream stream (jsonFile);

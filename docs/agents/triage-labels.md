@@ -1,6 +1,8 @@
 # Triage Labels
 
-The skills speak in terms of five canonical triage roles. This file maps those roles to the actual label strings used in this repo's issue tracker.
+The skills speak in terms of five canonical triage roles. This file maps those roles to the actual status strings used in this repo's issue tracker.
+
+In this repo the status is stored in each ticket's YAML frontmatter (`status:` field) under `docs/tickets/`. Implementation adds two lifecycle states beyond the five triage roles: `in-progress` (claimed) and `done` (closed). See `docs/agents/issue-tracker.md`.
 
 | Label in mattpocock/skills | Label in our tracker | Meaning                                  |
 | -------------------------- | -------------------- | ---------------------------------------- |

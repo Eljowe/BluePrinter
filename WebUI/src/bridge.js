@@ -22,6 +22,10 @@ export const FRONTEND_EVENTS = {
   // Organisational colour tag for a snippet: { id, color } where
   // color is one of the 8 palette keys or "" to clear.
   setSnippetColor: "frontendSetSnippetColor",
+  // Non-destructive playback trim for a snippet: { id, gainDb } (-24..+24 dB).
+  setSnippetGain: "frontendSetSnippetGain",
+  // { id } — set the trim so the snippet peak lands at -1 dBFS.
+  normalizeSnippet: "frontendNormalizeSnippet",
   deleteSnippet: "frontendDeleteSnippet",
   detectSnippetKey: "frontendDetectSnippetKey",
   saveSnippet: "frontendSaveSnippet",
@@ -42,8 +46,18 @@ export const FRONTEND_EVENTS = {
   setMetronome: "frontendSetMetronome",
   setBpm: "frontendSetBpm",
   setCountInBeats: "frontendSetCountInBeats",
-  // Level of the direct dry pass-through (0..1). { level }
+  // Monitor-only playback level for the looper in dB (-60..+12).
+  // { level }
+  setLoopLevel: "frontendSetLoopLevel",
+  // Direct dry pass-through in dB (-60..0, 0 = unity), applied to both
+  // the monitor and the capture. { level }
   setDryLevel: "frontendSetDryLevel",
+  // Overdub trim in dB (-60..0) applied to each new layer before it is
+  // mixed into the loop. { level }
+  setOverdubLevel: "frontendSetOverdubLevel",
+  // Clear a latched clip indicator: { target } is one of
+  // "input" | "record" | "output" | "loop" | "all".
+  resetClip: "frontendResetClip",
   // Click sound tuning popup: { pitch, accentPitch, decay, volume,
   // accentVolume, noise } — all values sent on every change.
   setClickParams: "frontendSetClickParams",
@@ -90,6 +104,10 @@ export const FRONTEND_EVENTS = {
   // channel filter (channels: [1..16]).
   setChainVolume: "frontendSetChainVolume",
   setChainMute: "frontendSetChainMute",
+  // Monitor-only solo/mute: { chain, solo } / { chain, muted }. These
+  // change what is heard, never the capture.
+  setChainMonitorSolo: "frontendSetChainMonitorSolo",
+  setChainMonitorMute: "frontendSetChainMonitorMute",
   setChainMidiChannels: "frontendSetChainMidiChannels",
 };
 

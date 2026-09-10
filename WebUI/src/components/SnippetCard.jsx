@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Waveform } from "./Waveform";
+import { Knob } from "./controls";
 import { formatDate, formatTime, SNIPPET_COLORS, snippetColor } from "../utils";
 import { FRONTEND_EVENTS, emit } from "../bridge";
 import {
@@ -18,6 +19,7 @@ export function SnippetCard({ snippet, tagNames, isPlaying, playPositionSeconds 
   const [name, setName] = useState(snippet.name ?? "");
   const [comments, setComments] = useState(snippet.comments ?? "");
   const [color, setColor] = useState(snippet.color ?? "");
+  const [gainDb, setGainDb] = useState(Number(snippet.gainDb ?? 0));
   const [expanded, setExpanded] = useState(false);
   // `detecting` flips on while an analysis request is in flight
   // and clears when the backend echoes the (possibly empty) result
@@ -50,9 +52,25 @@ export function SnippetCard({ snippet, tagNames, isPlaying, playPositionSeconds 
     }
   }, [snippet.id, snippet.name, snippet.comments]);
 
+  // The backend echoes the persisted trim (including after Normalize)
+  // through the snippet prop; mirror it. During a drag the prop does not
+  // change until the debounced flush, so this never fights the knob.
+  useEffect(() => {
+    setGainDb(Number(snippet.gainDb ?? 0));
+  }, [snippet.gainDb, snippet.id]);
+
   const handleColor = (next) => {
     setColor(next);
     emit(FRONTEND_EVENTS.setSnippetColor, { id: snippet.id, color: next });
+  };
+
+  const handleGain = (next) => {
+    setGainDb(next);
+    emit(FRONTEND_EVENTS.setSnippetGain, { id: snippet.id, gainDb: next });
+  };
+
+  const handleNormalize = () => {
+    emit(FRONTEND_EVENTS.normalizeSnippet, { id: snippet.id });
   };
 
   // The backend clears `key` immediately on a fresh detect request,
@@ -272,6 +290,32 @@ export function SnippetCard({ snippet, tagNames, isPlaying, playPositionSeconds 
               placeholder="What did you play? Tuning, take notes, what to work on…"
             />
           </label>
+
+          <div className="snippet-field snippet-gain-field">
+            <span>Gain</span>
+            <div className="snippet-gain-controls">
+              <Knob
+                label="Gain"
+                min={-24}
+                max={24}
+                value={gainDb}
+                onChange={handleGain}
+                step="0.5"
+                decimals={1}
+                unit="dB"
+                className="snippet-gain-knob"
+                title="Non-destructive playback trim for this snippet — never baked into the WAV"
+              />
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={handleNormalize}
+                title="Set the trim so this snippet's peak lands at -1 dBFS"
+              >
+                Normalize
+              </button>
+            </div>
+          </div>
 
           <footer className="snippet-footer">
             <div className="snippet-meta">
