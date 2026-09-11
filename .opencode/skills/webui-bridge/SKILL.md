@@ -35,7 +35,7 @@ The two lists are **machine-checked**: `Tests/check-bridge-events.mjs` (register
 
 **Frontend events** (React → C++):
 - `setParameter`, `startRecording`, `stopRecording`, `startPlayback`, `stopPlayback`
-- `updateSnippet`, `deleteSnippet`, `detectSnippetKey`, `saveSnippet`, `exportSnippet`, `saveLoop`, `revealSnippet`
+- `updateSnippet`, `deleteSnippet`, `detectSnippetKey`, `saveSnippet`, `exportSnippet`, `importAudio`, `importAudioData`, `saveLoop`, `revealSnippet`
 - `chooseLibraryFolder`, `openLibraryFolder`, `refreshLibrary`, `getSnippets`
 - `copyDiagnostics`, `openDiagnosticsFolder` (0016) — copy an audio-free support report (version/OS/CPU, settings counts, plugin quarantine, last restore error, current + rotated `crash-info.txt`, WER LocalDumps command) to the clipboard, or reveal `%APPDATA%\Retrokielto`. Driven by the footer **Diagnostics** popover in `App.jsx`.
 - `setMetronome`, `setBpm`, `setCountInBeats`, `setMidiClock`, `setMidiClockOnRecord` (`{ enabled }` — restrict the MIDI clock to take/loop captures instead of free-running), `setMidiDevice`
@@ -88,6 +88,7 @@ The two lists are **machine-checked**: `Tests/check-bridge-events.mjs` (register
 - **Takes grid cap**: `SnippetList` renders the first `VISIBLE_PAGE` (10) takes of the filtered/ordered list with a "Show more" button (+`SHOW_MORE_STEP` 10, shows `visible / total`); `visibleCount` resets to the cap whenever query/sort/key/tag filters change.
 - **Snippet card summary**: two-row layout. `.snippet-title-line` (tag dot + `.snippet-name`, `flex: 1 1 100%`) is the full-width first row so a long name never competes with the chips; the key/notes chips, duration (`margin-left: auto`) and date wrap onto a second row.
 - **First-run empty states** (0018): `SnippetList` shows a richer `.snippet-empty--first-run` block (record → review → save steps) only when `snippets.length === 0`, with a **Choose a library folder…** button (`chooseLibraryFolder`) when `folder` is empty, else a one-line note — so users with takes (or a set folder) never see onboarding chrome. `PluginChain` shows an actionable `.fx-chain-empty` ("No plugins yet. Use **Add**… or **Scan VST3 folder**…") when a chain has no slots, a "Restoring N plugins…" variant while `pending > 0`, and "No chains yet. Use **Add chain**…" when the rail is empty. There is no persistent "seen" flag because the states are content-driven and vanish once real content exists.
+- **Audio import** (0024): the Library section head has an **Import audio…** button (`importAudio` → multi-select `FileChooser`). The whole `.library-section` is a drop target: `onDragOver`/`onDragEnter` set `dragActive` (`.is-drag-target` outline), and `onDrop` reads each `File` via `arrayBuffer()`, base64s it (`btoa` over 32 KB chunks), and emits `importAudioData { name, data }` — the WebView2 backend exposes **no dropped-file path** (JUCE's `WebBrowserComponent` has no drag-drop either), so bytes-in-JSON is the only route; drops over 32 MB are rejected with a toast (the chooser has no cap). `App.jsx` owns the handler + `dragActive` state; the backend decodes with `SnippetLibrary::importAudioFile`/`importAudioFromStream`.
 
 ## Vite Build
 

@@ -52,6 +52,9 @@ public:
     static constexpr const char* frontendDetectSnippetKeyEvent = "frontendDetectSnippetKey";
     static constexpr const char* frontendSaveSnippetEvent      = "frontendSaveSnippet";
     static constexpr const char* frontendExportSnippetEvent    = "frontendExportSnippet";
+    // Import external audio (FileChooser) or dropped bytes (base64).
+    static constexpr const char* frontendImportAudioEvent      = "frontendImportAudio";
+    static constexpr const char* frontendImportAudioDataEvent  = "frontendImportAudioData";
     static constexpr const char* frontendSaveLoopEvent         = "frontendSaveLoop";
     static constexpr const char* frontendRevealSnippetEvent    = "frontendRevealSnippet";
     static constexpr const char* frontendChooseFolderEvent     = "frontendChooseLibraryFolder";
@@ -136,6 +139,8 @@ public:
     // registered inside makeWebViewOptions can call them.
     void handleSaveSnippet(const juce::var& data);
     void handleExportSnippet(const juce::var& data);
+    void handleImportAudio();
+    void handleImportAudioData(const juce::var& data);
     void handleSaveLoop();
     void handleRevealSnippet(const juce::var& data);
     void handleChooseLibraryFolder();

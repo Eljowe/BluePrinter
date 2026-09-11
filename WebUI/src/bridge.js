@@ -42,6 +42,11 @@ export const FRONTEND_EVENTS = {
   // that holds crash-info.txt / BluePrinter.properties.
   copyDiagnostics: "frontendCopyDiagnostics",
   openDiagnosticsFolder: "frontendOpenDiagnosticsFolder",
+  // Import external audio: `importAudio` opens a multi-select file
+  // chooser, `importAudioData { name, data }` imports one dropped file
+  // whose bytes the WebView read (base64; no path is available).
+  importAudio: "frontendImportAudio",
+  importAudioData: "frontendImportAudioData",
   // Request a fresh snippet snapshot from the backend. Fired once
   // when the React app mounts, because the snippets loaded from
   // disk in the processor's constructor arrive before the editor

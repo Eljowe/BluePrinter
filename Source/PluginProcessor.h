@@ -154,6 +154,15 @@ public:
     // Extensions this build can export to (.wav, .aiff, .flac).
     juce::StringArray getSupportedExportExtensions() const;
 
+    // Import an external audio file (FileChooser) or dropped audio bytes
+    // (base64, drag-drop — the WebView exposes no path) into the library.
+    // Returns the new snippet id, or -1 with outError set; pushes a
+    // library snapshot on success.
+    int importAudioFile (const juce::File& file, juce::String& outError);
+    int importAudioFromBase64 (const juce::String& name,
+                               const juce::String& base64,
+                               juce::String& outError);
+
     // Run musical-key detection on the snippet's audio. The FFT-based
     // chroma analysis runs on a worker thread; the snippet is updated
     // and the sidecar JSON rewritten on the message thread, then

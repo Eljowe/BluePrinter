@@ -190,3 +190,59 @@ BP_TEST (SnippetExport_listsSupportedLosslessFormats)
     BP_CHECK (extensions.contains (".flac"));
 }
 
+BP_TEST (SnippetImport_fileAndStreamWithDuplicateDetection)
+{
+    const auto dir = makeTempDir ("import");
+
+    SnippetLibrary library;
+    auto source = library.addSnippet (makeBuffer (1, 1000, 0.5f), 44100.0, "source");
+    BP_CHECK (source != nullptr);
+
+    // A WAV on disk to import back.
+    juce::String error;
+    auto wav = dir.getChildFile ("source.wav");
+    BP_CHECK (SnippetLibrary::exportSnippetToFile (*source, wav, false, error));
+
+    // File import decodes, computes peaks, and records the source path.
+    const int fileId = library.importAudioFile (wav, error);
+    BP_CHECK (fileId >= 0);
+    BP_CHECK (error.isEmpty());
+
+    auto imported = library.findById (fileId);
+    BP_CHECK (imported != nullptr);
+    BP_CHECK_EQ (imported->numSamples, static_cast<juce::int64> (1000));
+    BP_CHECK_EQ (imported->numChannels, 1);
+    BP_CHECK (static_cast<int> (imported->peaks.size()) > 0);
+    BP_CHECK (imported->savedPath == wav.getFullPathName());
+
+    // Re-importing the same file is a no-op.
+    BP_CHECK_EQ (library.importAudioFile (wav, error), -1);
+    BP_CHECK (error.containsIgnoreCase ("already"));
+
+    // Stream import (the drag-drop path) decodes from memory.
+    juce::MemoryBlock bytes;
+    BP_CHECK (wav.loadFileAsData (bytes));
+
+    const auto sourceKey = "drop:dropped:" + juce::String (bytes.getSize());
+    auto stream = std::make_unique<juce::MemoryInputStream> (bytes, false);
+    const int streamId = library.importAudioFromStream (std::move (stream), "dropped", sourceKey, error);
+    BP_CHECK (streamId >= 0);
+
+    auto dropped = library.findById (streamId);
+    BP_CHECK (dropped != nullptr);
+    BP_CHECK_EQ (dropped->numSamples, static_cast<juce::int64> (1000));
+
+    // The same source key is rejected.
+    auto stream2 = std::make_unique<juce::MemoryInputStream> (bytes, false);
+    BP_CHECK_EQ (library.importAudioFromStream (std::move (stream2), "dropped", sourceKey, error), -1);
+
+    // Corrupt data fails with a message rather than crashing.
+    juce::MemoryBlock junk;
+    junk.append ("not audio", 9);
+    auto junkStream = std::make_unique<juce::MemoryInputStream> (junk, false);
+    BP_CHECK_EQ (library.importAudioFromStream (std::move (junkStream), "junk.wav", "drop:junk", error), -1);
+    BP_CHECK (error.isNotEmpty());
+
+    dir.deleteRecursively();
+}
+

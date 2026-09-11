@@ -2232,6 +2232,36 @@ juce::StringArray BluePrinterAudioProcessor::getSupportedExportExtensions() cons
     return SnippetLibrary::supportedExportExtensions();
 }
 
+int BluePrinterAudioProcessor::importAudioFile (const juce::File& file, juce::String& outError)
+{
+    const int id = library.importAudioFile (file, outError);
+    if (id >= 0)
+        listeners.call ([](Listener& l) { l.libraryChanged(); });
+    return id;
+}
+
+int BluePrinterAudioProcessor::importAudioFromBase64 (const juce::String& name,
+                                                      const juce::String& base64,
+                                                      juce::String& outError)
+{
+    juce::MemoryOutputStream decoded;
+    if (! juce::Base64::convertFromBase64 (decoded, base64) || decoded.getDataSize() == 0)
+    {
+        outError = "Dropped file could not be read: " + name;
+        return -1;
+    }
+
+    // The WebView cannot expose a dropped file's path, so name + byte
+    // size is the stable identity for duplicate detection.
+    const auto sourceKey = "drop:" + name + ":" + juce::String (decoded.getDataSize());
+
+    auto stream = std::make_unique<juce::MemoryInputStream> (decoded.getMemoryBlock());
+    const int id = library.importAudioFromStream (std::move (stream), name, sourceKey, outError);
+    if (id >= 0)
+        listeners.call ([](Listener& l) { l.libraryChanged(); });
+    return id;
+}
+
 void BluePrinterAudioProcessor::detectSnippetKeyAndNotes (int id)
 {
     // Hold a strong ref to the snippet's audio so the worker thread
