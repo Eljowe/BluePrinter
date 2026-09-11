@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { SnippetCard } from "./SnippetCard";
 import { SNIPPET_COLORS, snippetColor } from "../utils";
+import { FRONTEND_EVENTS, emit } from "../bridge";
 import { IconChevronDown, IconSearch, IconTag, IconX } from "./icons";
 
 const SORT_OPTIONS = [
@@ -71,7 +72,7 @@ function TagRenamePopover({ tagNames, onRenameTag, onClose }) {
   );
 }
 
-export function SnippetList({ snippets, tagNames, onRenameTag, playingSnippetId, playPositionSeconds }) {
+export function SnippetList({ snippets, tagNames, onRenameTag, playingSnippetId, playPositionSeconds, folder }) {
   const [query, setQuery] = useState("");
   const [sortBy, setSortBy] = useState("newest");
   const [tagFilter, setTagFilter] = useState(() => new Set());
@@ -250,11 +251,29 @@ export function SnippetList({ snippets, tagNames, onRenameTag, playingSnippetId,
       </div>
 
       {ordered.length === 0 ? (
-        <div className="snippet-empty">
-          {snippets.length === 0
-            ? "No takes yet. Hit the record button, play something, then stop."
-            : "No takes match the current filters."}
-        </div>
+        snippets.length === 0 ? (
+          <div className="snippet-empty snippet-empty--first-run">
+            <p className="snippet-empty-title">No takes yet</p>
+            <ol className="snippet-empty-steps">
+              <li><strong>Record</strong> — hit the record button, play something, then stop.</li>
+              <li><strong>Review</strong> — replay the pending take and keep the good one.</li>
+              <li><strong>Save</strong> — send it here with a name and notes.</li>
+            </ol>
+            {folder ? (
+              <p className="snippet-empty-note">Saved takes land in your library folder.</p>
+            ) : (
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={() => emit(FRONTEND_EVENTS.chooseLibraryFolder)}
+              >
+                Choose a library folder…
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="snippet-empty">No takes match the current filters.</div>
+        )
       ) : (
         <>
           <div className="snippet-grid">

@@ -2501,6 +2501,52 @@ button {
   text-transform: uppercase;
 }
 
+/* First-run empty state: the record -> review -> save workflow (0018). */
+.snippet-empty--first-run {
+  padding: 22px 24px;
+  text-align: left;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--ink-2);
+  font-family: inherit;
+  font-size: 0.78rem;
+}
+
+.snippet-empty-title {
+  margin: 0 0 10px 0;
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+}
+
+.snippet-empty-steps {
+  margin: 0 0 14px 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 6px;
+  line-height: 1.45;
+  font-size: 0.78rem;
+}
+
+.snippet-empty-steps strong {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+.snippet-empty-note {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
 /* "Show more" below the capped takes grid. */
 .snippet-show-more {
   display: flex;
