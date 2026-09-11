@@ -45,8 +45,8 @@ blocked_by: []            # ticket ids that must be closed first, e.g. ["0001"]
 
 | Ticket | Title | Status | Blocked by |
 | ------ | ----- | ------ | ---------- |
-| [0011](0011-windows-ci-build-pipeline.md) | Windows CI build pipeline (GitHub Actions) | in-progress | — |
-| [0012](0012-ctest-harness-pure-logic-tests.md) | CTest harness + pure-logic unit tests | ready-for-agent | 0011 |
+| [0011](0011-windows-ci-build-pipeline.md) | Windows CI build pipeline (GitHub Actions) | done | — |
+| [0012](0012-ctest-harness-pure-logic-tests.md) | CTest harness + pure-logic unit tests | in-progress | 0011 |
 | [0013](0013-bridge-event-name-parity-check.md) | Automated parity check for bridge event names | ready-for-agent | 0012 |
 | [0014](0014-context-md-and-adrs.md) | Add CONTEXT.md and ADRs for the load-bearing decisions | done | — |
 
@@ -88,9 +88,18 @@ blocked_by: []            # ticket ids that must be closed first, e.g. ["0001"]
 | ------ | ----- | ------ | ---------- |
 | [0027](0027-decompose-pluginprocessor-deep-modules.md) | Decompose PluginProcessor into deep modules | needs-triage | 0011, 0012 |
 
+### Backlog / deferred
+
+| Ticket | Title | Status | Blocked by |
+| ------ | ----- | ------ | ---------- |
+| [0028](0028-cross-platform-macos-linux.md) | Cross-platform support: macOS and Linux builds (deferred) | needs-triage | — |
+
 ## Roadmap notes
 
 - Ordered by risk-reduction first, then user-visible wins, with the refactor
   (0027) trailing behind the tests + CI that make it safe.
 - Tickets marked `needs-info` / `needs-triage` have open decisions in the body
   and are not ready for an AFK agent yet.
+- **Deferred backlog**: 0028 (cross-platform) is recorded for later and must not
+  be started until the Windows safety net and release path are stable and its
+  open decisions are made. It would supersede ADR-0001 if green-lit.
