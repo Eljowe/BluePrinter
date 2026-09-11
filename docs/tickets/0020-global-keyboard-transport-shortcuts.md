@@ -1,7 +1,7 @@
 ---
 id: "0020"
 title: "Global keyboard transport shortcuts"
-status: ready-for-agent
+status: in-progress
 blocked_by: []
 ---
 

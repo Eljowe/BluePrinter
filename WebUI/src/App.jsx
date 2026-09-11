@@ -124,7 +124,7 @@ function readInitialTransport() {
      takePlaying: Boolean(raw.takePlaying),
      takePosition: Number(raw.takePosition ?? 0),
      takePeaks: Array.isArray(raw.takePeaks) ? raw.takePeaks : [],
-     looperRecording: Boolean(raw.looperRecording), looperPreRoll: Boolean(raw.looperPreRoll), looperPlaying: Boolean(raw.looperPlaying), looperLooping: raw.looperLooping !== false, looperOverdub: Boolean(raw.looperOverdub), looperCountInBeats: Number(raw.looperCountInBeats ?? 4), looperCropStartBeats: Number(raw.looperCropStartBeats ?? 0), looperCropEndBeats: Number(raw.looperCropEndBeats ?? 0), audioLoopStart: Number(raw.audioLoopStart ?? 0), audioLoopPosition: Number(raw.audioLoopPosition ?? 0), audioLoopLength: Number(raw.audioLoopLength ?? 0), audioLoopPeaks: Array.isArray(raw.audioLoopPeaks) ? raw.audioLoopPeaks : [], chainLevels: Array.isArray(raw.chainLevels) ? raw.chainLevels : [], maxRecordSamples: Number(raw.maxRecordSamples ?? 0),
+     looperRecording: Boolean(raw.looperRecording), looperPreRoll: Boolean(raw.looperPreRoll), looperPlaying: Boolean(raw.looperPlaying), looperLooping: raw.looperLooping !== false, looperOverdub: Boolean(raw.looperOverdub), looperCountInBeats: Number(raw.looperCountInBeats ?? 4), looperLengthBars: Number(raw.looperLengthBars ?? 0), looperCropStartBeats: Number(raw.looperCropStartBeats ?? 0), looperCropEndBeats: Number(raw.looperCropEndBeats ?? 0), audioLoopStart: Number(raw.audioLoopStart ?? 0), audioLoopPosition: Number(raw.audioLoopPosition ?? 0), audioLoopLength: Number(raw.audioLoopLength ?? 0), audioLoopPeaks: Array.isArray(raw.audioLoopPeaks) ? raw.audioLoopPeaks : [], chainLevels: Array.isArray(raw.chainLevels) ? raw.chainLevels : [], maxRecordSamples: Number(raw.maxRecordSamples ?? 0),
   };
 }
 
@@ -164,6 +164,65 @@ export default function App() {
     handleRecordingModeChange(next);
     document.getElementById(`recording-tab-${next}`)?.focus();
   };
+
+  // Global transport shortcuts (0020). Space starts/stops capture for the
+  // active recording tab, Enter saves a pending take, Esc stops playback.
+  // Ignored while typing or when focus is on a control, so Space/Enter still
+  // activate the focused button/select instead of double-firing.
+  useEffect(() => {
+    const isEditable = (el) => {
+      if (!el) return false;
+      const tag = el.tagName;
+      return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable;
+    };
+    const isControl = (el) => Boolean(el && el.closest
+      && el.closest("button, a, [role='button'], [role='tab'], [role='switch']"));
+
+    const onKeyDown = (e) => {
+      if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (isEditable(e.target) || isEditable(document.activeElement)) return;
+
+      if (e.key === " ") {
+        if (isControl(document.activeElement)) return;
+        e.preventDefault();
+        if (recordingMode === "take") {
+          const capturing = transport.recording || transport.preRollActive;
+          if (capturing) emit(FRONTEND_EVENTS.stopRecording);
+          else emit(FRONTEND_EVENTS.startRecording);
+        } else {
+          const capturing = transport.looperRecording || transport.looperPreRoll;
+          emit(FRONTEND_EVENTS.setLooperRecording, { enabled: !capturing });
+        }
+        return;
+      }
+
+      if (e.key === "Enter") {
+        if (isControl(document.activeElement)) return;
+        if (recordingMode === "take" && transport.takePending) {
+          e.preventDefault();
+          emit(FRONTEND_EVENTS.saveTake);
+        }
+        return;
+      }
+
+      if (e.key === "Escape") {
+        if (Number(transport.playingSnippetId ?? -1) >= 0) emit(FRONTEND_EVENTS.stopPlayback);
+        if (transport.takePlaying) emit(FRONTEND_EVENTS.setTakePlayback, { enabled: false });
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [
+    recordingMode,
+    transport.recording,
+    transport.preRollActive,
+    transport.looperRecording,
+    transport.looperPreRoll,
+    transport.takePending,
+    transport.takePlaying,
+    transport.playingSnippetId,
+  ]);
 
   // Splash lifecycle. `showing` -> `leaving` (fade) -> `hidden`. The splash
   // stays up until the first chain snapshot arrives (covering the WebView2
@@ -289,6 +348,7 @@ export default function App() {
          looperOverdub: payload.looperOverdub !== undefined ? Boolean(payload.looperOverdub) : prev.looperOverdub,
          maxRecordSamples: payload.maxRecordSamples !== undefined ? Number(payload.maxRecordSamples) : prev.maxRecordSamples,
          looperCountInBeats: payload.looperCountInBeats !== undefined ? Number(payload.looperCountInBeats) : prev.looperCountInBeats,
+         looperLengthBars: payload.looperLengthBars !== undefined ? Number(payload.looperLengthBars) : prev.looperLengthBars,
          looperCropStartBeats: payload.looperCropStartBeats !== undefined ? Number(payload.looperCropStartBeats) : prev.looperCropStartBeats,
          looperCropEndBeats: payload.looperCropEndBeats !== undefined ? Number(payload.looperCropEndBeats) : prev.looperCropEndBeats,
          audioLoopStart: Number(payload.audioLoopStart ?? prev.audioLoopStart ?? 0),
@@ -528,6 +588,14 @@ export default function App() {
             <p>Record a take, name it, note what to work on.</p>
           </div>
         </div>
+        <details className="shortcut-help">
+          <summary title="Keyboard shortcuts">Keyboard</summary>
+          <dl className="shortcut-list">
+            <div><dt>Space</dt><dd>Start / stop capture (Take or Loop tab)</dd></div>
+            <div><dt>Enter</dt><dd>Save the pending take</dd></div>
+            <div><dt>Esc</dt><dd>Stop playback</dd></div>
+          </dl>
+        </details>
       </header>
 
       <section className="bp-section control-deck" aria-label="Monitoring controls">
