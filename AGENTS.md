@@ -5,7 +5,7 @@ BluePrinter is a JUCE audio plugin (VST3 + Standalone) for recording guitar take
 
 ## Build System
 - CMake 3.22+ with JUCE CMake API
-- JUCE source tree expected at `C:/JUCE/JUCE` (override with `-DJUCE_DIR=...`)
+- JUCE source tree expected at `C:/JUCE/JUCE` (override with `-DJUCE_DIR=...`), **JUCE 8.0.14 plus the patch in `cmake/patches/juce-webview2-additional-args.patch`** (`WinWebView2::withAdditionalBrowserArguments`, used by `WebViewEditor.cpp` to pass `--allow-no-sandbox-job --disable-gpu`). Apply with `git -C <juce> apply cmake/patches/juce-webview2-additional-args.patch`; CI does this after checkout.
 - Output formats: VST3, Standalone
 - See `CMakeLists.txt` for full build config and install rules
 - WebUI must be built separately: `cd WebUI && npm install && npm run build`
@@ -37,7 +37,7 @@ See `.vscode/tasks.json` for 11 pre-configured tasks:
 ## Commands
 - Build WebUI: `cd WebUI && npm install && npm run build` (outputs `WebUI/dist/`)
 - Build C++ (Debug): CMake configure with JUCE_DIR, then `cmake --build build --config Debug` — see `.vscode/tasks.json` for the exact invocation.
-- **CI**: `.github/workflows/build.yml` runs on every push to `master` and every PR (Windows runner). It builds the WebUI, configures CMake against a pinned JUCE (`JUCE_VERSION` in the workflow, cached) with **Ninja + MSVC** (not the "Visual Studio NN YYYY" generator, so runner-image VS-version bumps don't break it), installs the WebView2 SDK from NuGet into `JUCE_WEBVIEW2_PACKAGE_LOCATION`, builds the Release standalone + VST3, and uploads both as artifacts. No secrets required (unsigned). Mirrors the local build, so a green run is the machine-checked equivalent of "it builds on my machine".
+- **CI**: `.github/workflows/build.yml` runs on every push to `master` and every PR (Windows runner). It builds the WebUI, then checks out + patches a pinned JUCE (`JUCE_VERSION` = **8.0.14**; `cmake/patches/juce-webview2-additional-args.patch`), caches it, configures CMake with **Ninja + MSVC** (not the "Visual Studio NN YYYY" generator, so runner-image VS-version bumps don't break it), installs the WebView2 SDK from NuGet into `JUCE_WEBVIEW2_PACKAGE_LOCATION`, builds the Release standalone + VST3, and uploads both as artifacts. No secrets required (unsigned). Mirrors the local build, so a green run is the machine-checked equivalent of "it builds on my machine".
 - **Lint / format / test**: none configured. There is no `.clang-format`, ESLint, or Prettier config, and no test suite. Match the style of surrounding code by hand. If a lint/test command is added later, update this section.
 
 ## Event Naming

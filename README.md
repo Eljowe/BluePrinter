@@ -121,7 +121,11 @@ trim monitoring level while recording.
 - CMake 3.22+
 - Node.js 18+ and npm
 - JUCE source tree at `C:/JUCE/JUCE` (override with `-DJUCE_DIR=...` if yours
-  is elsewhere)
+  is elsewhere). The project builds against **JUCE 8.0.14 plus the patch in
+  [`cmake/patches/juce-webview2-additional-args.patch`](cmake/patches/juce-webview2-additional-args.patch)**,
+  which adds `WinWebView2::withAdditionalBrowserArguments` (used by the editor to
+  pass `--allow-no-sandbox-job --disable-gpu`). Apply it to a stock tree with
+  `git -C C:/JUCE/JUCE apply <path-to-patch>`; CI does the same after checkout.
 - Microsoft Edge **WebView2 Runtime** (preinstalled on Windows 10/11 in
   most setups; otherwise the editor falls back to a plain message)
 
@@ -160,12 +164,13 @@ cmake --build build --config Debug --target BluePrinter_VST3
 Every push to `master` and every pull request runs
 [`.github/workflows/build.yml`](.github/workflows/build.yml) on `windows-latest`.
 It builds the WebUI (`npm ci && npm run build`), configures CMake against a pinned
-JUCE (the workflow's `JUCE_VERSION`) with **Ninja + MSVC** — deliberately not the
-`Visual Studio 17 2022` generator, which broke when GitHub repointed
-`windows-latest` to a VS 2026 image — builds the **Release** standalone + VST3, and
-uploads both as downloadable artifacts. The WebView2 SDK is fetched from NuGet and
-passed via `JUCE_WEBVIEW2_PACKAGE_LOCATION`. No secrets are needed — the output is
-unsigned (code signing is tracked separately).
+JUCE (the workflow's `JUCE_VERSION`, **8.0.14**) with **Ninja + MSVC** — deliberately
+not the `Visual Studio 17 2022` generator, which broke when GitHub repointed
+`windows-latest` to a VS 2026 image — applies the required JUCE patch from
+`cmake/patches/`, builds the **Release** standalone + VST3, and uploads both as
+downloadable artifacts. The WebView2 SDK is fetched from NuGet and passed via
+`JUCE_WEBVIEW2_PACKAGE_LOCATION`. No secrets are needed — the output is unsigned
+(code signing is tracked separately).
 
 ## Run
 
