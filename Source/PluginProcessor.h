@@ -132,6 +132,13 @@ public:
     void savePendingTake();
     void discardPendingTake();
 
+    // Take-recorder overdub (session-only, like the looper's switch): with
+    // a pending take, the next record layers the new input over the take
+    // instead of replacing it. The take keeps playing while you play along,
+    // and the new layer is wrapped-mixed into the take on stop.
+    bool isTakeOverdub() const { return takeOverdub.load (std::memory_order_acquire); }
+    void setTakeOverdub (bool enabled);
+
     bool deleteSnippet (int id);
     bool updateSnippetMeta (int id, const juce::String& name, const juce::String& comments);
 
@@ -479,6 +486,7 @@ private:
     void timerCallback();
     void finalizeRecordingOnMessageThread();
     void beginActualRecording();
+    void beginActualTakeOverdub();
 
     void writeRecording (const juce::AudioBuffer<float>& source, int numSamples);
     void renderPlayback (juce::AudioBuffer<float>& destination, int numSamples);
@@ -584,6 +592,16 @@ private:
     std::atomic<int64_t> takePlaybackPos    { 0 };
     std::vector<float>   takePeaks;
 
+    // Take overdub (session-only). takeOverdub is the user's Dub toggle;
+    // takeOverdubPending marks a start (possibly still in count-in) that
+    // will layer; takeOverdubCapture is true once the layer is actually
+    // being written and drives the monitor playback. takeOverdubPlayPos is
+    // the looped read position of the pending take during the layer.
+    std::atomic<bool>    takeOverdub        { false };
+    std::atomic<bool>    takeOverdubPending { false };
+    std::atomic<bool>    takeOverdubCapture { false };
+    std::atomic<int64_t> takeOverdubPlayPos { 0 };
+
     void refreshTakePeaks();
     // Clears the pending-take state. Message thread only (touches the
     // takePeaks vector). Audio-thread invalidation (beginActualRecording)
@@ -659,11 +677,14 @@ private:
 
     void refreshLooperPeaks();
     void trimLooperToMusicalGrid();
-    // Mixes the overdub layer region (overdubWritePos - oldLoopLength)
-    // into the loop [audioLoopStart, +audioLoopLength), wrapping across
-    // loop cycles pedal-style. Message thread only, run with capture
-    // stopped and playback off.
-    void mixOverdubLayer (int64_t oldLoopLength, int64_t layerBase, int64_t layerLength);
+    // Mixes a layer region [layerBase, layerBase + layerLength) into the
+    // loop [loopStart, loopStart + loopLength), wrapping across loop cycles
+    // pedal-style. Message thread only, run with capture stopped and
+    // playback off. Shared by the looper (loopStart = audioLoopStart) and
+    // the take recorder (loopStart = 0, loopLength = takeLength). Latch is
+    // the clip atomic to latch when the mixed result reaches 0 dBFS.
+    void mixOverdubLayer (int64_t loopStart, int64_t loopLength, int64_t layerBase,
+                          int64_t layerLength, std::atomic<bool>& clipLatch);
 
     // Pre-rendered metronome clicks. Two sounds, both synthesized by
     // resynthesizeClicks() (message thread only): a bright accent tick

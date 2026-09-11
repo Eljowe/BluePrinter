@@ -1002,6 +1002,47 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         }
     }
 
+    // 6b. Take-recorder overdub playback: while a layered capture is
+    //     running, play the pending take additively (looping) so the
+    //     player hears it while playing along. Monitor-only — never added
+    //     to recordingMixBuffer, so the captured layer holds only the new
+    //     playing. Started from position 0 when the capture begins, so the
+    //     layer aligns with the take's first sample.
+    if (takeOverdubCapture.load (std::memory_order_acquire) && recordBuffer != nullptr)
+    {
+        const auto takeLen = takeLength.load (std::memory_order_acquire);
+        if (takeLen > 0)
+        {
+            const int channels = juce::jmin (numChannels, recordBuffer->getNumChannels());
+            const int declick = juce::jmin (loopCrossfadeSamples, static_cast<int> (takeLen / 2));
+            auto position = takeOverdubPlayPos.load (std::memory_order_acquire);
+
+            for (int i = 0; i < numSamples; ++i)
+            {
+                if (position >= takeLen)
+                    position = 0;
+
+                float env = 1.0f;
+                if (declick > 0)
+                {
+                    const float fadeIn = static_cast<float> (position + 1)
+                                       / static_cast<float> (declick + 1);
+                    const float fadeOut = static_cast<float> (takeLen - position)
+                                        / static_cast<float> (declick + 1);
+                    env = juce::jmin (1.0f, juce::jmin (fadeIn, fadeOut));
+                }
+
+                const int src = static_cast<int> (position);
+                for (int ch = 0; ch < channels; ++ch)
+                    buffer.addSample (ch, i, recordBuffer->getSample (ch, src) * env);
+
+                ++position;
+            }
+
+            takeOverdubPlayPos.store (position, std::memory_order_release);
+        }
+    }
+
     // 7. Playback overwrites the output buffer. Done after recording so
     //    monitoring of the input stops while a snippet is playing.
     if (playbackActive.load (std::memory_order_acquire))
@@ -1421,6 +1462,15 @@ void BluePrinterAudioProcessor::startRecording()
     const int beats = countInBeats.load (std::memory_order_acquire);
     metronomePosition.store (0, std::memory_order_release);
 
+    // Overdub: when the Dub toggle is on and there is a pending take to
+    // layer onto, this capture records a new layer after the take instead
+    // of replacing it. The layer plays back the take while you play along
+    // and is wrap-mixed in on stop. Fresh otherwise.
+    const bool overdubbing = takeOverdub.load (std::memory_order_acquire)
+        && takePending.load (std::memory_order_acquire)
+        && takeLength.load (std::memory_order_acquire) > 0;
+    takeOverdubPending.store (overdubbing, std::memory_order_release);
+
     if (metronomeEnabled.load (std::memory_order_acquire) && beats > 0)
     {
         // Count-in: play N beats of click, then start recording. The
@@ -1546,7 +1596,8 @@ void BluePrinterAudioProcessor::setLooperRecording (bool enabled)
             const auto loopLength = audioLoopLength.load (std::memory_order_acquire);
             const auto layerBase  = audioLoopFullLength.load (std::memory_order_acquire);
             const auto layerLength = overdubWritePos.load (std::memory_order_acquire) - layerBase;
-            mixOverdubLayer (loopLength, layerBase, layerLength);
+            mixOverdubLayer (audioLoopStart.load (std::memory_order_acquire),
+                             loopLength, layerBase, layerLength, loopPlayClipped);
             refreshLooperPeaks();
         }
         else
@@ -1624,21 +1675,23 @@ void BluePrinterAudioProcessor::trimLooperToMusicalGrid()
     refreshLooperPeaks();
 }
 
-// Mixes the overdub layer (recorded into [loopLength, loopLength +
-// layerLength) during the capture) into the audible loop window
-// [audioLoopStart, audioLoopStart + loopLength), wrapping across loop
-// cycles pedal-style — play past the end and it layers on top of the
-// next cycle. Message thread only: capture is stopped and playback is
-// off, so the only recordBuffer access here is ours, under the lock
-// (matching refreshLooperPeaks).
-void BluePrinterAudioProcessor::mixOverdubLayer (int64_t loopLength, int64_t layerBase,
-                                                 int64_t layerLength)
+// Mixes a layer region [layerBase, layerBase + layerLength) into the loop
+// window [loopStart, loopStart + loopLength), wrapping across loop cycles
+// pedal-style — play past the end and it layers on top of the next cycle.
+// Shared by the looper (loopStart = audioLoopStart) and the take recorder
+// (loopStart = 0, loopLength = takeLength). Message thread only: capture is
+// stopped and playback is off, so the only recordBuffer access here is
+// ours, under the lock (matching refreshLooperPeaks).
+void BluePrinterAudioProcessor::mixOverdubLayer (int64_t loopStart, int64_t loopLength,
+                                                 int64_t layerBase, int64_t layerLength,
+                                                 std::atomic<bool>& clipLatch)
 {
     if (recordBuffer == nullptr || loopLength <= 0 || layerLength <= 0
-        || layerBase < 0 || layerBase + layerLength > recordBuffer->getNumSamples())
+        || loopStart < 0 || layerBase < 0
+        || loopStart + loopLength > recordBuffer->getNumSamples()
+        || layerBase + layerLength > recordBuffer->getNumSamples())
         return;
 
-    const auto start = audioLoopStart.load (std::memory_order_acquire);
     const int channels = recordBuffer->getNumChannels();
     // Overdub trim: attenuate each new layer before it piles into the
     // loop (0 dB is a no-op).
@@ -1651,7 +1704,7 @@ void BluePrinterAudioProcessor::mixOverdubLayer (int64_t loopLength, int64_t lay
         const auto cyclePos = offset % loopLength;
         const auto toMix = juce::jmin (loopLength - cyclePos, layerLength - offset);
         for (int ch = 0; ch < channels; ++ch)
-            recordBuffer->addFrom (ch, static_cast<int> (start + cyclePos),
+            recordBuffer->addFrom (ch, static_cast<int> (loopStart + cyclePos),
                                    *recordBuffer, ch,
                                    static_cast<int> (layerBase + offset),
                                    static_cast<int> (toMix), layerGain);
@@ -1659,13 +1712,13 @@ void BluePrinterAudioProcessor::mixOverdubLayer (int64_t loopLength, int64_t lay
     }
 
     // The mixed loop can now exceed 0 dBFS even if each layer was
-    // trimmed — latch the loop clip indicator so the UI shows it.
+    // trimmed — latch the caller's clip indicator so the UI shows it.
     float peak = 0.0f;
     for (int ch = 0; ch < channels; ++ch)
         peak = juce::jmax (peak, recordBuffer->getMagnitude (
-            ch, static_cast<int> (start), static_cast<int> (loopLength)));
+            ch, static_cast<int> (loopStart), static_cast<int> (loopLength)));
     if (peak >= 1.0f)
-        loopPlayClipped.store (true, std::memory_order_release);
+        clipLatch.store (true, std::memory_order_release);
 }
 
 int BluePrinterAudioProcessor::saveLoopSnippet()
@@ -1823,10 +1876,19 @@ void BluePrinterAudioProcessor::clearLoop()
 
 void BluePrinterAudioProcessor::beginActualRecording()
 {
+    // A start (or count-in) that intends to overdub switches to the
+    // layering path; the pending take and its audio are kept.
+    if (takeOverdubPending.exchange (false, std::memory_order_acq_rel))
+    {
+        beginActualTakeOverdub();
+        return;
+    }
+
     // A new take wipes recordBuffer, so any pending (unsaved) take is
     // invalidated. Audio-thread safe: atomics only — takePeaks stays
     // stale until the next finalize rebuilds it.
     takePending.store (false, std::memory_order_release);
+    takeOverdubCapture.store (false, std::memory_order_release);
     takePlaybackActive.store (false, std::memory_order_release);
     takePlaybackPos.store (0, std::memory_order_release);
     takeLength.store (0, std::memory_order_release);
@@ -1852,12 +1914,43 @@ void BluePrinterAudioProcessor::beginActualRecording()
     }
 }
 
+void BluePrinterAudioProcessor::beginActualTakeOverdub()
+{
+    // Layering keeps the pending take (and its audio) intact. The new
+    // input is captured after the take (recordWritePos = takeLength) and
+    // wrap-mixed into [0, takeLength) on stop. The take playback starts
+    // from the top so the layer aligns with the take's first sample.
+    takePlaybackActive.store (false, std::memory_order_release);
+    takePlaybackPos.store (0, std::memory_order_release);
+    takeOverdubPlayPos.store (0, std::memory_order_release);
+    takeOverdubCapture.store (true, std::memory_order_release);
+
+    {
+        const juce::ScopedLock sl (recordLock);
+        recordWritePos.store (takeLength.load (std::memory_order_acquire),
+                              std::memory_order_release);
+        recordingState.store (RecordingState::Recording, std::memory_order_release);
+        recordingFinalizePending.store (false, std::memory_order_release);
+    }
+    recordingRequested.store (true, std::memory_order_release);
+    transportPosition.store (0, std::memory_order_release);
+
+    // Re-sync external gear when the clock is already running, same as a
+    // fresh take.
+    if (clockRunning.load (std::memory_order_acquire))
+    {
+        midiStartPending.store (true, std::memory_order_release);
+        midiClockOutput.sendStart();
+    }
+}
+
 void BluePrinterAudioProcessor::stopRecording()
 {
     // Cancel count-in if one is running. Nothing was recorded.
     if (preRollActive.load (std::memory_order_acquire))
     {
         preRollActive.store (false, std::memory_order_release);
+        takeOverdubPending.store (false, std::memory_order_release);
         transportPosition.store (0, std::memory_order_release);
         updateClockRunState();
 
@@ -3276,6 +3369,33 @@ void BluePrinterAudioProcessor::finalizeRecordingOnMessageThread()
     if (recordBuffer == nullptr)
         return;
 
+    // Overdub finalize: the input captured after the take is wrapped-mixed
+    // into the take. The take length is unchanged — only its peaks refresh.
+    if (takeOverdubCapture.exchange (false, std::memory_order_acq_rel))
+    {
+        const auto takeLen = takeLength.load (std::memory_order_acquire);
+        int layerEnd = 0;
+        {
+            const juce::ScopedLock sl (recordLock);
+            layerEnd = static_cast<int> (recordWritePos.load (std::memory_order_acquire));
+            recordWritePos.store (0, std::memory_order_release);
+        }
+
+        takePlaybackActive.store (false, std::memory_order_release);
+        takePlaybackPos.store (0, std::memory_order_release);
+        takeOverdubPlayPos.store (0, std::memory_order_release);
+
+        const auto layerLength = static_cast<int64_t> (layerEnd) - takeLen;
+        if (takeLen > 0 && layerLength > 0)
+        {
+            mixOverdubLayer (0, takeLen, takeLen, layerLength, recordClipped);
+            refreshTakePeaks();
+        }
+
+        listeners.call ([](Listener& l) { l.transportChanged(); });
+        return;
+    }
+
     // The take is not saved automatically anymore — it becomes a pending
     // take the user reviews, replays, then explicitly saves to the
     // library or discards. The audio stays in recordBuffer (the shared
@@ -3323,6 +3443,9 @@ void BluePrinterAudioProcessor::clearPendingTake()
     takePlaybackActive.store (false, std::memory_order_release);
     takePlaybackPos.store (0, std::memory_order_release);
     takeLength.store (0, std::memory_order_release);
+    takeOverdubPending.store (false, std::memory_order_release);
+    takeOverdubCapture.store (false, std::memory_order_release);
+    takeOverdubPlayPos.store (0, std::memory_order_release);
     takePeaks.clear();
 }
 
@@ -3332,6 +3455,12 @@ void BluePrinterAudioProcessor::setTakePlayback (bool enabled)
     {
         if (! takePending.load (std::memory_order_acquire)
             || takeLength.load (std::memory_order_acquire) <= 0)
+            return;
+
+        // Not while a capture (fresh or layered) is in flight — review
+        // playback would fight the capture/overdub playback.
+        if (recordingRequested.load (std::memory_order_acquire)
+            || takeOverdubCapture.load (std::memory_order_acquire))
             return;
 
         // One reviewer at a time: stop snippet playback and the looper
@@ -3352,9 +3481,24 @@ void BluePrinterAudioProcessor::setTakePlayback (bool enabled)
     listeners.call ([](Listener& l) { l.transportChanged(); });
 }
 
+void BluePrinterAudioProcessor::setTakeOverdub (bool enabled)
+{
+    takeOverdub.store (enabled, std::memory_order_release);
+
+    // Turning Dub on while a capture is already in flight only affects
+    // the next capture; don't disturb the running one.
+    listeners.call ([](Listener& l) { l.transportChanged(); });
+}
+
 void BluePrinterAudioProcessor::savePendingTake()
 {
     if (! takePending.load (std::memory_order_acquire))
+        return;
+
+    // Don't finalise mid-capture (the Enter shortcut uses takePending,
+    // which stays true through an overdub layer).
+    if (recordingRequested.load (std::memory_order_acquire)
+        || takeOverdubCapture.load (std::memory_order_acquire))
         return;
 
     const auto captured = takeLength.load (std::memory_order_acquire);
@@ -3409,6 +3553,12 @@ void BluePrinterAudioProcessor::savePendingTake()
 void BluePrinterAudioProcessor::discardPendingTake()
 {
     if (! takePending.load (std::memory_order_acquire))
+        return;
+
+    // Don't discard mid-capture (the Enter shortcut uses takePending,
+    // which stays true through an overdub layer).
+    if (recordingRequested.load (std::memory_order_acquire)
+        || takeOverdubCapture.load (std::memory_order_acquire))
         return;
 
     clearPendingTake();

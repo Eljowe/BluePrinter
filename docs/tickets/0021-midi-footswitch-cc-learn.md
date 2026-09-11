@@ -1,11 +1,18 @@
 ---
 id: "0021"
 title: "MIDI footswitch / CC control with learn"
-status: needs-info
+status: wontfix
 blocked_by: []
 ---
 
 # MIDI footswitch / CC control with learn
+
+## Resolution
+
+**Wontfix (2026-09-12).** The maintainer does not use a MIDI footswitch, so this
+control surface is out of scope. The existing global keyboard shortcuts (0020)
+cover hands-free transport. Revisit only if real users ask for pedal control;
+the open questions below remain as the starting point if that happens.
 
 ## Problem
 

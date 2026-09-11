@@ -238,6 +238,12 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
                 && (bool) data.getDynamicObject()->getProperty("enabled");
             processor.setTakePlayback (enabled);
         })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetTakeOverdubEvent, [&processor](juce::var data)
+        {
+            const bool enabled = data.getDynamicObject() != nullptr
+                && (bool) data.getDynamicObject()->getProperty("enabled");
+            processor.setTakeOverdub (enabled);
+        })
         .withEventListener(BluePrinterWebViewEditor::frontendSaveTakeEvent, [&processor](juce::var)
         {
             processor.savePendingTake();
@@ -994,6 +1000,7 @@ juce::var BluePrinterWebViewEditor::makeTransportSnapshot() const
             peakArray.add (juce::var (p));
         obj->setProperty ("takePeaks", juce::var (peakArray));
     }
+    obj->setProperty ("takeOverdub", audioProcessor.isTakeOverdub());
     obj->setProperty ("looperRecording", audioProcessor.isLooperRecording());
     obj->setProperty ("looperPreRoll", audioProcessor.isLooperPreRolling());
     obj->setProperty ("looperPlaying", audioProcessor.isLooperPlaying());

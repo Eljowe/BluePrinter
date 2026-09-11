@@ -6,11 +6,14 @@ import { formatTime } from "../utils";
 // Review panel for the last recorded take. Recordings are no longer
 // saved automatically — after stopping, the take stays pending here
 // until it is replayed and either saved to the library or discarded.
+// Dub layers the next record over this take instead of replacing it.
 export function TakeReview({ transport }) {
   const pending = Boolean(transport?.takePending);
   if (!pending) return null;
 
   const playing = Boolean(transport?.takePlaying);
+  const recording = Boolean(transport?.recording) || Boolean(transport?.preRollActive);
+  const overdub = Boolean(transport?.takeOverdub);
   const sampleRate = Number(transport?.recordingSampleRate ?? 0);
   const length = Number(transport?.takeLength ?? 0);
   const seconds = sampleRate > 0 ? length / sampleRate : 0;
@@ -18,16 +21,26 @@ export function TakeReview({ transport }) {
     ? Math.min(100, Math.max(0, (Number(transport?.takePosition ?? 0) / length) * 100))
     : 0;
 
+  const stateLabel = recording
+    ? (overdub ? "Overdub" : "Recording")
+    : (playing ? "Playing" : `${formatTime(seconds)} take`);
+
   return (
-    <section className={`take-review ${playing ? "is-playing" : ""}`}>
+    <section className={`take-review ${playing ? "is-playing" : ""} ${recording ? "is-recording" : ""}`}>
       <div className="take-review-header">
         <div>
           <h2>Review the take</h2>
-          <p>Play it back, then save it to the library or discard it. A new recording replaces it.</p>
+          <p>
+            {recording
+              ? (overdub
+                ? "Layering over the take — stop to mix the new pass in."
+                : "Recording over the take — it will be replaced.")
+              : "Play it back, then save it to the library or discard it. Turn on Dub to layer another pass."}
+          </p>
         </div>
         <div className="take-review-state" aria-live="polite">
           <span className="take-review-state-dot" />
-          {playing ? "Playing" : `${formatTime(seconds)} take`}
+          {stateLabel}
         </div>
       </div>
 
@@ -40,10 +53,29 @@ export function TakeReview({ transport }) {
         </div>
       </div>
 
+      <label
+        className={`take-review-dub ${recording ? "is-disabled" : ""}`}
+        title={recording
+          ? "Stop the capture to change Dub"
+          : (overdub
+            ? "Dub on — the next record layers over this take"
+            : "Dub off — the next record replaces this take. Turn on to layer.")}
+      >
+        <input
+          type="checkbox"
+          checked={overdub}
+          disabled={recording}
+          onChange={(e) => emit(FRONTEND_EVENTS.setTakeOverdub, { enabled: e.target.checked })}
+        />
+        <span className="take-review-dub-switch" />
+        <span>Dub</span>
+      </label>
+
       <div className="take-review-actions">
         <button
           type="button"
           className="btn btn-primary btn-sm"
+          disabled={recording}
           onClick={() => emit(FRONTEND_EVENTS.setTakePlayback, { enabled: !playing })}
         >
           {playing ? <IconStop size={13} /> : <IconPlay size={13} />} {playing ? "Stop take" : "Play take"}
@@ -51,7 +83,7 @@ export function TakeReview({ transport }) {
         <button
           type="button"
           className="btn btn-ghost btn-sm"
-          disabled={playing}
+          disabled={playing || recording}
           onClick={() => emit(FRONTEND_EVENTS.saveTake)}
           title="Save the take to the library (and to the library folder if one is set)"
         >
@@ -60,7 +92,7 @@ export function TakeReview({ transport }) {
         <button
           type="button"
           className="btn btn-ghost btn-sm"
-          disabled={playing}
+          disabled={playing || recording}
           onClick={() => emit(FRONTEND_EVENTS.discardTake)}
           title="Delete the take without saving"
         >

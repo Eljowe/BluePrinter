@@ -65,14 +65,14 @@ blocked_by: []            # ticket ids that must be closed first, e.g. ["0001"]
 | Ticket | Title | Status | Blocked by |
 | ------ | ----- | ------ | ---------- |
 | [0020](0020-global-keyboard-transport-shortcuts.md) | Global keyboard transport shortcuts | done | — |
-| [0021](0021-midi-footswitch-cc-learn.md) | MIDI footswitch / CC control with learn | needs-info | — |
+| [0021](0021-midi-footswitch-cc-learn.md) | MIDI footswitch / CC control with learn | wontfix | — |
 
 ### Phase 3 — Capture workflow
 
 | Ticket | Title | Status | Blocked by |
 | ------ | ----- | ------ | ---------- |
 | [0022](0022-fixed-length-n-bar-loop-capture.md) | Fixed-length N-bar loop capture | done | — |
-| [0023](0023-take-overdub-punch-in.md) | Take recorder overdub / punch-in | needs-info | — |
+| [0023](0023-take-overdub-punch-in.md) | Take recorder overdub / punch-in | in-progress | — |
 
 ### Phase 4 — Library & import
 
@@ -80,7 +80,7 @@ blocked_by: []            # ticket ids that must be closed first, e.g. ["0001"]
 | ------ | ----- | ------ | ---------- |
 | [0024](0024-audio-drag-drop-import.md) | Audio drag-drop and Import into the library | done | — |
 | [0025](0025-audio-export-formats-bounce-loop.md) | Export audio in multiple formats and bounce a loop | done | — |
-| [0026](0026-midi-file-export.md) | MIDI file (.mid) export | needs-triage | — |
+| [0026](0026-midi-file-export.md) | MIDI file (.mid) export | wontfix | — |
 
 ### Phase 5 — Decomposition
 

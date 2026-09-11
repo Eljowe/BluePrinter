@@ -55,6 +55,10 @@ export function Transport({
   const isPreRoll = Boolean(transport?.preRollActive);
   const isRecording = Boolean(transport?.recording) || isPreRoll;
   const isPlaying = (transport?.playingSnippetId ?? -1) >= 0;
+  // A capture over a pending take with Dub on is a layered pass.
+  const isOverdubbing = Boolean(transport?.recording)
+    && Boolean(transport?.takeOverdub)
+    && Boolean(transport?.takePending);
   const recordingSeconds = isRecording && transport?.recordingSampleRate > 0
     ? (transport.recordingLength ?? 0) / transport.recordingSampleRate
     : 0;
@@ -73,7 +77,9 @@ export function Transport({
 
   const status = countdown !== null
     ? "count-in"
-    : (isRecording ? "recording" : (isPlaying ? "playing" : (transport?.midiClockEnabled ? "clock" : "ready")));
+    : (isRecording
+      ? (isOverdubbing ? "overdub" : "recording")
+      : (isPlaying ? "playing" : (transport?.midiClockEnabled ? "clock" : "ready")));
 
   const toggleRecording = () => {
     if (isRecording) emit(FRONTEND_EVENTS.stopRecording);
