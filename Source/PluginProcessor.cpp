@@ -13,6 +13,7 @@
 #include "LooperGridMath.h"
 #include "SnippetMath.h"
 #include "ClickSynth.h"
+#include "MidiClockMath.h"
 
 #include <algorithm>
 #include <set>
@@ -1238,36 +1239,18 @@ void BluePrinterAudioProcessor::renderMidiClockInBlock (juce::MidiBuffer& midiMe
     if (! clockRunning.load (std::memory_order_acquire))
         return;
 
-    const double bpmValue = bpm.load (std::memory_order_acquire);
-    if (bpmValue <= 0.0 || currentSampleRate <= 0.0)
-        return;
-
-    // 24 MIDI clock pulses per quarter note.
-    const double samplesPerClock = (60.0 * currentSampleRate) / (bpmValue * 24.0);
-    if (samplesPerClock <= 0.0)
-        return;
-
-    const int64_t endPos = metronomePos + numSamples;
-    const int64_t firstPulse = static_cast<int64_t> (std::ceil  (static_cast<double> (metronomePos) / samplesPerClock));
-    const int64_t lastPulse  = static_cast<int64_t> (std::floor (static_cast<double> (endPos)        / samplesPerClock));
-
-    for (int64_t pulse = firstPulse; pulse <= lastPulse; ++pulse)
+    MidiClock::forEachPulse (metronomePos, numSamples, currentSampleRate,
+                             bpm.load (std::memory_order_acquire),
+                             [this, &midiMessages] (int offset)
     {
-        const int64_t pulseSample = static_cast<int64_t> (pulse * samplesPerClock);
-        const int offset = static_cast<int> (pulseSample - metronomePos);
-        if (offset < 0 || offset >= numSamples)
-            continue;
-
         midiMessages.addEvent (juce::MidiMessage::midiClock(), offset);
 
         // Also punch out directly for standalone mode so external
         // MIDI hardware receives the clock regardless of host routing.
-        {
-            const juce::ScopedLock sl (midiOutputLock);
-            if (midiOutput != nullptr)
-                midiOutput->sendMessageNow (juce::MidiMessage::midiClock());
-        }
-    }
+        const juce::ScopedLock sl (midiOutputLock);
+        if (midiOutput != nullptr)
+            midiOutput->sendMessageNow (juce::MidiMessage::midiClock());
+    });
 }
 
 static void sendDirectMidiStart (std::unique_ptr<juce::MidiOutput>& out,

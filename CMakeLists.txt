@@ -187,6 +187,7 @@ if(BUILD_TESTING)
         Tests/test_MidiChannelFilter.cpp
         Tests/test_ClickSynth.cpp
         Tests/test_MetronomePlayer.cpp
+        Tests/test_MidiClockMath.cpp
         # Production sources under test. Kept deliberately minimal so the
         # test target never pulls in WebView2, the plugin host, or the
         # audio device layer.
