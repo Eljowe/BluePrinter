@@ -78,6 +78,9 @@ export const FRONTEND_EVENTS = {
   // record layers the new input over the loop instead of replacing it.
   setLooperOverdub: "frontendSetLooperOverdub",
   setLooperCountIn: "frontendSetLooperCountIn",
+  // Fixed capture length: { bars } — 0 = Free, else the capture auto-stops
+  // after exactly that many bars (1/2/4/8).
+  setLooperLengthBars: "frontendSetLooperLengthBars",
   // Crop the captured loop: { startBeats, endBeats } in whole beats
   // (4 per bar at the current BPM).
   setLoopCrop: "frontendSetLoopCrop",

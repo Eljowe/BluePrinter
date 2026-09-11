@@ -81,7 +81,8 @@ the **Build Release Bundle** VS Code task (`installer/build-release.ps1`).
 - **Audio looper** — capture a loop of the record mix (dry input +
   selected chains — guitar, synth sounds, FX — all baked in), with the
   same click + count-in + MIDI-clock controls as the take recorder,
-  beat-stepped start/end cropping, and loop/one-shot playback. Saving a
+  **Free or fixed-length (N bars) capture**, beat-stepped start/end
+  cropping, and loop/one-shot playback. Saving a
   loop converts it into a library snippet using the same one-click flow
   as the take recorder. Audio-only: there is no MIDI event sequencing or
   `.mid` export.
@@ -240,6 +241,7 @@ Events flow through `window.__JUCE__.backend`:
 | `frontendSetMidiClock` / `frontendSetMidiDevice`          | MIDI clock output on/off + output device           |
 | `frontendSetLooperRecording` / `...Playing` / `...Looping` | Looper: record / play / loop toggle              |
 | `frontendSetLooperClick` / `frontendSetLooperCountIn` / `frontendSetLooperClickDuringCapture` | Looper: click + count-in beats + click-through-capture gate |
+| `frontendSetLooperLengthBars`                             | Looper: capture length — `bars: 0` = Free, `1/2/4/8` = fixed N-bar auto-stop |
 | `frontendSetLoopCrop` / `frontendClearLoop` / `frontendSaveLoop` | Looper: crop start/end **beats** / clear / save as snippet to the library folder |
 | `frontendAddVst3` / `frontendRemoveVst3` / `frontendMoveVst3` | VST3 chain: add / remove / reorder slots       |
 | `frontendSetVst3Bypass` / `frontendOpenVst3Editor` / `frontendCloseVst3Editor` | Chain slot bypass + native editor |
@@ -296,10 +298,15 @@ produce, so the loop sounds exactly like what you heard while recording:
   the global **Click sound** tuning (pitch/snap/volume) in the sync strip
   beside the recording tabs, which the take and the looper share.
 - On stop, the captured length is trimmed to the nearest full 4/4 bar
-  (beat-length fallback). **Crop start / end** steppers trim in **whole
-  beats** (4 per bar at the current BPM) off either side — the audible window
-  is `[audioLoopStart, audioLoopStart + audioLoopLength)`. The timeline shows
-  a live waveform of the cropped loop, with the trimmed regions shaded.
+  (beat-length fallback). The **Length** selector picks **Free** (stop when
+  you stop) or a fixed **1 / 2 / 4 / 8 bars**: in fixed mode the capture
+  stops itself once that many bars have been recorded (driven off the same
+  BPM/sample-rate bar math as the count-in), then the usual grid trim stores
+  exactly N bars so the loop never drifts. **Crop start / end** steppers trim
+  in **whole beats** (4 per bar at the current BPM) off either side — the
+  audible window is `[audioLoopStart, audioLoopStart + audioLoopLength)`. The
+  timeline shows a live waveform of the cropped loop, with the trimmed
+  regions shaded.
 - Playback mixes the loop over the live input, post-chain (the loop audio is
   already processed, so it isn't re-run through the chains), with a
   precomputed crossfade at the wrap point. Loop/one-shot is toggleable.

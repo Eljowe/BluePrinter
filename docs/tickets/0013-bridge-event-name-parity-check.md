@@ -1,7 +1,7 @@
 ---
 id: "0013"
 title: "Automated parity check for bridge event names"
-status: in-progress
+status: done
 blocked_by: ["0012"]
 ---
 

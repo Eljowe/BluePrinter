@@ -47,7 +47,7 @@ blocked_by: []            # ticket ids that must be closed first, e.g. ["0001"]
 | ------ | ----- | ------ | ---------- |
 | [0011](0011-windows-ci-build-pipeline.md) | Windows CI build pipeline (GitHub Actions) | done | — |
 | [0012](0012-ctest-harness-pure-logic-tests.md) | CTest harness + pure-logic unit tests | done | 0011 |
-| [0013](0013-bridge-event-name-parity-check.md) | Automated parity check for bridge event names | in-progress | 0012 |
+| [0013](0013-bridge-event-name-parity-check.md) | Automated parity check for bridge event names | done | 0012 |
 | [0014](0014-context-md-and-adrs.md) | Add CONTEXT.md and ADRs for the load-bearing decisions | done | — |
 
 ### Phase 1 — Release-ready polish
@@ -71,7 +71,7 @@ blocked_by: []            # ticket ids that must be closed first, e.g. ["0001"]
 
 | Ticket | Title | Status | Blocked by |
 | ------ | ----- | ------ | ---------- |
-| [0022](0022-fixed-length-n-bar-loop-capture.md) | Fixed-length N-bar loop capture | ready-for-agent | — |
+| [0022](0022-fixed-length-n-bar-loop-capture.md) | Fixed-length N-bar loop capture | in-progress | — |
 | [0023](0023-take-overdub-punch-in.md) | Take recorder overdub / punch-in | needs-info | — |
 
 ### Phase 4 — Library & import

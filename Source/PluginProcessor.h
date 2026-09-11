@@ -265,6 +265,10 @@ public:
     // the new input over the existing loop instead of replacing it.
     bool    isLooperOverdub() const { return looperOverdub.load(); }
     int     getLooperCountInBeats() const { return looperCountInBeats.load(); }
+    // Fixed capture length in bars (0022): 0 = Free (stop when the user
+    // stops), 1/2/4/8 = auto-stop the capture after exactly that many
+    // bars so the loop always lands on the grid.
+    int     getLooperLengthBars() const { return looperLengthBars.load (std::memory_order_acquire); }
     // Header-level click-during-capture gate, shared by the take recorder
     // and the looper: when false the click only plays during count-ins,
     // never through the take or the loop capture itself. The count-in
@@ -290,6 +294,7 @@ public:
     void    setLooperLooping (bool enabled);
     void    setLooperOverdub (bool enabled);
     void    setLooperCountInBeats (int beats);
+    void    setLooperLengthBars (int bars);
     void    setClickDuringCapture (bool enabled);
     // Trim start/end of the loop in whole beats (4 per bar at the current
     // BPM), clamped so the window never fully collapses.
@@ -583,6 +588,14 @@ private:
     // samples at playback/save time. All audio-thread reads go through
     // the atomics; the crop bar counts are message-thread only.
     std::atomic<int>     looperCountInBeats     { 4 };
+    // Fixed capture length in bars (0 = Free). Read by the audio thread to
+    // auto-stop a fresh capture after N bars (4 beats per bar); persisted
+    // with the host state.
+    std::atomic<int>     looperLengthBars       { 0 };
+    // Set by the audio thread when a fixed-length capture has written its
+    // last block; the message thread finalises it via setLooperRecording(false)
+    // so the buffer trim/mix never runs on the audio thread.
+    std::atomic<bool>    looperAutoStopPending  { false };
     std::atomic<bool>    looperPreRollActive    { false };
     std::atomic<bool>    looperCaptureArmed     { false };
     std::atomic<bool>    looperLooping          { true };
