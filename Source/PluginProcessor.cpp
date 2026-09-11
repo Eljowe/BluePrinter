@@ -1792,23 +1792,15 @@ void BluePrinterAudioProcessor::setLoopCrop (int startBeats, int endBeats)
     if (full <= 0 || currentSampleRate <= 0.0)
         return;
 
-    const auto beat = 60.0 * currentSampleRate / juce::jmax (1.0f, bpm.load());
-    // Total beats of the FULL loop — crops are measured against this, never
-    // against the already-cropped window, so moving a crop handle back
-    // toward 0 restores the region it cut off (the old code re-derived the
-    // total from the shrunken window and every adjustment deleted more of
-    // the take).
-    const auto loopBeats = juce::jmax (1, static_cast<int> (std::llround (static_cast<double> (full) / beat)));
+    // Crop math (whole beats measured against the FULL loop, so moving a
+    // handle back restores what it cut) lives in LooperGrid::computeCrop.
+    const auto crop = LooperGrid::computeCrop (full, currentSampleRate,
+                                               bpm.load(), startBeats, endBeats);
+    looperCropStartBeats = crop.startBeats;
+    looperCropEndBeats   = crop.endBeats;
 
-    startBeats = juce::jlimit (0, loopBeats - 1, startBeats);
-    endBeats = juce::jlimit (0, loopBeats - 1 - startBeats, endBeats);
-    looperCropStartBeats = startBeats;
-    looperCropEndBeats = endBeats;
-
-    const auto trimStart = static_cast<int64_t> (startBeats * beat);
-    const auto trimEnd = static_cast<int64_t> (endBeats * beat);
-    audioLoopStart.store (trimStart, std::memory_order_release);
-    audioLoopLength.store (full - trimStart - trimEnd, std::memory_order_release);
+    audioLoopStart.store  (crop.startSamples,  std::memory_order_release);
+    audioLoopLength.store (crop.lengthSamples, std::memory_order_release);
 
     // Keep the playhead inside the cropped window.
     const auto remaining = audioLoopLength.load (std::memory_order_acquire);

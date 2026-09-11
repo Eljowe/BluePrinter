@@ -367,7 +367,8 @@ Update these together:
 
 BluePrinter has a small pure-logic unit-test suite (CTest) covering the
 functions where a subtle bug is most expensive: key detection, looper
-grid quantization, snippet gain/normalize math and sidecar round-tripping,
+grid quantization and crop math, snippet gain/normalize math and sidecar
+round-tripping,
 chain-state migration, the MIDI channel filter, metronome click synthesis,
 metronome click scheduling/ring-out, MIDI clock pulse scheduling, metering
 math, and the meter level/peak/clip state. It builds a standalone

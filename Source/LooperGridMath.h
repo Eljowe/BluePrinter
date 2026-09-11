@@ -28,4 +28,24 @@ namespace LooperGrid
     int64_t computeFixedLengthSamples (int bars,
                                        double sampleRate,
                                        float bpm);
+
+    // A whole-beat crop of a captured loop. `startBeats` is trimmed off the
+    // front, `endBeats` off the back; the caller plays
+    // [startSamples, startSamples + lengthSamples). Beats are measured
+    // against the FULL loop (so moving a handle back restores the region it
+    // cut off) and clamped so a start crop always leaves at least one beat,
+    // and end can't cross the start.
+    struct Crop
+    {
+        int     startBeats    = 0;
+        int     endBeats      = 0;
+        int64_t startSamples  = 0;
+        int64_t lengthSamples = 0;
+    };
+
+    Crop computeCrop (int64_t fullSamples,
+                      double sampleRate,
+                      float bpm,
+                      int startBeats,
+                      int endBeats);
 }
