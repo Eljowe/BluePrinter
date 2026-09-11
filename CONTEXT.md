@@ -157,6 +157,7 @@ _Avoid_: Message, IPC event
 | MIDI clock pulse scheduling | `Source/MidiClockMath.h` |
 | MIDI output device + direct sends | `Source/MidiClockOutput.h/.cpp` |
 | Metering math | `Source/MeterMath.h` |
+| Per-meter level/peak/clip state | `Source/Meter.h` |
 | React app + components | `WebUI/src/` |
 | Bridge API | `WebUI/src/bridge.js` |
 

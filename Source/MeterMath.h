@@ -12,6 +12,8 @@ namespace MeterMath
     inline constexpr float blockPeakDecay = 0.95f;
     // Slower peak decay applied by the 30 Hz transport timer.
     inline constexpr float timerPeakDecay = 0.92f;
+    // One-pole level time constant, in blocks (the processor used 8).
+    inline constexpr float levelSmoothing = 8.0f;
 
     struct Measurement
     {
