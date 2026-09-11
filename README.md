@@ -160,7 +160,9 @@ cmake --build build --config Debug --target BluePrinter_VST3
 Every push to `master` and every pull request runs
 [`.github/workflows/build.yml`](.github/workflows/build.yml) on `windows-latest`.
 It builds the WebUI (`npm ci && npm run build`), configures CMake against a pinned
-JUCE (the workflow's `JUCE_VERSION`), builds the **Release** standalone + VST3, and
+JUCE (the workflow's `JUCE_VERSION`) with **Ninja + MSVC** — deliberately not the
+`Visual Studio 17 2022` generator, which broke when GitHub repointed
+`windows-latest` to a VS 2026 image — builds the **Release** standalone + VST3, and
 uploads both as downloadable artifacts. The WebView2 SDK is fetched from NuGet and
 passed via `JUCE_WEBVIEW2_PACKAGE_LOCATION`. No secrets are needed — the output is
 unsigned (code signing is tracked separately).
