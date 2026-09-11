@@ -1,0 +1,44 @@
+--- a/modules/juce_gui_extra/misc/juce_WebBrowserComponent.h
++++ b/modules/juce_gui_extra/misc/juce_WebBrowserComponent.h
+@@ -204,6 +204,13 @@
+             */
+             [[nodiscard]] WinWebView2 withBuiltInErrorPageDisabled() const           { return withMember (*this, &WinWebView2::disableBuiltInErrorPage, true); }
+ 
++            /** Sets additional command-line arguments to pass to the WebView2 browser process.
++
++                These are passed verbatim to Chromium (e.g. L"--no-sandbox",
++                L"--allow-no-sandbox-job", L"--disable-gpu"). Use with care.
++            */
++            [[nodiscard]] WinWebView2 withAdditionalBrowserArguments (String args) const { return withMember (*this, &WinWebView2::additionalBrowserArguments, std::move (args)); }
++
+             /** Sets the background colour that WebView2 renders underneath all web content.
+ 
+                 This colour must either be fully opaque or fully transparent.
+@@ -222,12 +229,14 @@
+             bool getIsStatusBarDisabled() const noexcept         { return disableStatusBar; }
+             bool getIsBuiltInErrorPageDisabled() const noexcept  { return disableBuiltInErrorPage; }
+             Colour getBackgroundColour() const                   { return backgroundColour; }
++            String getAdditionalBrowserArguments() const         { return additionalBrowserArguments; }
+ 
+         private:
+             //==============================================================================
+             File dllLocation, userDataFolder;
+             bool disableStatusBar = false, disableBuiltInErrorPage = false;
+             Colour backgroundColour;
++            String additionalBrowserArguments;
+         };
+ 
+         /** Options specific to the WkWebView backend used on Apple systems. These options will be
+--- a/modules/juce_gui_extra/native/juce_WebBrowserComponent_windows.cpp
++++ b/modules/juce_gui_extra/native/juce_WebBrowserComponent_windows.cpp
+@@ -663,6 +663,10 @@
+ 
+         auto webViewOptions = Microsoft::WRL::Make<CoreWebView2EnvironmentOptions>();
+ 
++        const auto additionalArgs = options.getWinWebView2BackendOptions().getAdditionalBrowserArguments();
++        if (additionalArgs.isNotEmpty())
++            webViewOptions->put_AdditionalBrowserArguments (additionalArgs.toWideCharPointer());
++
+         const auto userDataFolder = options.getWinWebView2BackendOptions().getUserDataFolder().getFullPathName();
+ 
+         auto hr = createWebViewEnvironmentWithOptions (nullptr,
