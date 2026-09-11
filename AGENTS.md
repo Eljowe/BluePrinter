@@ -41,7 +41,7 @@ See `.vscode/tasks.json` for 11 pre-configured tasks:
 - **Lint / format / test**: no `.clang-format`, ESLint, or Prettier config, so match the style of surrounding code by hand. There **is** a pure-logic CTest suite: `cmake -S . -B build -DBUILD_TESTING=ON && cmake --build build --target BluePrinterTests && ctest --test-dir build --output-on-failure` (sources in `Tests/`, no external framework; CI runs it on every push/PR). Keep this section in sync if a formatter or lint command is added.
 
 ## Event Naming
-All C++→JS and JS→C++ events use `static constexpr const char*` in `WebViewEditor.h`. Match these exactly in `bridge.js` (`FRONTEND_EVENTS` / `BACKEND_EVENTS`). Never hardcode event name strings. See the **webui-bridge** skill for the full event listing and the add-a-new-event recipe.
+All C++→JS and JS→C++ events use `static constexpr const char*` in `WebViewEditor.h`. Match these exactly in `bridge.js` (`FRONTEND_EVENTS` / `BACKEND_EVENTS`). Never hardcode event name strings. Parity is machine-checked by `Tests/check-bridge-events.mjs` (CTest case `BridgeEventParity`, run in CI), so a one-sided rename fails the build with a readable diff. See the **webui-bridge** skill for the full event listing and the add-a-new-event recipe.
 
 ## VST3 Chains (multi-chain model)
 - The plugin hosts a **flexible list of parallel chains** (not a fixed MIDI + audio pair). Chains live in `std::vector<std::unique_ptr<PluginChain>> chains` on the processor, guarded by `chainLock`; the audio thread iterates a raw-pointer snapshot (`blockChains`) taken under that lock at the top of `processBlock`.

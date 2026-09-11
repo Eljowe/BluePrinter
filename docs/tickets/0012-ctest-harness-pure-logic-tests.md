@@ -1,7 +1,7 @@
 ---
 id: "0012"
 title: "CTest harness + pure-logic unit tests"
-status: in-progress
+status: done
 blocked_by: ["0011"]
 ---
 

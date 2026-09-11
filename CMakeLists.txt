@@ -202,5 +202,18 @@ if(BUILD_TESTING)
         juce::juce_core)
 
     add_test(NAME BluePrinterTests COMMAND BluePrinterTests)
+
+    # Bridge event-name parity (ticket 0013): kept as a Node script so it
+    # can import bridge.js and compare its maps against WebViewEditor.h.
+    # Requires node, which CI already has (setup-node before configure).
+    find_program(BLUEPRINTER_NODE_EXECUTABLE NAMES node)
+
+    if(BLUEPRINTER_NODE_EXECUTABLE)
+        add_test(NAME BridgeEventParity
+                 COMMAND ${BLUEPRINTER_NODE_EXECUTABLE}
+                         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/check-bridge-events.mjs)
+    else()
+        message(STATUS "node not found: BridgeEventParity test disabled")
+    endif()
 endif()
 
