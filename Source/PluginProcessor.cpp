@@ -12,6 +12,7 @@
 #include "ChainStateMigration.h"
 #include "LooperGridMath.h"
 #include "SnippetMath.h"
+#include "ClickSynth.h"
 
 #include <algorithm>
 #include <set>
@@ -2435,66 +2436,17 @@ void BluePrinterAudioProcessor::resynthesizeClicks()
     if (sampleRate <= 0.0)
         return;
 
-    struct ClickParams
-    {
-        double fundamental;
-        double decayRate;
-        double duration;
-        float  amplitude;
-        float  noiseLevel;
-    };
-
-    auto makeClick = [sampleRate](const ClickParams& p) -> std::vector<float>
-    {
-        const int n = juce::jmax (1, static_cast<int> (sampleRate * p.duration));
-        std::vector<float> buf (static_cast<size_t> (n));
-
-        const int attackSamples = juce::jmax (1, static_cast<int> (sampleRate * 0.002));
-        const int fadeSamples   = juce::jmax (1, static_cast<int> (sampleRate * 0.002));
-        const double noiseWindow = 0.004;
-
-        // Deterministic LCG so the click is identical every launch.
-        uint32_t noiseState = 0x1B3F5A91u;
-        auto nextNoise = [&noiseState]()
-        {
-            noiseState = noiseState * 1664525u + 1013904223u;
-            return (static_cast<float> (noiseState) / static_cast<float> (0xFFFFFFFFu)) * 2.0f - 1.0f;
-        };
-
-        const float twoPi = juce::MathConstants<float>::twoPi;
-        for (int i = 0; i < n; ++i)
-        {
-            const double t = static_cast<double> (i) / sampleRate;
-
-            double env = std::exp (-p.decayRate * t);
-            if (i < attackSamples)
-                env *= static_cast<double> (i) / attackSamples;
-            const int tailLeft = n - i;
-            if (tailLeft < fadeSamples)
-                env *= static_cast<double> (tailLeft) / fadeSamples;
-
-            const float f = static_cast<float> (t);
-            const float tonal = std::sin (twoPi * static_cast<float> (p.fundamental) * f) * 0.55f
-                              + std::sin (twoPi * static_cast<float> (p.fundamental * 2.0) * f) * 0.30f
-                              + std::sin (twoPi * static_cast<float> (p.fundamental * 3.0) * f) * 0.15f;
-            const float noise = t < noiseWindow ? nextNoise() * p.noiseLevel : 0.0f;
-
-            buf[static_cast<size_t> (i)] = (tonal * p.amplitude + noise) * static_cast<float> (env);
-        }
-        return buf;
-    };
-
-    // The accent decays a little slower than the tick so it rings
-    // slightly longer, and both get a touch of the same onset noise.
-    clickBuffer       = std::make_shared<const std::vector<float>> (
-        makeClick ({ static_cast<double> (clickPitch),
-                     static_cast<double> (clickDecay),
-                     0.040, clickVolume, clickNoise }));
+    // Click synthesis lives in ClickSynth (pure, unit-tested). The accent
+    // decays a little slower and rings a touch longer than the tick; both
+    // get the same onset noise.
+    clickBuffer = std::make_shared<const std::vector<float>> (
+        ClickSynth::render (sampleRate,
+                            { clickPitch, clickDecay, 0.040, clickVolume, clickNoise }));
 
     accentClickBuffer = std::make_shared<const std::vector<float>> (
-        makeClick ({ static_cast<double> (clickAccentPitch),
-                     static_cast<double> (clickDecay) * 0.78,
-                     0.055, clickAccentVolume, clickNoise }));
+        ClickSynth::render (sampleRate,
+                            { clickAccentPitch, clickDecay * 0.78f, 0.055,
+                              clickAccentVolume, clickNoise }));
 }
 
 // -------------------------------------------------------------------------

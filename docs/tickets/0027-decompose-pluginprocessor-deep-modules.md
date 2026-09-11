@@ -1,7 +1,7 @@
 ---
 id: "0027"
 title: "Decompose PluginProcessor into deep modules"
-status: needs-triage
+status: in-progress
 blocked_by: ["0011", "0012"]
 ---
 
@@ -35,6 +35,28 @@ one at a time, each behind tests from 0012. Candidate modules:
 
 Rules: incremental (one module per PR), behaviour-preserving, no new locks or
 allocations on the audio thread, and `processBlock` reduces to an orchestrator.
+
+## Plan (seams)
+
+Triage picked the order below: the pure/small seams first, the stateful
+audio-path modules next, and the large coupled persistence last. Each row is
+its own PR — behaviour-preserving, pure logic under test, CI green before the
+next.
+
+| # | Module | Seam | Status |
+| - | ------ | ---- | ------ |
+| 1 | `ClickSynth` | Pure click-voice synthesis behind `Voice` + `render` | done |
+| 2 | `MetronomePlayer` | Per-block click scheduling + ring-out (owns `activeClicks`) | todo |
+| 3 | `MidiClockOutput` | 24-ppqn scheduling + Start/Stop + device open/close | todo |
+| 4 | `Metering` | Level computation, peak decay, clip latches | todo |
+| 5 | `ChainStatePersistence` | make/apply + migration + quarantine/self-heal | todo |
+| 6 | `TakeRecorder` / `Looper` | capture, grid trim, crop, overdub mix | todo |
+
+Step 1 removed the click-synthesis lambda from
+`PluginProcessor::resynthesizeClicks` and moved it to
+`Source/ClickSynth.{h,cpp}` (deterministic output, clamping in the module,
+direct unit tests in `Tests/test_ClickSynth.cpp`) without touching the audio
+render path.
 
 ## Acceptance criteria
 

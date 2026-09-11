@@ -39,7 +39,8 @@ target_sources(BluePrinter PRIVATE
     Source/Vst3Library.cpp
     Source/KeyDetector.cpp
     Source/LooperGridMath.cpp
-    Source/ChainStateMigration.cpp)
+    Source/ChainStateMigration.cpp
+    Source/ClickSynth.cpp)
 
 target_include_directories(BluePrinter PRIVATE
     ${CMAKE_CURRENT_BINARY_DIR})
@@ -183,13 +184,15 @@ if(BUILD_TESTING)
         Tests/test_LooperGridMath.cpp
         Tests/test_ChainStateMigration.cpp
         Tests/test_MidiChannelFilter.cpp
+        Tests/test_ClickSynth.cpp
         # Production sources under test. Kept deliberately minimal so the
         # test target never pulls in WebView2, the plugin host, or the
         # audio device layer.
         Source/KeyDetector.cpp
         Source/SnippetLibrary.cpp
         Source/LooperGridMath.cpp
-        Source/ChainStateMigration.cpp)
+        Source/ChainStateMigration.cpp
+        Source/ClickSynth.cpp)
 
     juce_generate_juce_header(BluePrinterTests)
 

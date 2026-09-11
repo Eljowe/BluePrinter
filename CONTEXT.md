@@ -146,6 +146,7 @@ _Avoid_: Message, IPC event
 | VST3 scanning | `Source/Vst3Library.h/.cpp` |
 | Snippet library + WAV/JSON | `Source/SnippetLibrary.h/.cpp` |
 | Key detection | `Source/KeyDetector.h/.cpp` |
+| Metronome click synthesis | `Source/ClickSynth.h/.cpp` |
 | React app + components | `WebUI/src/` |
 | Bridge API | `WebUI/src/bridge.js` |
 
