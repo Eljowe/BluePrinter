@@ -14,6 +14,7 @@
 #include "Vst3Library.h"
 #include "KeyDetector.h"
 #include "MetronomePlayer.h"
+#include "MidiClockOutput.h"
 
 //==============================================================================
 // A dedicated thread that owns every VST3 instantiation so every
@@ -707,13 +708,12 @@ private:
     std::atomic<bool>    clockRunning           { false };
     std::atomic<bool>    midiStartPending       { false };
     std::atomic<bool>    midiStopPending        { false };
-    juce::CriticalSection midiOutputLock;
-    juce::String         midiOutputDeviceName;
-    std::unique_ptr<juce::MidiOutput> midiOutput;
+
+    // The selected device + direct Start/Stop/clock sends (the standalone
+    // never forwards the host MIDI buffer to hardware).
+    MidiClockOutput midiClockOutput;
 
     void renderMidiClockInBlock (juce::MidiBuffer& midiMessages, int64_t metronomePos, int numSamples);
-    void openMidiOutputDevice();
-    void closeMidiOutputDevice();
 
     // Cached audio-thread copies. Updated under the library lock briefly,
     // then held as shared_ptrs so playback can't dangle.

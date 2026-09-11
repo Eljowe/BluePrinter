@@ -41,7 +41,8 @@ target_sources(BluePrinter PRIVATE
     Source/LooperGridMath.cpp
     Source/ChainStateMigration.cpp
     Source/ClickSynth.cpp
-    Source/MetronomePlayer.cpp)
+    Source/MetronomePlayer.cpp
+    Source/MidiClockOutput.cpp)
 
 target_include_directories(BluePrinter PRIVATE
     ${CMAKE_CURRENT_BINARY_DIR})
