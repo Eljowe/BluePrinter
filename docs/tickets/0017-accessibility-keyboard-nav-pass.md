@@ -1,7 +1,7 @@
 ---
 id: "0017"
 title: "Accessibility and keyboard-navigation pass"
-status: ready-for-agent
+status: in-progress
 blocked_by: []
 ---
 

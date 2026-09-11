@@ -38,17 +38,30 @@ export default function ResizeHandle() {
       event.currentTarget.releasePointerCapture(event.pointerId);
   }, []);
 
+  // Keyboard resize: the grip is a real button so a keyboard user can grow
+  // or shrink the window with the arrow keys (the aspect ratio is locked in
+  // C++, so only the horizontal delta matters).
+  const onKeyDown = useCallback((event) => {
+    let direction = 0;
+    if (event.key === "ArrowRight" || event.key === "ArrowUp") direction = 1;
+    else if (event.key === "ArrowLeft" || event.key === "ArrowDown") direction = -1;
+    if (direction === 0) return;
+    event.preventDefault();
+    const dpr = window.devicePixelRatio || 1;
+    emit(FRONTEND_EVENTS.resizeEditor, { dWidth: direction * 24 * dpr });
+  }, []);
+
   return (
     <button
       type="button"
-      tabIndex={-1}
       className="bp-resize-handle"
-      aria-label="Resize window"
-      title="Drag to resize"
+      aria-label="Resize window; drag or use the arrow keys"
+      title="Drag, or use the arrow keys, to resize"
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={endDrag}
       onPointerCancel={endDrag}
+      onKeyDown={onKeyDown}
       onLostPointerCapture={() => {
         drag.current.active = false;
       }}
