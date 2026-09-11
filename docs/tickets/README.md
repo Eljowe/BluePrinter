@@ -58,7 +58,7 @@ blocked_by: []            # ticket ids that must be closed first, e.g. ["0001"]
 | [0016](0016-crash-diagnostics-report-flow.md) | In-app crash diagnostics report flow | ready-for-agent | — |
 | [0017](0017-accessibility-keyboard-nav-pass.md) | Accessibility and keyboard-navigation pass | ready-for-agent | — |
 | [0018](0018-first-run-empty-state-onboarding.md) | First-run empty states and onboarding hints | ready-for-agent | — |
-| [0019](0019-release-checklist-doc.md) | Single ordered release checklist | ready-for-agent | — |
+| [0019](0019-release-checklist-doc.md) | Single ordered release checklist | done | — |
 
 ### Phase 2 — Hands-free control
 
@@ -79,7 +79,7 @@ blocked_by: []            # ticket ids that must be closed first, e.g. ["0001"]
 | Ticket | Title | Status | Blocked by |
 | ------ | ----- | ------ | ---------- |
 | [0024](0024-audio-drag-drop-import.md) | Audio drag-drop and Import into the library | ready-for-agent | — |
-| [0025](0025-audio-export-formats-bounce-loop.md) | Export audio in multiple formats and bounce a loop | in-progress | — |
+| [0025](0025-audio-export-formats-bounce-loop.md) | Export audio in multiple formats and bounce a loop | done | — |
 | [0026](0026-midi-file-export.md) | MIDI file (.mid) export | needs-triage | — |
 
 ### Phase 5 — Decomposition
