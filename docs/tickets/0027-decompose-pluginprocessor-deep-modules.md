@@ -49,7 +49,8 @@ next.
 | 2 | `MetronomePlayer` | Per-block click scheduling + ring-out (owns `activeClicks`) | done |
 | 3a | `MidiClockMath` | 24-ppqn pulse scheduling (pure) | done |
 | 3b | `MidiClockOutput` | Device open/close + Start/Stop + direct send | todo |
-| 4 | `Metering` | Level computation, peak decay, clip latches | todo |
+| 4a | `MeterMath` | Peak/RMS measurement + level smoothing + peak decay (pure) | done |
+| 4b | `Metering` | Per-meter atomics + clip latches | todo |
 | 5 | `ChainStatePersistence` | make/apply + migration + quarantine/self-heal | todo |
 | 6 | `TakeRecorder` / `Looper` | capture, grid trim, crop, overdub mix | todo |
 
