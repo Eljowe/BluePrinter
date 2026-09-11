@@ -108,3 +108,85 @@ BP_TEST (SnippetSidecar_roundTripsMetadataThroughDisk)
 
     dir.deleteRecursively();
 }
+
+BP_TEST (SnippetExport_writesLosslessAudioAndOptionallyAppliesGain)
+{
+    const auto dir = makeTempDir ("export");
+
+    SnippetLibrary library;
+    auto snippet = library.addSnippet (makeBuffer (1, 1000, 0.5f), 44100.0, "export me");
+    BP_CHECK (snippet != nullptr);
+
+    juce::AudioFormatManager formats;
+    formats.registerBasicFormats();
+
+    auto decodedPeak = [&formats](const juce::File& file, juce::int64& outSamples, int& outChannels)
+    {
+        std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (file));
+        if (reader == nullptr)
+            return -1.0f;
+
+        outSamples = reader->lengthInSamples;
+        outChannels = static_cast<int> (reader->numChannels);
+
+        juce::AudioBuffer<float> buffer (static_cast<int> (reader->numChannels),
+                                         static_cast<int> (reader->lengthInSamples));
+        reader->read (&buffer, 0, buffer.getNumSamples(), 0, true, true);
+
+        float peak = 0.0f;
+        for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+            peak = juce::jmax (peak, buffer.getMagnitude (ch, 0, buffer.getNumSamples()));
+
+        return peak;
+    };
+
+    juce::String error;
+    juce::int64 samples = 0;
+    int channels = 0;
+
+    // Unity: gainDb 0 with applyGain on leaves the peak at ~0.5.
+    auto wavFile = dir.getChildFile ("unity.wav");
+    BP_CHECK (SnippetLibrary::exportSnippetToFile (*snippet, wavFile, true, error));
+    BP_CHECK (error.isEmpty());
+    BP_CHECK_NEAR (decodedPeak (wavFile, samples, channels), 0.5, 0.01);
+    BP_CHECK_EQ (samples, static_cast<juce::int64> (1000));
+    BP_CHECK_EQ (channels, 1);
+
+    // -6.02 dB halves the peak in the exported file...
+    snippet->gainDb = -6.0206f;
+    auto gainedFile = dir.getChildFile ("gained.wav");
+    BP_CHECK (SnippetLibrary::exportSnippetToFile (*snippet, gainedFile, true, error));
+    BP_CHECK_NEAR (decodedPeak (gainedFile, samples, channels), 0.25, 0.01);
+
+    // ...but is ignored when applyGain is false (the library-save semantics).
+    auto unityFile = dir.getChildFile ("unity-again.wav");
+    BP_CHECK (SnippetLibrary::exportSnippetToFile (*snippet, unityFile, false, error));
+    BP_CHECK_NEAR (decodedPeak (unityFile, samples, channels), 0.5, 0.01);
+
+    dir.deleteRecursively();
+}
+
+BP_TEST (SnippetExport_rejectsUnsupportedExtensions)
+{
+    const auto dir = makeTempDir ("export-bad");
+
+    SnippetLibrary library;
+    auto snippet = library.addSnippet (makeBuffer (1, 100, 0.2f), 44100.0, "x");
+    BP_CHECK (snippet != nullptr);
+
+    juce::String error;
+    BP_CHECK (! SnippetLibrary::exportSnippetToFile (*snippet, dir.getChildFile ("nope.xyz"), true, error));
+    BP_CHECK (error.isNotEmpty());
+
+    dir.deleteRecursively();
+}
+
+BP_TEST (SnippetExport_listsSupportedLosslessFormats)
+{
+    const auto extensions = SnippetLibrary::supportedExportExtensions();
+    BP_CHECK (extensions.contains (".wav"));
+    // WAV/AIFF/FLAC writers are bundled with JUCE 8.
+    BP_CHECK (extensions.contains (".aiff"));
+    BP_CHECK (extensions.contains (".flac"));
+}
+

@@ -97,6 +97,22 @@ public:
 
     static std::vector<float> computePeaks (const juce::AudioBuffer<float>& audio, int numBuckets);
 
+    // Writes `snippet` to `file`, choosing the writer from the file's
+    // extension (WAV/AIFF/FLAC as the JUCE build provides). When
+    // `applyGain` is true the snippet's non-destructive `gainDb` trim is
+    // baked into the exported audio — an export is a finished file — while
+    // the library's own save stays non-destructive. Returns false and sets
+    // outError on any failure.
+    static bool exportSnippetToFile (const Snippet& snippet,
+                                     const juce::File& file,
+                                     bool applyGain,
+                                     juce::String& outError);
+
+    // Extensions this build can export to, derived from the registered
+    // formats (MP3 has no writer and is never offered). UI order matters:
+    // WAV first, then lossless alternatives.
+    static juce::StringArray supportedExportExtensions();
+
 private:
     static bool writeMetadataFile (const Snippet& snippet, const juce::File& jsonFile);
 

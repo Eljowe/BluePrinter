@@ -29,6 +29,9 @@ export const FRONTEND_EVENTS = {
   deleteSnippet: "frontendDeleteSnippet",
   detectSnippetKey: "frontendDetectSnippetKey",
   saveSnippet: "frontendSaveSnippet",
+  // { id } — export a snippet to a chosen file (WAV/AIFF/FLAC), baking the
+  // non-destructive gainDb trim into the exported file.
+  exportSnippet: "frontendExportSnippet",
   saveLoop: "frontendSaveLoop",
   revealSnippet: "frontendRevealSnippet",
   chooseLibraryFolder: "frontendChooseLibraryFolder",

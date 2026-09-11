@@ -505,3 +505,105 @@ std::vector<float> SnippetLibrary::computePeaks (const juce::AudioBuffer<float>&
 
     return result;
 }
+
+juce::StringArray SnippetLibrary::supportedExportExtensions()
+{
+    juce::StringArray extensions;
+    juce::AudioFormatManager formatManager;
+    formatManager.registerBasicFormats();
+
+    // Lossless first (WAV is the library's native format), then the
+    // alternatives. Ogg is intentionally omitted: it is lossy and its
+    // quality index would need a separate UI decision.
+    for (const auto* ext : { ".wav", ".aiff", ".flac" })
+        if (formatManager.findFormatForFileExtension (ext) != nullptr)
+            extensions.add (ext);
+
+    return extensions;
+}
+
+bool SnippetLibrary::exportSnippetToFile (const Snippet& snippet,
+                                          const juce::File& file,
+                                          bool applyGain,
+                                          juce::String& outError)
+{
+    if (snippet.audio == nullptr || snippet.audio->getNumSamples() <= 0)
+    {
+        outError = "Snippet has no audio data.";
+        return false;
+    }
+
+    const auto extension = file.getFileExtension();
+    if (extension.isEmpty())
+    {
+        outError = "Choose a file name with an extension (e.g. .wav, .flac, .aiff).";
+        return false;
+    }
+
+    juce::AudioFormatManager formatManager;
+    formatManager.registerBasicFormats();
+    auto* format = formatManager.findFormatForFileExtension (extension);
+    if (format == nullptr)
+    {
+        outError = "Unsupported export format: " + extension;
+        return false;
+    }
+
+    const int numChannels = juce::jmax (1, snippet.audio->getNumChannels());
+    const double sampleRate = snippet.sampleRate > 0.0 ? snippet.sampleRate : 44100.0;
+
+    file.deleteFile();
+    std::unique_ptr<juce::FileOutputStream> stream (file.createOutputStream());
+    if (stream == nullptr)
+    {
+        outError = "Could not open file for writing: " + file.getFullPathName();
+        return false;
+    }
+
+    // 16-bit PCM is valid for every lossless format we expose and matches
+    // the library's own saves.
+    std::unique_ptr<juce::AudioFormatWriter> writer (format->createWriterFor (
+        stream.release(),
+        sampleRate,
+        static_cast<unsigned int> (numChannels),
+        16,
+        {},
+        0));
+
+    if (writer == nullptr)
+    {
+        outError = "Could not create a " + extension + " writer for these settings.";
+        return false;
+    }
+
+    bool wrote = false;
+
+    if (applyGain && snippet.gainDb != 0.0f)
+    {
+        // Bake the non-destructive trim into the export.
+        juce::AudioBuffer<float> gained (*snippet.audio);
+        gained.applyGain (juce::Decibels::decibelsToGain (snippet.gainDb));
+        wrote = writer->writeFromAudioSampleBuffer (gained, 0, gained.getNumSamples());
+    }
+    else
+    {
+        wrote = writer->writeFromAudioSampleBuffer (*snippet.audio, 0, snippet.audio->getNumSamples());
+    }
+
+    // Destroy the writer to flush and close the file before checking it.
+    writer.reset();
+
+    if (! wrote)
+    {
+        outError = "Failed to write audio data.";
+        return false;
+    }
+
+    if (! file.existsAsFile())
+    {
+        outError = "The exported file was not created.";
+        return false;
+    }
+
+    return true;
+}

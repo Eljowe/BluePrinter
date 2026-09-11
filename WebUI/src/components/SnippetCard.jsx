@@ -5,6 +5,7 @@ import { formatDate, formatTime, SNIPPET_COLORS, snippetColor } from "../utils";
 import { FRONTEND_EVENTS, emit } from "../bridge";
 import {
   IconAnalyze,
+  IconArrowDown,
   IconChevronDown,
   IconChevronUp,
   IconExternal,
@@ -115,6 +116,10 @@ export function SnippetCard({ snippet, tagNames, isPlaying, playPositionSeconds 
 
   const handleSave = () => {
     emit(FRONTEND_EVENTS.saveSnippet, { id: snippet.id });
+  };
+
+  const handleExport = () => {
+    emit(FRONTEND_EVENTS.exportSnippet, { id: snippet.id });
   };
 
   const handleReveal = () => {
@@ -356,6 +361,15 @@ export function SnippetCard({ snippet, tagNames, isPlaying, playPositionSeconds 
               >
                 <IconSave size={13} />
                 Save
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={handleExport}
+                title="Export as WAV, AIFF or FLAC — the Gain trim is baked into the exported file"
+              >
+                <IconArrowDown size={13} />
+                Export
               </button>
               <button
                 type="button"

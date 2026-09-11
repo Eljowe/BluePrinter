@@ -79,7 +79,7 @@ blocked_by: []            # ticket ids that must be closed first, e.g. ["0001"]
 | Ticket | Title | Status | Blocked by |
 | ------ | ----- | ------ | ---------- |
 | [0024](0024-audio-drag-drop-import.md) | Audio drag-drop and Import into the library | ready-for-agent | — |
-| [0025](0025-audio-export-formats-bounce-loop.md) | Export audio in multiple formats and bounce a loop | ready-for-agent | — |
+| [0025](0025-audio-export-formats-bounce-loop.md) | Export audio in multiple formats and bounce a loop | in-progress | — |
 | [0026](0026-midi-file-export.md) | MIDI file (.mid) export | needs-triage | — |
 
 ### Phase 5 — Decomposition
