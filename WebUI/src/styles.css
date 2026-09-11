@@ -1092,6 +1092,24 @@ button {
   -moz-appearance: textfield;
 }
 
+/* Fixed capture length selector (Free / N bars) */
+.looper-length-select {
+  height: 28px;
+  background: var(--panel);
+  border: 2px solid var(--line);
+  padding: 0 4px;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  transition: border-color 0.08s linear;
+}
+
+.looper-length-select:focus {
+  border-color: var(--accent);
+}
+
 .count-in-suffix {
   color: var(--ink-3);
   font-family: var(--mono);

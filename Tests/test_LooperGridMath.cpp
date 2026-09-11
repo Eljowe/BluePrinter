@@ -48,3 +48,13 @@ BP_TEST (LooperGrid_rejectsInvalidInput)
     BP_CHECK_EQ (LooperGrid::computeLength (-5, kSampleRate, kBpm, 1000000), static_cast<int64_t> (0));
     BP_CHECK_EQ (LooperGrid::computeLength (50000, 0.0, kBpm, 1000000), static_cast<int64_t> (0));
 }
+
+BP_TEST (LooperGrid_computesFixedLengthInBars)
+{
+    // 4 bars at 120 BPM / 44.1 kHz = 4 bars * 4 beats * 22050 = 352800.
+    BP_CHECK_EQ (LooperGrid::computeFixedLengthSamples (4, kSampleRate, kBpm), 4 * 4 * kBeat);
+    BP_CHECK_EQ (LooperGrid::computeFixedLengthSamples (1, kSampleRate, kBpm), kBar);
+    BP_CHECK_EQ (LooperGrid::computeFixedLengthSamples (0, kSampleRate, kBpm), static_cast<int64_t> (0));
+    BP_CHECK_EQ (LooperGrid::computeFixedLengthSamples (-2, kSampleRate, kBpm), static_cast<int64_t> (0));
+    BP_CHECK_EQ (LooperGrid::computeFixedLengthSamples (4, 0.0, kBpm), static_cast<int64_t> (0));
+}

@@ -845,7 +845,8 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     //    moves mid-capture; the layer is mixed into the loop on stop.
     if (looperCaptureArmed.load (std::memory_order_acquire))
     {
-        const auto writePos = looperOverdubCapture.load (std::memory_order_acquire)
+        const bool overdubCapture = looperOverdubCapture.load (std::memory_order_acquire);
+        const auto writePos = overdubCapture
             ? overdubWritePos.load (std::memory_order_relaxed)
             : audioLoopLength.load (std::memory_order_relaxed);
         const auto toCopy = juce::jmin (numSamples, maxRecordSamples - static_cast<int> (writePos));
@@ -853,10 +854,32 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         {
             for (int ch = 0; ch < juce::jmin (numChannels, recordBuffer->getNumChannels()); ++ch)
                 recordBuffer->copyFrom (ch, static_cast<int> (writePos), recordingMixBuffer, ch, 0, toCopy);
-            if (looperOverdubCapture.load (std::memory_order_acquire))
+            if (overdubCapture)
                 overdubWritePos.store (writePos + toCopy, std::memory_order_release);
             else
                 audioLoopLength.store (writePos + toCopy, std::memory_order_release);
+        }
+
+        // Fixed-length capture (0022): once a fresh capture has reached the
+        // configured number of bars, stop writing and ask the message thread
+        // to finalise it. trimLooperToMusicalGrid() then stores exactly N
+        // bars, so the loop stays on the grid regardless of the block
+        // boundary the stop lands on. Overdub layers are never auto-stopped —
+        // the existing loop already defines the length.
+        if (! overdubCapture)
+        {
+            const auto target = juce::jmin (
+                LooperGrid::computeFixedLengthSamples (looperLengthBars.load (std::memory_order_acquire),
+                                                       currentSampleRate,
+                                                       bpm.load (std::memory_order_acquire)),
+                static_cast<int64_t> (maxRecordSamples));
+
+            if (target > 0 && audioLoopLength.load (std::memory_order_acquire) >= target)
+            {
+                looperCaptureArmed.store (false, std::memory_order_release);
+                audioLoopRecording.store (false, std::memory_order_release);
+                looperAutoStopPending.store (true, std::memory_order_release);
+            }
         }
     }
 
@@ -1657,6 +1680,7 @@ void BluePrinterAudioProcessor::setLooperRecording (bool enabled)
     }
     else
     {
+        looperAutoStopPending.store (false, std::memory_order_release);
         looperPreRollActive.store (false, std::memory_order_release);
         looperCaptureArmed.store (false, std::memory_order_release);
         audioLoopRecording.store (false, std::memory_order_release);
@@ -1884,6 +1908,13 @@ void BluePrinterAudioProcessor::setLooperCountInBeats (int beats)
     listeners.call ([](Listener& l) { l.transportChanged(); });
 }
 
+// Fixed capture length in bars (0 = Free). Takes effect on the next capture.
+void BluePrinterAudioProcessor::setLooperLengthBars (int bars)
+{
+    looperLengthBars.store (juce::jlimit (0, 16, bars), std::memory_order_release);
+    listeners.call ([](Listener& l) { l.transportChanged(); });
+}
+
 void BluePrinterAudioProcessor::setLoopCrop (int startBeats, int endBeats)
 {
     const auto full = audioLoopFullLength.load (std::memory_order_acquire);
@@ -1921,6 +1952,7 @@ void BluePrinterAudioProcessor::setLoopCrop (int startBeats, int endBeats)
 
 void BluePrinterAudioProcessor::clearLoop()
 {
+    looperAutoStopPending.store (false, std::memory_order_release);
     looperPreRollActive.store (false, std::memory_order_release);
     looperCaptureArmed.store (false, std::memory_order_release);
     audioLoopRecording.store (false, std::memory_order_release);
@@ -3139,6 +3171,13 @@ void BluePrinterAudioProcessor::recordQuarantinedSkip (const juce::String& fileN
 //==============================================================================
 void BluePrinterAudioProcessor::timerCallback()
 {
+    // Fixed-length looper capture (0022): the audio thread stopped writing
+    // at the target and flagged us. Finalise on the message thread so the
+    // buffer trim, peak refresh, MIDI-clock update and listeners all run
+    // off the audio thread.
+    if (looperAutoStopPending.exchange (false, std::memory_order_acq_rel))
+        setLooperRecording (false);
+
     // Flush the debounced chain save once it has been quiet for 500 ms.
     if (chainPersistPending.load (std::memory_order_acquire)
         && juce::Time::currentTimeMillis() >= chainPersistDeadline.load (std::memory_order_acquire))
@@ -3552,6 +3591,7 @@ void BluePrinterAudioProcessor::getStateInformation (juce::MemoryBlock& destData
     state.setProperty ("metronomeEnabled", metronomeEnabled.load(), nullptr);
     state.setProperty ("bpm",              bpm.load(),              nullptr);
     state.setProperty ("countInBeats",     countInBeats.load(),     nullptr);
+    state.setProperty ("looperLengthBars", looperLengthBars.load(), nullptr);
     state.setProperty ("loopLevel",        loopLevel.load(),        nullptr);
     state.setProperty ("dryLevel",         dryLevel.load(),         nullptr);
     state.setProperty ("overdubLevel",     overdubLevel.load(),     nullptr);
@@ -3604,6 +3644,8 @@ void BluePrinterAudioProcessor::setStateInformation (const void* data, int sizeI
             metronomeEnabled.store (static_cast<bool>  (state.getProperty ("metronomeEnabled", true)));
             bpm.store              (static_cast<float> (state.getProperty ("bpm",              120.0f)));
             countInBeats.store     (static_cast<int>   (state.getProperty ("countInBeats",     4)));
+            looperLengthBars.store (static_cast<int>   (state.getProperty ("looperLengthBars", 0)),
+                                    std::memory_order_release);
             loopLevel.store        (static_cast<float> (state.getProperty ("loopLevel",        0.0f)));
             dryLevel.store         (static_cast<float> (state.getProperty ("dryLevel",         0.0f)));
             overdubLevel.store     (static_cast<float> (state.getProperty ("overdubLevel",     0.0f)));

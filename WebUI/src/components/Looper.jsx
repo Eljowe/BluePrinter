@@ -82,6 +82,8 @@ export function Looper({ transport, onOverdubChange, onLoopLevelChange, onOverdu
   const playing = Boolean(transport?.looperPlaying);
   const looping = transport?.looperLooping !== false;
   const overdub = Boolean(transport?.looperOverdub);
+  const lengthBars = Number(transport?.looperLengthBars ?? 0);
+  const fixedBars = lengthBars > 0;
 
   const loopLength = Number(transport?.audioLoopLength ?? 0);
   const hasLoop = loopLength > 0;
@@ -103,18 +105,22 @@ export function Looper({ transport, onOverdubChange, onLoopLevelChange, onOverdu
   const cropEndBeats = Number(transport?.looperCropEndBeats ?? 0);
   const loopStart = Number(transport?.audioLoopStart ?? 0);
 
-  // Fresh-capture progress: the timeline fills as the capture grows
-  // toward the record buffer's capacity.
-  const captureMax = Number(transport?.maxRecordSamples ?? 0);
-  const capturePct = captureMax > 0 && isRecording && !isOverdubbing
-    ? Math.min(100, Math.max(0, (loopLength / captureMax) * 100))
-    : 0;
-
   // The captured loop is trimmed to whole bars, so the beat count can be
   // derived from the current BPM/sample rate.
   const beatSamples = Number(transport?.bpm ?? 120) > 0 && Number(transport?.recordingSampleRate ?? 0) > 0
     ? (60.0 / Number(transport.bpm)) * Number(transport.recordingSampleRate)
     : 0;
+
+  // Fresh-capture progress: the timeline fills as the capture grows toward
+  // the record buffer's capacity — or, in fixed-length mode, toward the
+  // chosen bar count so the auto-stop is visible.
+  const captureMax = Number(transport?.maxRecordSamples ?? 0);
+  const captureTarget = fixedBars && beatSamples > 0 ? lengthBars * 4 * beatSamples : 0;
+  const captureDenominator = fixedBars && captureTarget > 0 ? captureTarget : captureMax;
+  const capturePct = captureDenominator > 0 && isRecording && !isOverdubbing
+    ? Math.min(100, Math.max(0, (loopLength / captureDenominator) * 100))
+    : 0;
+
   // The cropped window + the cropped-off beats are the FULL loop, which
   // is what the crop beats are measured against in the backend — so the
   // stepper ranges and the crop overlays stay anchored and moving a crop
@@ -235,7 +241,7 @@ export function Looper({ transport, onOverdubChange, onLoopLevelChange, onOverdu
         </div>
         <div className="looper-state" aria-live="polite">
           <span className="looper-state-dot" />
-          {preRoll ? "Count-in" : isOverdubbing ? "Overdub" : recording ? "Recording" : playing ? "Playing" : hasLoop ? `${formatBeats(croppedBeats)} loop ready` : "Empty"}
+          {preRoll ? "Count-in" : isOverdubbing ? "Overdub" : recording ? (fixedBars ? `Recording · ${lengthBars} bar${lengthBars === 1 ? "" : "s"}` : "Recording") : playing ? "Playing" : hasLoop ? `${formatBeats(croppedBeats)} loop ready` : "Empty"}
         </div>
       </div>
 
@@ -365,6 +371,24 @@ export function Looper({ transport, onOverdubChange, onLoopLevelChange, onOverdu
                 suffix="beats"
                 title="Beats of click before the loop capture starts (0 = off)"
               />
+            </label>
+          </div>
+
+          <div className="looper-setting">
+            <label className="count-in-control">
+              <span className="count-in-label">Length</span>
+              <select
+                className="looper-length-select"
+                value={fixedBars ? String(lengthBars) : "0"}
+                onChange={(e) => emit(FRONTEND_EVENTS.setLooperLengthBars, { bars: Number(e.target.value) })}
+                title="Fixed capture length — the capture stops itself after this many bars (4 beats each). Free stops when you stop."
+              >
+                <option value="0">Free</option>
+                <option value="1">1 bar</option>
+                <option value="2">2 bars</option>
+                <option value="4">4 bars</option>
+                <option value="8">8 bars</option>
+              </select>
             </label>
           </div>
 

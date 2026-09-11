@@ -20,4 +20,12 @@ namespace LooperGrid
                            double sampleRate,
                            float bpm,
                            int64_t maxSamples);
+
+    // Fixed capture target (0022) in samples for `bars` bars (4 beats
+    // each) at the given tempo/sample rate. Returns 0 for a non-positive
+    // bar count or invalid sample rate. The caller clamps to its record
+    // buffer capacity.
+    int64_t computeFixedLengthSamples (int bars,
+                                       double sampleRate,
+                                       float bpm);
 }

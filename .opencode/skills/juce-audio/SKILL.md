@@ -42,7 +42,13 @@ BluePrinter uses JUCE for audio processing, VST3 hosting, and WebView2 UI integr
    boundary never moves mid-capture); on stop, `mixOverdubLayer` wrap-mixes the
    layer into the loop on the message thread under `recordLock` (playback is
    stopped first so the mix can't race the audio thread's unlocked loop reads).
-   On capture stop `trimLooperToMusicalGrid` snaps the loop to the nearest
+   **Fixed-length mode** (`looperLengthBars` > 0): after the copy, a *fresh*
+   capture checks `audioLoopLength` against `LooperGrid::computeFixedLengthSamples`
+   and, at the target, clears `looperCaptureArmed`/`audioLoopRecording` and sets
+   `looperAutoStopPending`; `timerCallback` then calls `setLooperRecording(false)`
+   on the message thread. Never finalise (trim/mix/listeners) from the audio
+   thread, and never auto-stop an overdub layer. On capture stop
+   `trimLooperToMusicalGrid` snaps the loop to the nearest
    whole number of bars: the loop length is set to that snapped target (never
    clamped back to the raw capture), audio past it is truncated and a short
    capture is zero-padded so the wrap boundary stays on the click grid — a

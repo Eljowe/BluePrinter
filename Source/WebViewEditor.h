@@ -87,6 +87,8 @@ public:
     static constexpr const char* frontendSetLooperLoopingEvent   = "frontendSetLooperLooping";
     static constexpr const char* frontendSetLooperOverdubEvent   = "frontendSetLooperOverdub";
     static constexpr const char* frontendSetLooperCountInEvent   = "frontendSetLooperCountIn";
+    // Fixed capture length in bars (0 = Free, else 1/2/4/8).
+    static constexpr const char* frontendSetLooperLengthBarsEvent = "frontendSetLooperLengthBars";
     static constexpr const char* frontendSetLoopCropEvent        = "frontendSetLoopCrop";
     static constexpr const char* frontendClearLoopEvent          = "frontendClearLoop";
     static constexpr const char* frontendAddVst3Event          = "frontendAddVst3";
