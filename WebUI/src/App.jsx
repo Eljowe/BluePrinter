@@ -669,10 +669,13 @@ export default function App() {
         </div>
       </section>
 
-      <Notification
-        notification={notification}
-        onDismiss={() => setNotification(null)}
-      />
+      {createPortal(
+        <Notification
+          notification={notification}
+          onDismiss={() => setNotification(null)}
+        />,
+        document.body,
+      )}
 
       {createPortal(
         <SplashScreen

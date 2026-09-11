@@ -35,6 +35,14 @@ export function HeaderControls({
   onResetClip,
 }) {
   const resetClip = (target) => (onResetClip ? () => onResetClip(target) : undefined);
+  // The REC bus prints during a take or a loop capture (count-ins included),
+  // so the lamp above the REC meter mirrors the Transport/Looper state pills.
+  const captureLive = Boolean(
+    transport?.recording
+    || transport?.preRollActive
+    || transport?.looperRecording
+    || transport?.looperPreRoll,
+  );
 
   return (
     <div className="header-knobs">
@@ -68,13 +76,22 @@ export function HeaderControls({
           onResetClip={resetClip("input")}
         />
       </div>
-      <MeterChannel
-        label="REC"
-        level={transport?.recordLevel}
-        peak={transport?.recordPeak}
-        clipped={transport?.recordClipped}
-        onResetClip={resetClip("record")}
-      />
+      <div className="monitor-cell monitor-cell--meter-only">
+        <span
+          className={`monitor-lamp ${captureLive ? "is-on" : ""}`}
+          title="Lights while a take or loop capture is printing to the REC bus"
+        >
+          <span className="monitor-lamp-dot" aria-hidden="true" />
+          Capture
+        </span>
+        <MeterChannel
+          label="REC"
+          level={transport?.recordLevel}
+          peak={transport?.recordPeak}
+          clipped={transport?.recordClipped}
+          onResetClip={resetClip("record")}
+        />
+      </div>
       <div className="monitor-cell">
         <Knob
           label="Output"
