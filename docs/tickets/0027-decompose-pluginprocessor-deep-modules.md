@@ -52,7 +52,9 @@ next.
 | 4a | `MeterMath` | Peak/RMS measurement + level smoothing + peak decay (pure) | done |
 | 4b | `Meter` | Per-meter atomics + clip latches | done |
 | 5 | `ChainStatePersistence` | make/apply + migration + quarantine/self-heal | todo |
-| 6 | `TakeRecorder` / `Looper` | capture, grid trim, crop, overdub mix | todo |
+| 6a | `LooperGrid::computeCrop` | Whole-beat crop computation (pure) | done |
+| 6b | `TakeRecorder` | Capture/finalize/pending-take/overdub state | todo |
+| 6c | `Looper` | Capture, grid trim, crop, overdub mix | todo |
 
 Step 1 removed the click-synthesis lambda from
 `PluginProcessor::resynthesizeClicks` and moved it to

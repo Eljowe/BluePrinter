@@ -58,3 +58,42 @@ BP_TEST (LooperGrid_computesFixedLengthInBars)
     BP_CHECK_EQ (LooperGrid::computeFixedLengthSamples (-2, kSampleRate, kBpm), static_cast<int64_t> (0));
     BP_CHECK_EQ (LooperGrid::computeFixedLengthSamples (4, 0.0, kBpm), static_cast<int64_t> (0));
 }
+
+BP_TEST (LooperGrid_computesBeatCrop)
+{
+    // 2-bar loop (8 beats); trim one beat off each end.
+    const auto crop = LooperGrid::computeCrop (2 * kBar, kSampleRate, kBpm, 1, 1);
+    BP_CHECK_EQ (crop.startBeats, 1);
+    BP_CHECK_EQ (crop.endBeats, 1);
+    BP_CHECK_EQ (crop.startSamples, kBeat);
+    BP_CHECK_EQ (crop.lengthSamples, 2 * kBar - 2 * kBeat);
+
+    // No crop.
+    const auto full = LooperGrid::computeCrop (kBar, kSampleRate, kBpm, 0, 0);
+    BP_CHECK_EQ (full.startSamples, static_cast<int64_t> (0));
+    BP_CHECK_EQ (full.lengthSamples, kBar);
+}
+
+BP_TEST (LooperGrid_cropClampsToKeepAtLeastOneBeat)
+{
+    // 1 bar (4 beats): asking to trim 3 beats off the front clamps to 3,
+    // leaving one beat; a further end trim can't cross the start.
+    const auto crop = LooperGrid::computeCrop (kBar, kSampleRate, kBpm, 3, 4);
+    BP_CHECK_EQ (crop.startBeats, 3);
+    BP_CHECK_EQ (crop.endBeats, 0);
+    BP_CHECK_EQ (crop.startSamples, 3 * kBeat);
+    BP_CHECK_EQ (crop.lengthSamples, kBeat);
+
+    // A start past the loop clamps to the last beat.
+    const auto past = LooperGrid::computeCrop (kBar, kSampleRate, kBpm, 99, 0);
+    BP_CHECK_EQ (past.startBeats, 3);
+    BP_CHECK_EQ (past.endBeats, 0);
+}
+
+BP_TEST (LooperGrid_cropRejectsInvalidInput)
+{
+    BP_CHECK_EQ (LooperGrid::computeCrop (0, kSampleRate, kBpm, 1, 1).lengthSamples,
+                 static_cast<int64_t> (0));
+    BP_CHECK_EQ (LooperGrid::computeCrop (kBar, 0.0, kBpm, 1, 1).lengthSamples,
+                 static_cast<int64_t> (0));
+}
