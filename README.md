@@ -62,6 +62,9 @@ full ordered release process lives in
   time) or discard it. If a library folder is set, "Save to library" writes
   the WAV + sidecar there.
 - **Reveal in Explorer** — opens the saved WAV in Windows Explorer.
+- **Hands-free transport** — **Space** starts/stops a take or loop capture,
+  **Enter** saves a pending take, **Esc** stops playback. Shortcuts are ignored
+  while you're typing, and the header's **Keyboard** popover lists them.
 - **Live level meter** on the transport, with peak hold.
 - **Snippet list** with per-take waveform thumbnail (downsampled peaks).
 - **Musical key detection** — FFT-based (Krumhansl-Schmuckler) analysis that

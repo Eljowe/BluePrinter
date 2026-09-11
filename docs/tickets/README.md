@@ -64,7 +64,7 @@ blocked_by: []            # ticket ids that must be closed first, e.g. ["0001"]
 
 | Ticket | Title | Status | Blocked by |
 | ------ | ----- | ------ | ---------- |
-| [0020](0020-global-keyboard-transport-shortcuts.md) | Global keyboard transport shortcuts | ready-for-agent | — |
+| [0020](0020-global-keyboard-transport-shortcuts.md) | Global keyboard transport shortcuts | in-progress | — |
 | [0021](0021-midi-footswitch-cc-learn.md) | MIDI footswitch / CC control with learn | needs-info | — |
 
 ### Phase 3 — Capture workflow
