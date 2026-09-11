@@ -13,6 +13,7 @@
 #include "PluginChain.h"
 #include "Vst3Library.h"
 #include "KeyDetector.h"
+#include "MetronomePlayer.h"
 
 //==============================================================================
 // A dedicated thread that owns every VST3 instantiation so every
@@ -491,7 +492,6 @@ private:
                             std::atomic<float>& peakAtomic,
                             float gain,
                             std::atomic<bool>* clipAtomic = nullptr);
-    void renderMetronomeInBlock (juce::AudioBuffer<float>& buffer, int64_t startPos, int numSamples);
     // Recomputes whether any source wants the MIDI clock running and
     // sends Start/Stop on the edges. Message thread only (may open/close
     // the output device). refreshClockRunning is the audio-thread-safe
@@ -676,25 +676,10 @@ private:
     std::shared_ptr<const std::vector<float>> clickBuffer;
     std::shared_ptr<const std::vector<float>> accentClickBuffer;
 
-    // Audio-thread-only metronome click carry-over. A click burst is
-    // longer than the block it starts in; truncating it at the block
-    // boundary made beats near the end of a block sound short and
-    // quiet while beats near the start rang out — and the accent, the
-    // longest burst, varied the most. renderMetronomeInBlock now rings
-    // each click out across every block it spans: on-beat it schedules
-    // an ActiveClick (renders the in-block portion), and later blocks
-    // append the remainder before scheduling new beats. Never touched
-    // by the message thread.
-    struct ActiveClick
-    {
-        std::shared_ptr<const std::vector<float>> buffer;
-        int64_t nextSample = 0;  // absolute sample: buffer[readPos] goes here
-        int     readPos     = 0;
-    };
-    std::vector<ActiveClick> activeClicks;
-    int64_t lastMetronomeStartPos = 0;  // detects clock resets (backward jump)
-    void renderClickTail (juce::AudioBuffer<float>& buffer, ActiveClick& ac,
-                          int64_t startPos, int64_t endPos, int numChannels);
+    // Audio-thread metronome rendering: schedules beats and rings each
+    // click out across the blocks it spans. The player owns only the
+    // ringing state; the waveforms above are passed in per block.
+    MetronomePlayer metronomePlayer;
 
     // Click sound parameters (message-thread only). Persisted in host
     // state like the other metronome settings. Tuned via the "Click

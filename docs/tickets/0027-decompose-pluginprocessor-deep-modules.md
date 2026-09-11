@@ -46,7 +46,7 @@ next.
 | # | Module | Seam | Status |
 | - | ------ | ---- | ------ |
 | 1 | `ClickSynth` | Pure click-voice synthesis behind `Voice` + `render` | done |
-| 2 | `MetronomePlayer` | Per-block click scheduling + ring-out (owns `activeClicks`) | todo |
+| 2 | `MetronomePlayer` | Per-block click scheduling + ring-out (owns `activeClicks`) | done |
 | 3 | `MidiClockOutput` | 24-ppqn scheduling + Start/Stop + device open/close | todo |
 | 4 | `Metering` | Level computation, peak decay, clip latches | todo |
 | 5 | `ChainStatePersistence` | make/apply + migration + quarantine/self-heal | todo |

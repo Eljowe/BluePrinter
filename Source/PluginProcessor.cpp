@@ -651,6 +651,7 @@ void BluePrinterAudioProcessor::releaseResources()
     }
     clickBuffer.reset();
     accentClickBuffer.reset();
+    metronomePlayer.reset();
 }
 
 #ifndef JucePlugin_PreferredChannelConfigurations
@@ -696,6 +697,11 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     // count-in-into-capture transition (two drivers fire back-to-back in
     // the same block) advances exactly once per block.
     bool clockAdvancedThisBlock = false;
+
+    // Tempo context for the metronome player, read once per block.
+    metronomePlayer.setContext (currentSampleRate,
+                                bpm.load (std::memory_order_acquire),
+                                countInBeats.load (std::memory_order_acquire));
 
     // Apply the input trim (the record level). This is the post-DSP
     // signal we want to record and the pass-through signal when nothing
@@ -1015,7 +1021,7 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     {
         const int64_t startPos = metronomePosition.load (std::memory_order_acquire);
         if (metronomeEnabled.load (std::memory_order_acquire))
-            renderMetronomeInBlock (buffer, startPos, numSamples);
+            metronomePlayer.render (buffer, startPos, numSamples, clickBuffer, accentClickBuffer);
 
         const int64_t newPos = startPos + numSamples;
         const double bpmValue = bpm.load (std::memory_order_acquire);
@@ -1064,7 +1070,7 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     if (preRollActive.load (std::memory_order_acquire))
     {
         const int64_t startPos = metronomePosition.load (std::memory_order_acquire);
-        renderMetronomeInBlock (buffer, startPos, numSamples);
+        metronomePlayer.render (buffer, startPos, numSamples, clickBuffer, accentClickBuffer);
 
         const int64_t newPos = startPos + numSamples;
         const double bpmValue = bpm.load (std::memory_order_acquire);
@@ -1107,7 +1113,7 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         const int64_t startPos = metronomePosition.load (std::memory_order_acquire);
         if (metronomeEnabled.load (std::memory_order_acquire)
             && clickDuringCapture.load (std::memory_order_acquire))
-            renderMetronomeInBlock (buffer, startPos, numSamples);
+            metronomePlayer.render (buffer, startPos, numSamples, clickBuffer, accentClickBuffer);
 
         const int64_t newPos = startPos + numSamples;
         metronomePosition.store (newPos, std::memory_order_release);
@@ -1126,7 +1132,7 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         const int64_t startPos = metronomePosition.load (std::memory_order_acquire);
         if (metronomeEnabled.load (std::memory_order_acquire)
             && clickDuringCapture.load (std::memory_order_acquire))
-            renderMetronomeInBlock (buffer, startPos, numSamples);
+            metronomePlayer.render (buffer, startPos, numSamples, clickBuffer, accentClickBuffer);
 
         const int64_t newPos = startPos + numSamples;
         metronomePosition.store (newPos, std::memory_order_release);
@@ -1167,7 +1173,7 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             // same clock and gate their own click with clickDuringCapture.
             if (midiClockEnabled.load (std::memory_order_acquire)
                 && metronomeEnabled.load (std::memory_order_acquire))
-                renderMetronomeInBlock (buffer, blockStartMetronomePos, numSamples);
+                metronomePlayer.render (buffer, blockStartMetronomePos, numSamples, clickBuffer, accentClickBuffer);
         }
 
         const int64_t clockPos = metronomePosition.load (std::memory_order_acquire);
@@ -1222,125 +1228,6 @@ void BluePrinterAudioProcessor::writeRecording (const juce::AudioBuffer<float>& 
         recordingRequested.store (false, std::memory_order_release);
         recordingState.store (RecordingState::Idle, std::memory_order_release);
         recordingFinalizePending.store (true, std::memory_order_release);
-    }
-}
-
-void BluePrinterAudioProcessor::renderClickTail (juce::AudioBuffer<float>& buffer,
-                                                 ActiveClick& ac,
-                                                 int64_t startPos,
-                                                 int64_t endPos,
-                                                 int numChannels)
-{
-    if (ac.buffer == nullptr || ac.readPos >= static_cast<int> (ac.buffer->size()))
-        return;
-
-    // Where this click's unplayed samples would land.
-    const int64_t head = juce::jmax (startPos, ac.nextSample);
-    const int64_t tailEnd = ac.nextSample
-                        + (static_cast<int> (ac.buffer->size()) - ac.readPos);
-    if (tailEnd <= startPos)
-        return;
-
-    const int64_t inBlockEnd = juce::jmin (endPos, tailEnd);
-    if (inBlockEnd <= head)
-        return;
-
-    const int blockOff = static_cast<int> (head - startPos);
-    const int count    = static_cast<int> (inBlockEnd - head);
-    for (int j = 0; j < count; ++j)
-    {
-        const float sample = (*ac.buffer)[static_cast<size_t> (ac.readPos + j)];
-        for (int ch = 0; ch < numChannels; ++ch)
-            buffer.addSample (ch, blockOff + j, sample);
-    }
-
-    ac.readPos    += count;
-    ac.nextSample += count;
-}
-
-void BluePrinterAudioProcessor::renderMetronomeInBlock (juce::AudioBuffer<float>& buffer,
-                                                        int64_t startPos,
-                                                        int numSamples)
-{
-    // Copy the shared_ptrs once per block so a message-thread
-    // resynthesizeClicks() (click sound settings changed) can never
-    // invalidate the buffers mid-render.
-    const auto normalClick = clickBuffer;
-    const auto accentClick = accentClickBuffer;
-
-    const double bpmValue = bpm.load (std::memory_order_acquire);
-    if (bpmValue <= 0.0 || currentSampleRate <= 0.0)
-        return;
-
-    const double samplesPerBeat = 60.0 / bpmValue * currentSampleRate;
-    if (samplesPerBeat <= 0.0)
-        return;
-
-    const int numChannels = buffer.getNumChannels();
-    if (numChannels <= 0)
-        return;
-
-    // A backward jump in the render position means the clock was reset
-    // (a new count-in / capture): drop any click that is still ringing
-    // out from the old clock so it can't land on the new beat grid.
-    if (startPos < lastMetronomeStartPos)
-        activeClicks.clear();
-    lastMetronomeStartPos = startPos;
-
-    const int64_t endPos = startPos + numSamples;
-
-    // 1. Ring out clicks that started in earlier blocks. A click burst
-    //    outlives one block, so the tail must continue here instead of
-    //    being truncated at the block boundary — truncation made beats
-    //    near the end of a block sound short and quiet, and the long
-    //    accents varied the most.
-    for (auto& ac : activeClicks)
-        renderClickTail (buffer, ac, startPos, endPos, numChannels);
-
-    activeClicks.erase (std::remove_if (activeClicks.begin(), activeClicks.end(),
-                                        [](const ActiveClick& ac)
-                                        {
-                                            return ac.buffer == nullptr
-                                                || ac.readPos
-                                                    >= static_cast<int> (ac.buffer->size());
-                                        }),
-                        activeClicks.end());
-
-    if ((normalClick == nullptr || normalClick->empty())
-     && (accentClick == nullptr || accentClick->empty()))
-        return;
-
-    // Accent the first beat of every bar — beats whose index is a
-    // multiple of countInBeats (default 4). Falls back to 4-beat bars
-    // when count-in is disabled so the accent still works during plain
-    // recording. The accent uses its own brighter, louder click; the
-    // other beats use the softer tick.
-    const int beatsPerBar = juce::jmax (1, countInBeats.load (std::memory_order_acquire));
-
-    // Beat boundaries that fall inside [startPos, startPos + numSamples).
-    const int firstBeat  = static_cast<int> (std::ceil (static_cast<double> (startPos) / samplesPerBeat));
-    const int lastBeat   = static_cast<int> (std::floor (static_cast<double> (endPos)   / samplesPerBeat));
-
-    for (int beat = firstBeat; beat <= lastBeat; ++beat)
-    {
-        const int64_t beatSample = static_cast<int64_t> (beat * samplesPerBeat);
-        if (beatSample < startPos || beatSample >= endPos)
-            continue;
-
-        const bool isAccent = (beat % beatsPerBar == 0)
-            && accentClick != nullptr && ! accentClick->empty();
-        if (isAccent     == false
-         && (normalClick == nullptr || normalClick->empty()))
-            continue;
-
-        // Start the click at the beat. Render the in-block portion now
-        // and keep the ActiveClick so following blocks ring out the rest.
-        ActiveClick ac;
-        ac.buffer     = isAccent ? accentClick : normalClick;
-        ac.nextSample = beatSample;
-        ac.readPos    = 0;
-        renderClickTail (buffer, ac, startPos, endPos, numChannels);
-        activeClicks.push_back (ac);
     }
 }
 
