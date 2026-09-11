@@ -350,6 +350,16 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
         {
             processor.refreshLibraryFromFolder();
         })
+        .withEventListener(BluePrinterWebViewEditor::frontendCopyDiagnosticsEvent, [owner](juce::var)
+        {
+            if (owner != nullptr)
+                owner->handleCopyDiagnostics();
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendOpenDiagnosticsFolderEvent, [owner](juce::var)
+        {
+            if (owner != nullptr)
+                owner->handleOpenDiagnosticsFolder();
+        })
         .withEventListener(BluePrinterWebViewEditor::frontendGetSnippetsEvent, [owner](juce::var)
         {
             // React asks for a fresh snippet snapshot once the page
@@ -1082,6 +1092,19 @@ void BluePrinterWebViewEditor::handleOpenLibraryFolder()
     auto folder = juce::File (audioProcessor.getLibraryFolder());
     if (folder.isDirectory())
         folder.startAsProcess();
+}
+
+void BluePrinterWebViewEditor::handleCopyDiagnostics()
+{
+    juce::SystemClipboard::copyTextToClipboard (audioProcessor.buildDiagnosticsReport());
+    sendNotification ("Diagnostics copied to the clipboard.", "ok");
+}
+
+void BluePrinterWebViewEditor::handleOpenDiagnosticsFolder()
+{
+    auto folder = audioProcessor.getDiagnosticsFolder();
+    folder.createDirectory();
+    folder.revealToUser();
 }
 
 void BluePrinterWebViewEditor::saveSnippetWithDialog(int snippetId, const juce::File& startingFolder)

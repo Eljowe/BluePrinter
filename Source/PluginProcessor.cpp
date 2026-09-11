@@ -207,6 +207,23 @@ static LONG WINAPI bluePrinterCrashHandler (PEXCEPTION_POINTERS info)
         }
     }
 
+    // Rotate before overwriting so a recent crash is not lost when a
+    // new one lands (keep the last 3: .txt -> .1 -> .2 -> .3). All
+    // kernel32, no heap — safe inside the crash handler.
+    {
+        char from[MAX_PATH] = { 0 };
+        char to[MAX_PATH] = { 0 };
+        for (int i = 2; i >= 1; --i)
+        {
+            wsprintfA (from, "%s\\Retrokielto\\crash-info.%d.txt", appData, i);
+            wsprintfA (to,   "%s\\Retrokielto\\crash-info.%d.txt", appData, i + 1);
+            MoveFileExA (from, to, MOVEFILE_REPLACE_EXISTING);
+        }
+        wsprintfA (from, "%s\\Retrokielto\\crash-info.txt", appData);
+        wsprintfA (to,   "%s\\Retrokielto\\crash-info.1.txt", appData);
+        MoveFileExA (from, to, MOVEFILE_REPLACE_EXISTING);
+    }
+
     HANDLE f = CreateFileA (path, GENERIC_WRITE, FILE_SHARE_READ, nullptr,
                             CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (f != INVALID_HANDLE_VALUE)
@@ -2746,6 +2763,93 @@ void BluePrinterAudioProcessor::saveEditorSize (int width, int height)
 juce::String BluePrinterAudioProcessor::getLastChainRestoreError() const
 {
     return lastChainRestoreError;
+}
+
+juce::File BluePrinterAudioProcessor::getDiagnosticsFolder() const
+{
+    return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+               .getChildFile ("Retrokielto");
+}
+
+juce::String BluePrinterAudioProcessor::buildDiagnosticsReport()
+{
+    const auto folder = getDiagnosticsFolder();
+
+    juce::String report;
+    report << "BluePrinter diagnostics report\n";
+    report << "Generated: " << juce::Time::getCurrentTime().toString (true, true) << "\n";
+    report << "Version: " << JucePlugin_VersionString << "\n";
+    report << "OS: " << juce::SystemStats::getOperatingSystemName()
+           << (juce::SystemStats::isOperatingSystem64Bit() ? " (64-bit)" : " (32-bit)") << "\n";
+    report << "CPU: " << juce::SystemStats::getCpuModel()
+           << ", " << juce::SystemStats::getNumCpus() << " logical cores\n\n";
+
+    // Settings summary. Counts only: no audio, no personal file paths
+    // beyond the crash-info module paths (which are Program Files).
+    int chainCount = 0;
+    {
+        const juce::ScopedLock sl (chainLock);
+        chainCount = static_cast<int> (chains.size());
+    }
+
+    const bool libraryFolderSet = [this]
+    {
+        if (auto* props = getUserState())
+            return props->getValue ("libraryFolder").isNotEmpty();
+        return false;
+    }();
+
+    report << "Settings summary\n";
+    report << "  Chains: " << chainCount << "\n";
+    report << "  Snippets in memory: " << static_cast<int> (library.snapshot().size()) << "\n";
+    report << "  Library folder set: " << (libraryFolderSet ? "yes" : "no") << "\n";
+
+    {
+        juce::StringArray quarantine;
+        if (auto* props = getUserState())
+        {
+            const auto parsed = juce::JSON::parse (props->getValue ("pluginQuarantine"));
+            if (auto* arr = parsed.getArray())
+                for (const auto& v : *arr)
+                    quarantine.addIfNotAlreadyThere (v.toString().trim());
+        }
+
+        report << "  Quarantined plugins: "
+               << (quarantine.isEmpty() ? "none" : quarantine.joinIntoString (", ")) << "\n";
+    }
+
+    report << "\nLast chain-restore error\n";
+    report << "  " << (lastChainRestoreError.isNotEmpty() ? lastChainRestoreError : "(none)") << "\n";
+
+    report << "\nCrash diagnostics in " << folder.getFullPathName() << "\n";
+
+    const auto appendCrashFile = [&report, &folder] (const juce::String& name)
+    {
+        const auto file = folder.getChildFile (name);
+        report << "\n--- " << name << " ---\n";
+        if (file.existsAsFile())
+        {
+            report << file.loadFileAsString();
+            if (! report.endsWithChar ('\n'))
+                report << "\n";
+        }
+        else
+        {
+            report << "(not present)\n";
+        }
+    };
+
+    appendCrashFile ("crash-info.txt");
+    for (int i = 1; i <= 3; ++i)
+        appendCrashFile ("crash-info." + juce::String (i) + ".txt");
+
+    report << "\nFor full crash dumps, run an elevated (Administrator) Command Prompt:\n";
+    report << "  reg add \"HKLM\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\LocalDumps\\BluePrinter.exe\""
+              " /v DumpFolder /t REG_EXPAND_SZ /d C:\\BluePrinterDumps"
+              " /v DumpType /t REG_DWORD /d 2 /v DumpCount /t REG_DWORD /d 10 /f\n";
+    report << "then open the .dmp in WinDbg with the matching build's PDB/MAP.\n";
+
+    return report;
 }
 
 // Build the combined plugin-chain bundle that gets written to host

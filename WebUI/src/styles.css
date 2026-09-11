@@ -875,7 +875,11 @@ button {
 
 .app-footer {
   margin-top: auto;
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  text-align: left;
   color: var(--ink-3);
   font-family: var(--mono);
   font-size: 0.62rem;
@@ -883,6 +887,83 @@ button {
   text-transform: uppercase;
   border-top: 2px solid var(--line);
   padding: 14px 0 0;
+}
+
+.app-footer-note {
+  min-width: 0;
+}
+
+/* Diagnostics popover (0016) — opens upward from the footer. */
+.diagnostics-help {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.diagnostics-help > summary {
+  list-style: none;
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-weight: 700;
+  color: var(--ink-3);
+  border: 2px solid var(--line);
+  background: var(--panel);
+  padding: 5px 9px;
+  user-select: none;
+}
+
+.diagnostics-help > summary::-webkit-details-marker {
+  display: none;
+}
+
+.diagnostics-help[open] > summary {
+  color: var(--ink);
+  border-color: var(--accent);
+}
+
+.diagnostics-help.has-warning > summary {
+  color: var(--rec);
+  border-color: var(--rec);
+}
+
+.diagnostics-panel {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);
+  z-index: 40;
+  width: 360px;
+  background: var(--panel);
+  border: 2px solid var(--line);
+  box-shadow: var(--shadow-hard-sm);
+  padding: 12px 14px;
+  text-align: left;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.diagnostics-warning {
+  margin: 0 0 10px 0;
+  color: var(--rec);
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.diagnostics-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.diagnostics-hint {
+  margin: 10px 0 0 0;
+  font-family: inherit;
+  font-size: 0.7rem;
+  letter-spacing: normal;
+  text-transform: none;
+  line-height: 1.5;
+  color: var(--ink-3);
 }
 
 .library-section .bp-section-body {

@@ -1,7 +1,7 @@
 ---
 id: "0017"
 title: "Accessibility and keyboard-navigation pass"
-status: in-progress
+status: done
 blocked_by: []
 ---
 

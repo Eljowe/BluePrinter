@@ -378,6 +378,15 @@ public:
     void clearLastChainRestoreError();
     void restoreSavedPluginChains();
 
+    // Diagnostics (0016): a shareable, audio-free support report built on
+    // the message thread — app/OS/build, crash-info.txt (current +
+    // rotated), the last chain-restore error, the plugin quarantine list
+    // and a settings summary (counts only, no user audio or personal
+    // paths). getDiagnosticsFolder() is %APPDATA%/Retrokielto, where
+    // crash-info.txt and the properties file live.
+    juce::String buildDiagnosticsReport();
+    juce::File getDiagnosticsFolder() const;
+
     // Plugin quarantine. A VST3 whose instantiation/prepare crashed the
     // app during a previous deferred restore is quarantined (persisted
     // file-name list): the restore skips it entirely — the plugin is
