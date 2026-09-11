@@ -42,6 +42,7 @@ export function Knob({ label, min, max, value, onChange, unit = "", step = "0.01
   };
 
   const beginDrag = (event) => {
+    if (disabled) return;
     event.preventDefault();
     dragState.current = {
       pointerId: event.pointerId,
@@ -68,6 +69,7 @@ export function Knob({ label, min, max, value, onChange, unit = "", step = "0.01
   };
 
   const handleWheel = (event) => {
+    if (disabled) return;
     event.preventDefault();
     const direction = event.deltaY < 0 ? 1 : -1;
     const fineStep = Number(step) || range / 100;
@@ -75,6 +77,7 @@ export function Knob({ label, min, max, value, onChange, unit = "", step = "0.01
   };
 
   const handleKeyDown = (event) => {
+    if (disabled) return;
     const fineStep = Number(step) || range / 100;
     const coarseStep = fineStep * 10;
 
@@ -118,12 +121,14 @@ export function Knob({ label, min, max, value, onChange, unit = "", step = "0.01
       <div
         className="knob-shell"
         role="slider"
-        tabIndex={0}
+        tabIndex={disabled ? -1 : 0}
         title={title || undefined}
         aria-label={label}
+        aria-disabled={disabled || undefined}
         aria-valuemin={min}
         aria-valuemax={max}
         aria-valuenow={value}
+        aria-valuetext={`${value.toFixed(decimals)}${unit ? ` ${unit}` : ""}`}
         onPointerDown={beginDrag}
         onPointerMove={continueDrag}
         onPointerUp={endDrag}

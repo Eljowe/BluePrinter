@@ -152,6 +152,13 @@ html, body {
   color: var(--ink);
 }
 
+/* Keep the focus ring inside the window: the grip sits in the corner, so a
+   positive outline offset would be clipped by the viewport. */
+.bp-resize-handle:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: -4px;
+}
+
 .bp-resize-grip {
   width: 20px;
   height: 20px;
@@ -2933,6 +2940,9 @@ button {
   right: 22px;
   bottom: 22px;
   max-width: 380px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
   background: var(--panel);
   border: 2px solid var(--line);
   border-left: 6px solid var(--line);
@@ -2944,6 +2954,31 @@ button {
   box-shadow: 5px 5px 0 var(--line);
   z-index: 100;
   animation: toast-in 0.15s linear;
+}
+
+.notification-message {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.notification-close {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 2px solid var(--line);
+  background: var(--panel);
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: background 0.08s linear, color 0.08s linear;
+}
+
+.notification-close:hover {
+  background: var(--line);
+  color: var(--on-ink);
 }
 
 @keyframes toast-in {

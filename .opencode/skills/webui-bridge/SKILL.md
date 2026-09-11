@@ -122,6 +122,17 @@ The C++ side loads `WebUI/dist/index.html` via `findLocalWebUiDistIndex()` in `W
 - `ErrorBoundary.jsx` wraps the snippet library rows in `App.jsx`; a crashing child must never blank the whole WebView (white screen). Keep new volatile components behind it.
 - Respect `prefers-reduced-motion`: the splash's logo pulse and indeterminate bar sweep are killed in the existing reduced-motion block — add new cosmetic animations there too.
 
+## Accessibility
+
+- **Focus ring**: one global `:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }` covers native and custom controls. Override the offset only where the element sits on the viewport edge (the resize grip uses `-4px`). Don't remove it.
+- **Knob** (`controls.jsx`) is a `role="slider"` with `tabIndex` (skipped when `disabled`), `aria-label`, `aria-valuemin/max/now` **and** `aria-valuetext` (value + unit), and full keyboard control: Up/Right `+step`, Down/Left `−step`, PageUp/PageDown ±10 steps, Home/End to min/max, plus wheel. Pointer/wheel/key handlers no-op while `disabled`.
+- **Level meter** (`LevelMeter.jsx`) is a `role="meter"` with `aria-valuemin/max/now` in dBFS and an accessible `label`; the clip LED is a real `<button>` with `aria-pressed` and a reset label.
+- **Tabs** use the WAI-ARIA tab pattern (`role="tablist"/"tab"/"tabpanel"`, `aria-selected`, roving `tabIndex`, Left/Right arrows).
+- **Toasts** (`Notification.jsx`) use `role="alert"` + `aria-live="assertive"` for errors and `role="status"` + polite otherwise, and carry a keyboard-reachable dismiss button (clicking the toast still dismisses).
+- **Resize grip** is a real `<button>` (in the tab order); arrow keys resize by `24px · devicePixelRatio`. Pointer drag is unchanged.
+- **Custom clickable rows** that aren't `<button>`s must carry `role`, `tabIndex` and Enter/Space handling — e.g. `.snippet-summary` is `role="button"`.
+- **Reduced motion** is honoured by the block at the end of `styles.css`; add new cosmetic animations there. The meter/playhead transitions are deliberately kept (they track live audio, not decoration).
+
 ## Don't
 
 - Keep UI-only page state (recording tab, list caps, filters) in the backend — hold it in React state, persisted to `localStorage` where it should survive restarts.
