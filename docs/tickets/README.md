@@ -71,7 +71,7 @@ blocked_by: []            # ticket ids that must be closed first, e.g. ["0001"]
 
 | Ticket | Title | Status | Blocked by |
 | ------ | ----- | ------ | ---------- |
-| [0022](0022-fixed-length-n-bar-loop-capture.md) | Fixed-length N-bar loop capture | in-progress | — |
+| [0022](0022-fixed-length-n-bar-loop-capture.md) | Fixed-length N-bar loop capture | done | — |
 | [0023](0023-take-overdub-punch-in.md) | Take recorder overdub / punch-in | needs-info | — |
 
 ### Phase 4 — Library & import
