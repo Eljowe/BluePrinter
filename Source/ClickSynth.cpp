@@ -9,10 +9,10 @@ namespace ClickSynth
 Voice Voice::clamped() const
 {
     Voice v;
-    v.fundamental = juce::jlimit (400.0f, 3000.0f, fundamental);
+    v.fundamental = juce::jlimit (400.0, 3000.0, fundamental);
     // The accent rate is derived as tick * 0.78 (down to ~15.6), so the
     // lower bound is intentionally below the user-facing 20.
-    v.decayRate   = juce::jlimit (0.0f, 1000.0f, decayRate);
+    v.decayRate   = juce::jlimit (0.0, 1000.0, decayRate);
     v.duration    = juce::jmax (0.001, duration);
     v.amplitude   = juce::jlimit (0.0f, 1.0f, amplitude);
     v.noise       = juce::jlimit (0.0f, 0.3f, noise);
@@ -48,7 +48,7 @@ std::vector<float> render (double sampleRate, const Voice& rawVoice)
     {
         const double t = static_cast<double> (i) / sampleRate;
 
-        double env = std::exp (-static_cast<double> (voice.decayRate) * t);
+        double env = std::exp (-voice.decayRate * t);
         if (i < attackSamples)
             env *= static_cast<double> (i) / attackSamples;
         const int tailLeft = n - i;
@@ -56,9 +56,9 @@ std::vector<float> render (double sampleRate, const Voice& rawVoice)
             env *= static_cast<double> (tailLeft) / fadeSamples;
 
         const float f = static_cast<float> (t);
-        const float tonal = std::sin (twoPi * voice.fundamental * f) * 0.55f
-                          + std::sin (twoPi * voice.fundamental * 2.0f * f) * 0.30f
-                          + std::sin (twoPi * voice.fundamental * 3.0f * f) * 0.15f;
+        const float tonal = std::sin (twoPi * static_cast<float> (voice.fundamental) * f) * 0.55f
+                          + std::sin (twoPi * static_cast<float> (voice.fundamental * 2.0) * f) * 0.30f
+                          + std::sin (twoPi * static_cast<float> (voice.fundamental * 3.0) * f) * 0.15f;
         const float noise = t < noiseWindow ? nextNoise() * voice.noise : 0.0f;
 
         buffer[static_cast<size_t> (i)] = (tonal * voice.amplitude + noise) * static_cast<float> (env);

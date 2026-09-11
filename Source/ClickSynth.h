@@ -22,11 +22,11 @@ namespace ClickSynth
     // user-facing 20 because the accent derives its rate as tick * 0.78.
     struct Voice
     {
-        float fundamental = 1000.0f;   // Hz; clamped to [400, 3000]
-        float decayRate   = 90.0f;     // envelope exponent; clamped to [0, 1000]
-        double duration   = 0.040;     // seconds of output
-        float amplitude   = 0.35f;     // clamped to [0, 1]
-        float noise       = 0.10f;     // onset noise; clamped to [0, 0.3]
+        double fundamental = 1000.0;   // Hz; clamped to [400, 3000]
+        double decayRate   = 90.0;     // envelope exponent; clamped to [0, 1000]
+        double duration    = 0.040;    // seconds of output
+        float  amplitude   = 0.35f;    // clamped to [0, 1]
+        float  noise       = 0.10f;    // onset noise; clamped to [0, 0.3]
 
         // A copy with every field in range.
         Voice clamped() const;
