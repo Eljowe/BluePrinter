@@ -149,6 +149,7 @@ _Avoid_: Message, IPC event
 | Metronome click synthesis | `Source/ClickSynth.h/.cpp` |
 | Metronome click scheduling + ring-out | `Source/MetronomePlayer.h/.cpp` |
 | MIDI clock pulse scheduling | `Source/MidiClockMath.h` |
+| Metering math | `Source/MeterMath.h` |
 | React app + components | `WebUI/src/` |
 | Bridge API | `WebUI/src/bridge.js` |
 

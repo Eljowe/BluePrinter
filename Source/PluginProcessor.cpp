@@ -14,6 +14,7 @@
 #include "SnippetMath.h"
 #include "ClickSynth.h"
 #include "MidiClockMath.h"
+#include "MeterMath.h"
 
 #include <algorithm>
 #include <set>
@@ -1387,38 +1388,18 @@ void BluePrinterAudioProcessor::computeLevelsInto (const juce::AudioBuffer<float
     if (numSamples <= 0)
         return;
 
-    float peak = 0.0f;
-    double sumSquares = 0.0;
-    int countedSamples = 0;
-
-    for (int ch = 0; ch < source.getNumChannels(); ++ch)
-    {
-        const float* data = source.getReadPointer (ch);
-        for (int i = 0; i < numSamples; ++i)
-        {
-            const float v = data[i];
-            const float a = std::abs (v);
-            if (a > peak)
-                peak = a;
-            sumSquares += static_cast<double> (v) * static_cast<double> (v);
-            ++countedSamples;
-        }
-    }
-
-    const double rms = countedSamples > 0
-        ? std::sqrt (sumSquares / static_cast<double> (countedSamples))
-        : 0.0;
+    const auto measured = MeterMath::measure (source, numSamples, gain);
 
     const float prevLevel = levelAtomic.load (std::memory_order_acquire);
     const float prevPeak  = peakAtomic.load  (std::memory_order_acquire);
-    const float alpha     = 1.0f / static_cast<float> (levelSmoothing);
-    const float newLevel  = prevLevel + (static_cast<float> (rms) * gain - prevLevel) * alpha;
-    const float decayPeak = prevPeak * 0.95f;
+    const float newLevel  = MeterMath::smoothLevel (prevLevel, measured.rms,
+                                                    static_cast<float> (levelSmoothing));
 
     levelAtomic.store (newLevel, std::memory_order_release);
-    peakAtomic.store  (juce::jmax (peak * gain, decayPeak), std::memory_order_release);
+    peakAtomic.store  (juce::jmax (measured.peak, prevPeak * MeterMath::blockPeakDecay),
+                       std::memory_order_release);
 
-    if (clipAtomic != nullptr && peak * gain >= 1.0f)
+    if (clipAtomic != nullptr && measured.peak >= 1.0f)
         clipAtomic->store (true, std::memory_order_release);
 }
 
@@ -3365,19 +3346,19 @@ void BluePrinterAudioProcessor::timerCallback()
     // Peak meter decay.
     const float prevPeak = inputPeak.load (std::memory_order_acquire);
     if (prevPeak > 0.001f)
-        inputPeak.store (prevPeak * 0.92f, std::memory_order_release);
+        inputPeak.store (prevPeak * MeterMath::timerPeakDecay, std::memory_order_release);
 
     const float prevRecordPeak = recordPeak.load (std::memory_order_acquire);
     if (prevRecordPeak > 0.001f)
-        recordPeak.store (prevRecordPeak * 0.92f, std::memory_order_release);
+        recordPeak.store (prevRecordPeak * MeterMath::timerPeakDecay, std::memory_order_release);
 
     const float prevOutputPeak = outputPeak.load (std::memory_order_acquire);
     if (prevOutputPeak > 0.001f)
-        outputPeak.store (prevOutputPeak * 0.92f, std::memory_order_release);
+        outputPeak.store (prevOutputPeak * MeterMath::timerPeakDecay, std::memory_order_release);
 
     const float prevLoopPeak = loopPlayPeak.load (std::memory_order_acquire);
     if (prevLoopPeak > 0.001f)
-        loopPlayPeak.store (prevLoopPeak * 0.92f, std::memory_order_release);
+        loopPlayPeak.store (prevLoopPeak * MeterMath::timerPeakDecay, std::memory_order_release);
 
     // The loop level is only written by the audio thread while the loop
     // plays, so let it fall to zero here once playback stops.
