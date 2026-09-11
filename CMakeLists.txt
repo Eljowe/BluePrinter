@@ -37,7 +37,9 @@ target_sources(BluePrinter PRIVATE
     Source/SnippetLibrary.cpp
     Source/PluginChain.cpp
     Source/Vst3Library.cpp
-    Source/KeyDetector.cpp)
+    Source/KeyDetector.cpp
+    Source/LooperGridMath.cpp
+    Source/ChainStateMigration.cpp)
 
 target_include_directories(BluePrinter PRIVATE
     ${CMAKE_CURRENT_BINARY_DIR})
@@ -157,3 +159,48 @@ if(WIN32)
             COMMENT "Embedding WebUI into VST3 bundle")
     endif()
 endif()
+
+# ==============================================================================
+# Tests
+#
+# Pure-logic unit tests: no audio device, no plugin instantiation, no
+# WebView2. Configure with -DBUILD_TESTING=ON (the default), then:
+#
+#   cmake --build build --target BluePrinterTests
+#   ctest --test-dir build --output-on-failure
+#
+# CI configures with BUILD_TESTING=ON (see .github/workflows/build.yml).
+# ==============================================================================
+include(CTest)
+
+if(BUILD_TESTING)
+    juce_add_console_app(BluePrinterTests PRODUCT_NAME "BluePrinter Tests")
+
+    target_sources(BluePrinterTests PRIVATE
+        Tests/TestRunner.cpp
+        Tests/test_KeyDetector.cpp
+        Tests/test_SnippetLibrary.cpp
+        Tests/test_LooperGridMath.cpp
+        Tests/test_ChainStateMigration.cpp
+        Tests/test_MidiChannelFilter.cpp
+        # Production sources under test. Kept deliberately minimal so the
+        # test target never pulls in WebView2, the plugin host, or the
+        # audio device layer.
+        Source/KeyDetector.cpp
+        Source/SnippetLibrary.cpp
+        Source/LooperGridMath.cpp
+        Source/ChainStateMigration.cpp)
+
+    juce_generate_juce_header(BluePrinterTests)
+
+    target_include_directories(BluePrinterTests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/Source)
+
+    target_link_libraries(BluePrinterTests PRIVATE
+        juce::juce_dsp
+        juce::juce_audio_formats
+        juce::juce_core)
+
+    add_test(NAME BluePrinterTests COMMAND BluePrinterTests)
+endif()
+

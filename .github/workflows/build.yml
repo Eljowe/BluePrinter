@@ -117,11 +117,8 @@ jobs:
       - name: Build (Release)
         run: cmake --build build
 
-      # ---------------------------------------------------------------------
-      # Tests (ticket 0012). Uncomment once the CTest harness and tests land.
-      # - name: Run tests
-      #   run: ctest --test-dir build --output-on-failure
-      # ---------------------------------------------------------------------
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure
 
       - name: Upload standalone
         uses: actions/upload-artifact@v4

@@ -1,7 +1,7 @@
 ---
 id: "0011"
 title: "Windows CI build pipeline (GitHub Actions)"
-status: in-progress
+status: done
 blocked_by: []
 ---
 

@@ -9,6 +9,9 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 #include "WebViewEditor.h"
+#include "ChainStateMigration.h"
+#include "LooperGridMath.h"
+#include "SnippetMath.h"
 
 #include <algorithm>
 #include <set>
@@ -458,38 +461,17 @@ void BluePrinterAudioProcessor::clearChains()
 
 void BluePrinterAudioProcessor::ensureUniqueChainIds()
 {
-    std::set<juce::String> seen;
-    int maxId = -1;
-    {
-        const juce::ScopedLock sl (chainLock);
+    const juce::ScopedLock sl (chainLock);
 
-        // First pass: find the highest numeric id in use ("chainN"),
-        // so regenerated ids never collide with existing ones.
-        for (auto& chain : chains)
-        {
-            const juce::String id = chain->getChainId();
-            if (id.startsWith ("chain") && id.length() > 5)
-            {
-                const juce::String suffix = id.substring (5);
-                const int numeric = suffix.getIntValue();
-                if (suffix == juce::String (numeric))
-                    maxId = juce::jmax (maxId, numeric);
-            }
-        }
+    std::vector<juce::String> rawIds;
+    rawIds.reserve (chains.size());
+    for (auto& chain : chains)
+        rawIds.push_back (chain->getChainId());
 
-        // Second pass: assign fresh ids to missing/duplicate ids,
-        // starting above the highest id in use.
-        int next = juce::jmax (maxId + 1, nextChainId);
-        for (auto& chain : chains)
-        {
-            const juce::String id = chain->getChainId();
-            if (id.isEmpty() || seen.count (id) > 0)
-                chain->setChainId (juce::String ("chain") + juce::String (next++));
-            else
-                seen.insert (id);
-        }
-        nextChainId = next;
-    }
+    const auto fixedIds = ChainStateMigration::dedupeIds (rawIds, nextChainId);
+    for (size_t i = 0; i < chains.size(); ++i)
+        if (fixedIds[i] != rawIds[i])
+            chains[i]->setChainId (fixedIds[i]);
 }
 
 BluePrinterAudioProcessor::~BluePrinterAudioProcessor()
@@ -1732,8 +1714,6 @@ void BluePrinterAudioProcessor::trimLooperToMusicalGrid()
     if (captured <= 0 || currentSampleRate <= 0.0)
         return;
 
-    const auto beat = 60.0 * currentSampleRate / juce::jmax (1.0f, bpm.load());
-    const auto bar = beat * 4.0;
     // Snap to a whole number of bars so the loop's downbeat stays on the
     // beat grid on every cycle. The old code clamped the snapped length
     // back to the raw capture (`jlimit(1, captured, target)`), so a
@@ -1742,11 +1722,12 @@ void BluePrinterAudioProcessor::trimLooperToMusicalGrid()
     // on every wrap — heard as the second cycle starting late. The loop
     // is now exactly the snapped length: audio past the capture is
     // truncated, and a short capture is zero-padded so the grid boundary
-    // is preserved.
-    auto target = static_cast<int64_t> (std::llround (static_cast<double> (captured) / bar) * bar);
+    // is preserved. The math lives in LooperGrid::computeLength so it can
+    // be unit tested.
+    const auto target = LooperGrid::computeLength (captured, currentSampleRate, bpm.load(),
+                                                   static_cast<int64_t> (maxRecordSamples));
     if (target <= 0)
-        target = static_cast<int64_t> (std::llround (static_cast<double> (captured) / beat) * beat);
-    target = juce::jlimit<int64_t> (1, static_cast<int64_t> (maxRecordSamples), target);
+        return;
 
     if (recordBuffer != nullptr && target > captured)
     {
@@ -2174,7 +2155,7 @@ bool BluePrinterAudioProcessor::normalizeSnippet (int id)
         return false;
 
     // Bring the peak to -1 dBFS: gainDb = targetDb - peakDb.
-    const float gainDb = -1.0f - juce::Decibels::gainToDecibels (peak, -144.0f);
+    const float gainDb = SnippetMath::normalizeGainDb (peak);
     if (! setSnippetGain (id, gainDb))
         return false;
 
@@ -2994,81 +2975,24 @@ void BluePrinterAudioProcessor::applyChainState (const juce::var& state, juce::S
 
     clearChains();
 
-    const bool splitFormat = obj->hasProperty ("midiChain")
-                          || obj->hasProperty ("audioChain");
-    const bool newFormat = obj->hasProperty ("chains");
-
-    if (! newFormat)
+    // Normalise the saved bundle (current / legacy-split / pre-split) into
+    // the chains to restore, then create and load each one. The parsing
+    // lives in ChainStateMigration so the migration rules are unit tested;
+    // the processor only wires the specs to its own chains.
+    const auto specs = ChainStateMigration::normalise (state);
+    for (const auto& spec : specs)
     {
-        // Legacy formats. Both chains default to the same behaviour the
-        // old code had: MIDI chain sees the keyboard, audio FX chain
-        // doesn't, both take the full stereo input and record.
-        if (splitFormat)
-        {
-            juce::String midiError, audioError;
+        auto* chain = createChain (spec.name, ChainInputBoth, spec.wantsMidi, spec.recordOnCapture);
 
-            auto* midiChain = createChain ("MIDI Chain", ChainInputBoth, true, true);
-            const auto midiVar = obj->getProperty ("midiChain");
-            if (midiVar.isObject())
-            {
-                midiChain->setChainState (midiVar, midiError);
-                if (! midiVar.getDynamicObject()->hasProperty ("wantsMidi"))
-                    midiChain->setWantsMidi (true);
-            }
+        if (! spec.hasState)
+            continue;
 
-            auto* audioChain = createChain ("Audio FX Chain", ChainInputBoth, false, true);
-            const auto audioVar = obj->getProperty ("audioChain");
-            if (audioVar.isObject())
-            {
-                audioChain->setChainState (audioVar, audioError);
-                if (! audioVar.getDynamicObject()->hasProperty ("wantsMidi"))
-                    audioChain->setWantsMidi (false);
-            }
-
-            if (midiError.isNotEmpty())
-            {
-                if (outError.isNotEmpty()) outError += "\n";
-                outError += "MIDI chain: " + midiError;
-            }
-            if (audioError.isNotEmpty())
-            {
-                if (outError.isNotEmpty()) outError += "\n";
-                outError += "Audio chain: " + audioError;
-            }
-        }
-        else
+        juce::String chainError;
+        chain->setChainState (spec.state, chainError);
+        if (chainError.isNotEmpty())
         {
-            // Old { slots, blocklist, availablePlugins } shape.
-            juce::String audioError;
-            auto* chain = createChain ("Audio FX Chain", ChainInputBoth, false, true);
-            chain->setChainState (obj->getProperty ("slots"), audioError);
-            if (audioError.isNotEmpty())
-            {
-                if (outError.isNotEmpty()) outError += "\n";
-                outError += "Audio chain: " + audioError;
-            }
-        }
-    }
-    else
-    {
-        // Current format. Each chain object carries its own id/name/
-        // routing config; setChainState restores those plus the slots.
-        auto chainArray = obj->getProperty ("chains");
-        if (auto* arr = chainArray.getArray())
-        {
-            for (const auto& chainVar : *arr)
-            {
-                if (! chainVar.isObject())
-                    continue;
-                auto* chain = createChain ({}, ChainInputBoth, true, true);
-                juce::String chainError;
-                chain->setChainState (chainVar, chainError);
-                if (chainError.isNotEmpty())
-                {
-                    if (outError.isNotEmpty()) outError += "\n";
-                    outError += "Chain: " + chainError;
-                }
-            }
+            if (outError.isNotEmpty()) outError += "\n";
+            outError += spec.errorLabel + " " + chainError;
         }
     }
 

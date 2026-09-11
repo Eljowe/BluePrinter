@@ -2,6 +2,7 @@
 
 #include <JuceHeader.h>
 #include "Vst3Library.h"
+#include "MidiChannelFilter.h"
 
 // One slot in the FX chain. Owns the loaded plugin instance and its
 // bypass flag. Plugins are serial — the output of slot N feeds the input
@@ -120,11 +121,7 @@ public:
     uint16_t getMidiChannelsMask() const { return midiChannelsMask.load (std::memory_order_acquire); }
     bool acceptsMidiChannel (int channel) const
     {
-        // channel 0 = system message (clock, start, stop…) — always pass.
-        if (channel <= 0)
-            return true;
-        const uint16_t bit = static_cast<uint16_t> (1u << (channel - 1));
-        return (midiChannelsMask.load (std::memory_order_acquire) & bit) != 0;
+        return MidiChannelFilter::accepts (midiChannelsMask.load (std::memory_order_acquire), channel);
     }
 
     // Add a .vst3 file to the end of the chain. Returns the new slot

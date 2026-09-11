@@ -167,8 +167,9 @@ It builds the WebUI (`npm ci && npm run build`), configures CMake against a pinn
 JUCE (the workflow's `JUCE_VERSION`, **8.0.14**) with **Ninja + MSVC** — deliberately
 not the `Visual Studio 17 2022` generator, which broke when GitHub repointed
 `windows-latest` to a VS 2026 image — applies the required JUCE patch from
-`cmake/patches/`, builds the **Release** standalone + VST3, and uploads both as
-downloadable artifacts. The WebView2 SDK is fetched from NuGet and passed via
+`cmake/patches/`, builds the **Release** standalone + VST3, runs the
+pure-logic CTest suite, and uploads both binaries as downloadable artifacts.
+The WebView2 SDK is fetched from NuGet and passed via
 `JUCE_WEBVIEW2_PACKAGE_LOCATION`. No secrets are needed — the output is unsigned
 (code signing is tracked separately).
 
@@ -329,12 +330,29 @@ Update these together:
 
 ## Testing
 
-This repository has no CTest tests configured. Run the standalone, hit
-**RECORD**, play something into the input (the standalone hosts a virtual
-input that you can route from your DAW or any source), stop, then verify the
-take-review panel lets you replay the take and either **Save** it (it appears
-in the snippet list with editable name and comments, and the WAV + JSON are
-written to the library folder when one is set) or **Discard** it.
+BluePrinter has a small pure-logic unit-test suite (CTest) covering the
+functions where a subtle bug is most expensive: key detection, looper
+grid quantization, snippet gain/normalize math and sidecar round-tripping,
+chain-state migration, and the MIDI channel filter. It builds a standalone
+console target with no WebView2, plugin host, or audio device, so it runs
+fast and everywhere.
+
+```
+cmake -S . -B build -DBUILD_TESTING=ON
+cmake --build build --target BluePrinterTests
+ctest --test-dir build --output-on-failure
+```
+
+CI runs the suite on every push and PR. Tests live in `Tests/` and use a
+tiny built-in assertion harness (`Tests/TestRunner.h`) — no external test
+framework.
+
+Beyond the unit tests, the changes that matter most are verified by hand
+in the standalone: hit **RECORD**, play something into the input, stop,
+then verify the take-review panel lets you replay the take and either
+**Save** it (it appears in the snippet list with editable name and
+comments, and the WAV + JSON are written to the library folder when one is
+set) or **Discard** it.
 
 ## VS Code tasks
 

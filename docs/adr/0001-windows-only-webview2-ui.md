@@ -13,3 +13,10 @@ editor falls back to a plain native message.
 - A non-Windows build is not a supported target, so "it doesn't build on macOS"
   is not a bug.
 - The WebView2 runtime dependency is installed by the installer, not assumed.
+
+## Status
+
+Accepted. **Proposed supersession (not yet accepted):** ticket
+[0028](../tickets/0028-cross-platform-macos-linux.md) records a deferred plan for
+macOS and Linux builds. If that is green-lit, this ADR is superseded by a new one
+and the Windows-only assumptions above become per-platform.
