@@ -82,10 +82,9 @@ html, body {
 /* ============================================================
    Fixed-design scaling shell
    The whole UI is laid out at DESIGN_WIDTH px and scaled to fill the
-   (aspect-locked) window — see components/UiScale.jsx. Uses CSS `zoom`
-   (layout-aware, and it doesn't trap position: fixed), so the scroll
-   container sees the real scaled height and the splash stays viewport-
-   anchored.
+   (aspect-locked) window — see components/UiScale.jsx. Uses
+   `transform: scale()`; .ui-scaled reserves the scaled scroll height and
+   fixed-position overlays (splash, notification) are portaled to <body>.
    ============================================================ */
 
 .ui-viewport {
@@ -105,9 +104,16 @@ html, body {
   scrollbar-gutter: stable;
 }
 
+/* Reserves the scaled content height for the scroll container, because a
+   transform does not affect layout. */
+.ui-scaled {
+  width: 100%;
+  overflow: hidden;
+}
+
 .ui-content {
   width: 960px;
-  margin: 0 auto;
+  transform-origin: top left;
   display: flex;
   flex-direction: column;
 }
@@ -544,6 +550,46 @@ button {
   flex-direction: column;
   align-items: center;
   gap: 8px;
+}
+
+/* The REC channel has no knob, so the cell stretches to its neighbours'
+   height, the meter bottom-aligns with the IN/OUT meters and the freed
+   knob slot holds the capture lamp instead. */
+.monitor-cell--meter-only {
+  align-self: stretch;
+  justify-content: flex-end;
+}
+
+.monitor-lamp {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  color: var(--ink-3);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-weight: 700;
+  cursor: default;
+}
+
+.monitor-lamp-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--line-soft);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+.monitor-lamp.is-on {
+  color: var(--rec-dark);
+}
+
+.monitor-lamp.is-on .monitor-lamp-dot {
+  background: var(--rec);
+  box-shadow: 0 0 6px var(--rec);
+  animation: status-blink 1.2s linear infinite;
 }
 
 .monitor-meter {

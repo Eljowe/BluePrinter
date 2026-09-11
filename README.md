@@ -155,6 +155,16 @@ Build only the VST3 target:
 cmake --build build --config Debug --target BluePrinter_VST3
 ```
 
+### Continuous integration
+
+Every push to `master` and every pull request runs
+[`.github/workflows/build.yml`](.github/workflows/build.yml) on `windows-latest`.
+It builds the WebUI (`npm ci && npm run build`), configures CMake against a pinned
+JUCE (the workflow's `JUCE_VERSION`), builds the **Release** standalone + VST3, and
+uploads both as downloadable artifacts. The WebView2 SDK is fetched from NuGet and
+passed via `JUCE_WEBVIEW2_PACKAGE_LOCATION`. No secrets are needed — the output is
+unsigned (code signing is tracked separately).
+
 ## Run
 
 ```
