@@ -368,7 +368,8 @@ Update these together:
 BluePrinter has a small pure-logic unit-test suite (CTest) covering the
 functions where a subtle bug is most expensive: key detection, looper
 grid quantization, snippet gain/normalize math and sidecar round-tripping,
-chain-state migration, and the MIDI channel filter. It builds a standalone
+chain-state migration, the MIDI channel filter, and metronome click
+synthesis. It builds a standalone
 console target with no WebView2, plugin host, or audio device, so it runs
 fast and everywhere.
 

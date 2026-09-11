@@ -86,7 +86,7 @@ blocked_by: []            # ticket ids that must be closed first, e.g. ["0001"]
 
 | Ticket | Title | Status | Blocked by |
 | ------ | ----- | ------ | ---------- |
-| [0027](0027-decompose-pluginprocessor-deep-modules.md) | Decompose PluginProcessor into deep modules | needs-triage | 0011, 0012 |
+| [0027](0027-decompose-pluginprocessor-deep-modules.md) | Decompose PluginProcessor into deep modules | in-progress | 0011, 0012 |
 
 ### Backlog / deferred
 
