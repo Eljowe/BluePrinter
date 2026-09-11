@@ -51,6 +51,7 @@ public:
     static constexpr const char* frontendDeleteSnippetEvent    = "frontendDeleteSnippet";
     static constexpr const char* frontendDetectSnippetKeyEvent = "frontendDetectSnippetKey";
     static constexpr const char* frontendSaveSnippetEvent      = "frontendSaveSnippet";
+    static constexpr const char* frontendExportSnippetEvent    = "frontendExportSnippet";
     static constexpr const char* frontendSaveLoopEvent         = "frontendSaveLoop";
     static constexpr const char* frontendRevealSnippetEvent    = "frontendRevealSnippet";
     static constexpr const char* frontendChooseFolderEvent     = "frontendChooseLibraryFolder";
@@ -130,6 +131,7 @@ public:
     // File-chooser / dialog handlers — public so the event-listener lambdas
     // registered inside makeWebViewOptions can call them.
     void handleSaveSnippet(const juce::var& data);
+    void handleExportSnippet(const juce::var& data);
     void handleSaveLoop();
     void handleRevealSnippet(const juce::var& data);
     void handleChooseLibraryFolder();
@@ -215,6 +217,7 @@ private:
     void emitScanProgress (bool active, int current, int total, const juce::String& currentFile);
 
     void saveSnippetWithDialog(int snippetId, const juce::File& startingFolder);
+    void exportSnippetWithDialog(int snippetId, const juce::File& startingFolder);
     void pickLibraryFolder(const juce::File& startingFolder);
     void pickLibraryFolderThenSave(int pendingSnippetId);
 

@@ -2197,6 +2197,24 @@ bool BluePrinterAudioProcessor::normalizeSnippet (int id)
     return true;
 }
 
+bool BluePrinterAudioProcessor::exportSnippetToFile (int id, const juce::File& file, bool applyGain,
+                                                     juce::String& outError)
+{
+    auto snippet = library.findById (id);
+    if (snippet == nullptr)
+    {
+        outError = "Snippet no longer exists.";
+        return false;
+    }
+
+    return library.exportSnippetToFile (*snippet, file, applyGain, outError);
+}
+
+juce::StringArray BluePrinterAudioProcessor::getSupportedExportExtensions() const
+{
+    return SnippetLibrary::supportedExportExtensions();
+}
+
 void BluePrinterAudioProcessor::detectSnippetKeyAndNotes (int id)
 {
     // Hold a strong ref to the snippet's audio so the worker thread

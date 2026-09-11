@@ -325,6 +325,11 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
             if (owner != nullptr)
                 owner->handleSaveLoop();
         })
+        .withEventListener(BluePrinterWebViewEditor::frontendExportSnippetEvent, [owner](juce::var data)
+        {
+            if (owner != nullptr)
+                owner->handleExportSnippet (data);
+        })
         .withEventListener(BluePrinterWebViewEditor::frontendRevealSnippetEvent, [owner](juce::var data)
         {
             if (owner != nullptr)
@@ -1034,6 +1039,18 @@ void BluePrinterWebViewEditor::handleSaveLoop()
         sendNotification ("There is no captured loop to save.", "error");
 }
 
+void BluePrinterWebViewEditor::handleExportSnippet(const juce::var& data)
+{
+    if (auto* obj = data.getDynamicObject())
+    {
+        const int id = static_cast<int> (obj->getProperty("id"));
+        juce::File start (audioProcessor.getLibraryFolder());
+        if (! start.isDirectory())
+            start = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory);
+        exportSnippetWithDialog (id, start);
+    }
+}
+
 void BluePrinterWebViewEditor::handleRevealSnippet(const juce::var& data)
 {
     if (auto* obj = data.getDynamicObject())
@@ -1127,6 +1144,67 @@ void BluePrinterWebViewEditor::saveSnippetWithDialog(int snippetId, const juce::
         {
             sendNotification ("Save failed: " + outError, "error");
         }
+    });
+}
+
+void BluePrinterWebViewEditor::exportSnippetWithDialog(int snippetId, const juce::File& startingFolder)
+{
+    auto snippet = audioProcessor.getLibrary().findById (snippetId);
+    if (snippet == nullptr)
+    {
+        sendNotification ("Snippet no longer exists.", "error");
+        return;
+    }
+
+    auto defaultName = snippet->name.isNotEmpty() ? snippet->name : ("Snippet-" + juce::String (snippet->id));
+    auto sanitized = defaultName.replaceCharacters ("<>:\"/\\|?*", "_");
+    auto startingFile = startingFolder.getChildFile (sanitized + ".wav");
+
+    // Offer every format this build can actually write.
+    juce::String wildcard;
+    for (const auto& extension : audioProcessor.getSupportedExportExtensions())
+    {
+        if (wildcard.isNotEmpty())
+            wildcard << ";";
+        wildcard << "*" << extension;
+    }
+    if (wildcard.isEmpty())
+        wildcard = "*.wav";
+
+    activeFileChooser = std::make_unique<juce::FileChooser> (
+        "Export snippet as",
+        startingFile,
+        wildcard,
+        true);
+
+    auto flags = juce::FileBrowserComponent::saveMode
+               | juce::FileBrowserComponent::canSelectFiles
+               | juce::FileBrowserComponent::warnAboutOverwriting;
+
+    activeFileChooser->launchAsync (flags, [this, snippetId](const juce::FileChooser& chooser)
+    {
+        auto result = chooser.getResult();
+        activeFileChooser.reset();
+
+        if (result == juce::File())
+        {
+            sendNotification ("Export cancelled.", "info");
+            return;
+        }
+
+        auto target = result;
+        if (target.isDirectory())
+            target = target.getChildFile ("snippet.wav");
+        if (target.getFileExtension().isEmpty())
+            target = target.withFileExtension (".wav");
+
+        // Export is a finished file, so the non-destructive snippet gain is
+        // baked in here (unlike the library save, which stays at unity).
+        juce::String error;
+        if (audioProcessor.exportSnippetToFile (snippetId, target, true, error))
+            sendNotification ("Exported to " + target.getFullPathName(), "ok");
+        else
+            sendNotification ("Export failed: " + error, "error");
     });
 }
 

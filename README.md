@@ -233,6 +233,7 @@ Events flow through `window.__JUCE__.backend`:
 | `frontendUpdateSnippetMeta` / `frontendDeleteSnippet`     | Edit name + comments / remove a snippet            |
 | `frontendDetectSnippetKey`                                | Run key detection on a snippet                     |
 | `frontendSaveSnippet`                                     | Open a save dialog and write WAV + JSON            |
+| `frontendExportSnippet`                                   | Open an export dialog and write WAV/AIFF/FLAC (bakes the snippet Gain trim) |
 | `frontendSaveLoop`                                        | Save the captured looper loop as a library snippet |
 | `frontendRevealSnippet`                                   | Reveal the saved file in Explorer                  |
 | `frontendChooseLibraryFolder` / `frontendOpenLibraryFolder` | Pick / open the library folder                   |

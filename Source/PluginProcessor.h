@@ -145,6 +145,15 @@ public:
     // -24..+24). No-op if the audio is empty/silent.
     bool normalizeSnippet (int id);
 
+    // Export a snippet to an arbitrary file, choosing the format from the
+    // file's extension. `applyGain` bakes the non-destructive gainDb trim
+    // into the exported audio (the library's own save never does). Returns
+    // false and sets outError on failure.
+    bool exportSnippetToFile (int id, const juce::File& file, bool applyGain, juce::String& outError);
+
+    // Extensions this build can export to (.wav, .aiff, .flac).
+    juce::StringArray getSupportedExportExtensions() const;
+
     // Run musical-key detection on the snippet's audio. The FFT-based
     // chroma analysis runs on a worker thread; the snippet is updated
     // and the sidecar JSON rewritten on the message thread, then
