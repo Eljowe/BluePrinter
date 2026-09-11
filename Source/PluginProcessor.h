@@ -15,6 +15,7 @@
 #include "KeyDetector.h"
 #include "MetronomePlayer.h"
 #include "MidiClockOutput.h"
+#include "Meter.h"
 
 //==============================================================================
 // A dedicated thread that owns every VST3 instantiation so every
@@ -439,23 +440,23 @@ public:
     bool isChainRestoreInProgress() const;
 
     // Meter values updated by the audio thread (peak + RMS over the last block).
-    float getCurrentInputLevel() const { return inputLevel.load (std::memory_order_acquire); }
-    float getCurrentInputPeak() const  { return inputPeak.load  (std::memory_order_acquire); }
+    float getCurrentInputLevel() const { return inputMeter.getLevel(); }
+    float getCurrentInputPeak() const  { return inputMeter.getPeak(); }
     // Record meter: the actual print (dry + recordOnCapture chains), read
     // from recordingMixBuffer — unaffected by the master Output.
-    float getCurrentRecordLevel() const { return recordLevel.load (std::memory_order_acquire); }
-    float getCurrentRecordPeak() const  { return recordPeak.load  (std::memory_order_acquire); }
+    float getCurrentRecordLevel() const { return recordMeter.getLevel(); }
+    float getCurrentRecordPeak() const  { return recordMeter.getPeak(); }
     // Output meter: the post-master-Output monitor signal.
-    float getCurrentOutputLevel() const { return outputLevel.load (std::memory_order_acquire); }
-    float getCurrentOutputPeak() const  { return outputPeak.load  (std::memory_order_acquire); }
+    float getCurrentOutputLevel() const { return outputMeter.getLevel(); }
+    float getCurrentOutputPeak() const  { return outputMeter.getPeak(); }
     // Loop playback meter (post loop-level gain).
-    float getCurrentLoopPlayLevel() const { return loopPlayLevel.load (std::memory_order_acquire); }
-    float getCurrentLoopPlayPeak() const  { return loopPlayPeak.load  (std::memory_order_acquire); }
+    float getCurrentLoopPlayLevel() const { return loopPlayMeter.getLevel(); }
+    float getCurrentLoopPlayPeak() const  { return loopPlayMeter.getPeak(); }
     // Latched clip indicators (set by the audio thread, cleared by the UI).
-    bool isInputClipped() const     { return inputClipped.load     (std::memory_order_acquire); }
-    bool isRecordClipped() const    { return recordClipped.load    (std::memory_order_acquire); }
-    bool isOutputClipped() const    { return outputClipped.load    (std::memory_order_acquire); }
-    bool isLoopPlayClipped() const  { return loopPlayClipped.load  (std::memory_order_acquire); }
+    bool isInputClipped() const     { return inputMeter.isClipped(); }
+    bool isRecordClipped() const    { return recordMeter.isClipped(); }
+    bool isOutputClipped() const    { return outputMeter.isClipped(); }
+    bool isLoopPlayClipped() const  { return loopPlayMeter.isClipped(); }
     // Clear a latched clip flag. target is "input" | "record" | "output" |
     // "loop" | "all" (unknown targets clear all). Message thread only.
     void resetClip (const juce::String& target);
@@ -480,7 +481,6 @@ public:
 
     static constexpr int maxRecordingSeconds = 120;
     static constexpr int transportTimerHz    = 30;
-    static constexpr int levelSmoothing      = 8;
 
 private:
     void timerCallback();
@@ -492,15 +492,6 @@ private:
     void renderPlayback (juce::AudioBuffer<float>& destination, int numSamples);
     void renderTakePlayback (juce::AudioBuffer<float>& destination, int numSamples);
     void computeLevels  (const juce::AudioBuffer<float>& source, int numSamples);
-    // Level-metering core, shared by the main input meter and the
-    // per-chain meters. gain scales the meter to reflect the chain's
-    // output volume.
-    void computeLevelsInto (const juce::AudioBuffer<float>& source,
-                            int numSamples,
-                            std::atomic<float>& levelAtomic,
-                            std::atomic<float>& peakAtomic,
-                            float gain,
-                            std::atomic<bool>* clipAtomic = nullptr);
     // Recomputes whether any source wants the MIDI clock running and
     // sends Start/Stop on the edges. Message thread only (may open/close
     // the output device). refreshClockRunning is the audio-thread-safe
@@ -681,10 +672,10 @@ private:
     // loop [loopStart, loopStart + loopLength), wrapping across loop cycles
     // pedal-style. Message thread only, run with capture stopped and
     // playback off. Shared by the looper (loopStart = audioLoopStart) and
-    // the take recorder (loopStart = 0, loopLength = takeLength). Latch is
-    // the clip atomic to latch when the mixed result reaches 0 dBFS.
+    // the take recorder (loopStart = 0, loopLength = takeLength). clipMeter
+    // latches when the mixed result reaches 0 dBFS.
     void mixOverdubLayer (int64_t loopStart, int64_t loopLength, int64_t layerBase,
-                          int64_t layerLength, std::atomic<bool>& clipLatch);
+                          int64_t layerLength, Meter& clipMeter);
 
     // Pre-rendered metronome clicks. Two sounds, both synthesized by
     // resynthesizeClicks() (message thread only): a bright accent tick
@@ -740,18 +731,11 @@ private:
     // then held as shared_ptrs so playback can't dangle.
     std::shared_ptr<const Snippet> playbackSnippet;
 
-    std::atomic<float> inputLevel { 0.0f };
-    std::atomic<float> inputPeak  { 0.0f };
-    std::atomic<float> recordLevel { 0.0f };
-    std::atomic<float> recordPeak  { 0.0f };
-    std::atomic<float> outputLevel { 0.0f };
-    std::atomic<float> outputPeak  { 0.0f };
-    std::atomic<float> loopPlayLevel { 0.0f };
-    std::atomic<float> loopPlayPeak  { 0.0f };
-    std::atomic<bool>  inputClipped     { false };
-    std::atomic<bool>  recordClipped    { false };
-    std::atomic<bool>  outputClipped    { false };
-    std::atomic<bool>  loopPlayClipped  { false };
+    // Meter level/peak/clip state (input, record, output monitor, loop).
+    Meter inputMeter;
+    Meter recordMeter;
+    Meter outputMeter;
+    Meter loopPlayMeter;
 
     juce::File libraryFolder;
     juce::CriticalSection libraryFolderLock;

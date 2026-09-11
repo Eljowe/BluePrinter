@@ -851,15 +851,14 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 
         // Per-chain output meter (post-volume; muted chains read 0).
         // Independent of solo/monitor-mute.
-        computeLevelsInto (chainScratchBuffer, numSamples,
-                           chain->outputLevel, chain->outputPeak, hardGain);
+        Meter::computeInto (chainScratchBuffer, numSamples,
+                            chain->outputLevel, chain->outputPeak, hardGain);
     }
 
     // 2b. Record meter. recordingMixBuffer is the actual print (dry +
     //     recordOnCapture chains), so this reflects what a take or loop
     //     capture would store — independently of the master Output.
-    computeLevelsInto (recordingMixBuffer, numSamples,
-                       recordLevel, recordPeak, 1.0f, &recordClipped);
+    recordMeter.compute (recordingMixBuffer, numSamples, 1.0f);
 
     // 3. Looper capture: tap the record mix so the loop bakes in
     //    whatever the selected chains produce (synth sounds, FX).
@@ -987,14 +986,7 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             // Loop playback meter (post loop-level gain, monitor only).
             // The peak decays between blocks like the other meters; the
             // level decays in timerCallback when playback stops.
-            {
-                const float prevLoopPeak = loopPlayPeak.load (std::memory_order_acquire);
-                loopPlayPeak.store (juce::jmax (loopPeakThisBlock, prevLoopPeak * 0.95f),
-                                    std::memory_order_release);
-                loopPlayLevel.store (loopPeakThisBlock, std::memory_order_release);
-                if (loopPeakThisBlock >= 1.0f)
-                    loopPlayClipped.store (true, std::memory_order_release);
-            }
+            loopPlayMeter.setPeak (loopPeakThisBlock);
 
             audioLoopPosition.store (position, std::memory_order_release);
             if (! looping && position >= length)
@@ -1245,7 +1237,7 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     // 14. Output meter: the post-master-Output monitor signal — what the
     //     user actually hears. Computed last so it includes the click and
     //     any snippet/loop playback.
-    computeLevelsInto (buffer, numSamples, outputLevel, outputPeak, 1.0f, &outputClipped);
+    outputMeter.compute (buffer, numSamples, 1.0f);
 }
 
 void BluePrinterAudioProcessor::writeRecording (const juce::AudioBuffer<float>& source, int numSamples)
@@ -1401,43 +1393,18 @@ void BluePrinterAudioProcessor::renderTakePlayback (juce::AudioBuffer<float>& de
     }
 }
 
-void BluePrinterAudioProcessor::computeLevelsInto (const juce::AudioBuffer<float>& source,
-                                                   int numSamples,
-                                                   std::atomic<float>& levelAtomic,
-                                                   std::atomic<float>& peakAtomic,
-                                                   float gain,
-                                                   std::atomic<bool>* clipAtomic)
-{
-    if (numSamples <= 0)
-        return;
-
-    const auto measured = MeterMath::measure (source, numSamples, gain);
-
-    const float prevLevel = levelAtomic.load (std::memory_order_acquire);
-    const float prevPeak  = peakAtomic.load  (std::memory_order_acquire);
-    const float newLevel  = MeterMath::smoothLevel (prevLevel, measured.rms,
-                                                    static_cast<float> (levelSmoothing));
-
-    levelAtomic.store (newLevel, std::memory_order_release);
-    peakAtomic.store  (juce::jmax (measured.peak, prevPeak * MeterMath::blockPeakDecay),
-                       std::memory_order_release);
-
-    if (clipAtomic != nullptr && measured.peak >= 1.0f)
-        clipAtomic->store (true, std::memory_order_release);
-}
-
 void BluePrinterAudioProcessor::computeLevels (const juce::AudioBuffer<float>& source, int numSamples)
 {
-    computeLevelsInto (source, numSamples, inputLevel, inputPeak, 1.0f, &inputClipped);
+    inputMeter.compute (source, numSamples, 1.0f);
 }
 
 void BluePrinterAudioProcessor::resetClip (const juce::String& target)
 {
     const bool all = target == "all";
-    if (all || target == "input")  inputClipped.store  (false, std::memory_order_release);
-    if (all || target == "record") recordClipped.store (false, std::memory_order_release);
-    if (all || target == "output") outputClipped.store (false, std::memory_order_release);
-    if (all || target == "loop")   loopPlayClipped.store (false, std::memory_order_release);
+    if (all || target == "input")  inputMeter.resetClip();
+    if (all || target == "record") recordMeter.resetClip();
+    if (all || target == "output") outputMeter.resetClip();
+    if (all || target == "loop")   loopPlayMeter.resetClip();
 }
 
 //==============================================================================
@@ -1597,7 +1564,7 @@ void BluePrinterAudioProcessor::setLooperRecording (bool enabled)
             const auto layerBase  = audioLoopFullLength.load (std::memory_order_acquire);
             const auto layerLength = overdubWritePos.load (std::memory_order_acquire) - layerBase;
             mixOverdubLayer (audioLoopStart.load (std::memory_order_acquire),
-                             loopLength, layerBase, layerLength, loopPlayClipped);
+                             loopLength, layerBase, layerLength, loopPlayMeter);
             refreshLooperPeaks();
         }
         else
@@ -1684,7 +1651,7 @@ void BluePrinterAudioProcessor::trimLooperToMusicalGrid()
 // ours, under the lock (matching refreshLooperPeaks).
 void BluePrinterAudioProcessor::mixOverdubLayer (int64_t loopStart, int64_t loopLength,
                                                  int64_t layerBase, int64_t layerLength,
-                                                 std::atomic<bool>& clipLatch)
+                                                 Meter& clipMeter)
 {
     if (recordBuffer == nullptr || loopLength <= 0 || layerLength <= 0
         || loopStart < 0 || layerBase < 0
@@ -1718,7 +1685,7 @@ void BluePrinterAudioProcessor::mixOverdubLayer (int64_t loopStart, int64_t loop
         peak = juce::jmax (peak, recordBuffer->getMagnitude (
             ch, static_cast<int> (loopStart), static_cast<int> (loopLength)));
     if (peak >= 1.0f)
-        clipLatch.store (true, std::memory_order_release);
+        clipMeter.latchClip();
 }
 
 int BluePrinterAudioProcessor::saveLoopSnippet()
@@ -3332,30 +3299,16 @@ void BluePrinterAudioProcessor::timerCallback()
         finalizeRecordingOnMessageThread();
 
     // Peak meter decay.
-    const float prevPeak = inputPeak.load (std::memory_order_acquire);
-    if (prevPeak > 0.001f)
-        inputPeak.store (prevPeak * MeterMath::timerPeakDecay, std::memory_order_release);
-
-    const float prevRecordPeak = recordPeak.load (std::memory_order_acquire);
-    if (prevRecordPeak > 0.001f)
-        recordPeak.store (prevRecordPeak * MeterMath::timerPeakDecay, std::memory_order_release);
-
-    const float prevOutputPeak = outputPeak.load (std::memory_order_acquire);
-    if (prevOutputPeak > 0.001f)
-        outputPeak.store (prevOutputPeak * MeterMath::timerPeakDecay, std::memory_order_release);
-
-    const float prevLoopPeak = loopPlayPeak.load (std::memory_order_acquire);
-    if (prevLoopPeak > 0.001f)
-        loopPlayPeak.store (prevLoopPeak * MeterMath::timerPeakDecay, std::memory_order_release);
+    inputMeter.decayPeak();
+    recordMeter.decayPeak();
+    outputMeter.decayPeak();
+    loopPlayMeter.decayPeak();
 
     // The loop level is only written by the audio thread while the loop
     // plays, so let it fall to zero here once playback stops.
-    if (! audioLoopPlaying.load (std::memory_order_acquire))
-    {
-        const float prevLoopLevel = loopPlayLevel.load (std::memory_order_acquire);
-        if (prevLoopLevel > 0.001f)
-            loopPlayLevel.store (prevLoopLevel * 0.85f, std::memory_order_release);
-    }
+    if (! audioLoopPlaying.load (std::memory_order_acquire)
+        && loopPlayMeter.getLevel() > 0.001f)
+        loopPlayMeter.decayLevel (0.85f);
 
     listeners.call ([](Listener& l) { l.transportChanged(); });
 }
@@ -3388,7 +3341,7 @@ void BluePrinterAudioProcessor::finalizeRecordingOnMessageThread()
         const auto layerLength = static_cast<int64_t> (layerEnd) - takeLen;
         if (takeLen > 0 && layerLength > 0)
         {
-            mixOverdubLayer (0, takeLen, takeLen, layerLength, recordClipped);
+            mixOverdubLayer (0, takeLen, takeLen, layerLength, recordMeter);
             refreshTakePeaks();
         }
 
