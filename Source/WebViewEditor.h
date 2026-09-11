@@ -57,6 +57,10 @@ public:
     static constexpr const char* frontendChooseFolderEvent     = "frontendChooseLibraryFolder";
     static constexpr const char* frontendOpenFolderEvent       = "frontendOpenLibraryFolder";
     static constexpr const char* frontendRefreshLibraryEvent   = "frontendRefreshLibrary";
+    // Diagnostics (0016): copy an audio-free support report to the
+    // clipboard, or open the folder that holds crash-info.txt.
+    static constexpr const char* frontendCopyDiagnosticsEvent  = "frontendCopyDiagnostics";
+    static constexpr const char* frontendOpenDiagnosticsFolderEvent = "frontendOpenDiagnosticsFolder";
     // Fired by the React app once the WebView has loaded, so the
     // backend can push a fresh snippet snapshot. The processor's
     // restoreUserState loads snippets from disk before the editor
@@ -136,6 +140,8 @@ public:
     void handleRevealSnippet(const juce::var& data);
     void handleChooseLibraryFolder();
     void handleOpenLibraryFolder();
+    void handleCopyDiagnostics();
+    void handleOpenDiagnosticsFolder();
 
     // VST3 chain handlers — public so the listener lambdas can drive them.
     // The "chain" argument is a stable chain id (e.g. "chain0") that the

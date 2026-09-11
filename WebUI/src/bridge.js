@@ -37,6 +37,11 @@ export const FRONTEND_EVENTS = {
   chooseLibraryFolder: "frontendChooseLibraryFolder",
   openLibraryFolder: "frontendOpenLibraryFolder",
   refreshLibrary: "frontendRefreshLibrary",
+  // { } — copy an audio-free diagnostics report (versions, crash-info,
+  // restore errors, quarantine) to the clipboard, or open the folder
+  // that holds crash-info.txt / BluePrinter.properties.
+  copyDiagnostics: "frontendCopyDiagnostics",
+  openDiagnosticsFolder: "frontendOpenDiagnosticsFolder",
   // Request a fresh snippet snapshot from the backend. Fired once
   // when the React app mounts, because the snippets loaded from
   // disk in the processor's constructor arrive before the editor

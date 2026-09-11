@@ -37,6 +37,7 @@ The two lists are **machine-checked**: `Tests/check-bridge-events.mjs` (register
 - `setParameter`, `startRecording`, `stopRecording`, `startPlayback`, `stopPlayback`
 - `updateSnippet`, `deleteSnippet`, `detectSnippetKey`, `saveSnippet`, `exportSnippet`, `saveLoop`, `revealSnippet`
 - `chooseLibraryFolder`, `openLibraryFolder`, `refreshLibrary`, `getSnippets`
+- `copyDiagnostics`, `openDiagnosticsFolder` (0016) — copy an audio-free support report (version/OS/CPU, settings counts, plugin quarantine, last restore error, current + rotated `crash-info.txt`, WER LocalDumps command) to the clipboard, or reveal `%APPDATA%\Retrokielto`. Driven by the footer **Diagnostics** popover in `App.jsx`.
 - `setMetronome`, `setBpm`, `setCountInBeats`, `setMidiClock`, `setMidiClockOnRecord` (`{ enabled }` — restrict the MIDI clock to take/loop captures instead of free-running), `setMidiDevice`
 - `setClickDuringCapture` (`{ enabled }`) — header-level, shared by the take recorder and the looper: false = click only during count-ins, silent through takes and loop captures
 - Take review (pending take): `setTakePlayback` (`{ enabled }` — one-shot replay of the pending take, overwrites output, scaled by the master Output), `saveTake` (writes the pending take to the library folder as a snippet + WAV/JSON, no dialog), `discardTake`. The backend ships `takePending`/`takeLength`/`takePlaying`/`takePosition`/`takePeaks` in the transport snapshot and `TakeReview.jsx` renders the panel. Any new capture (take or loop) invalidates the pending take.

@@ -326,6 +326,23 @@ produce, so the loop sounds exactly like what you heard while recording:
 - The looper and the take recorder share `recordBuffer` and preempt each
   other, so they never capture simultaneously.
 
+## Troubleshooting
+
+If a take won't record, a saved chain won't restore, or a VST3 crashes the
+standalone, open the **Diagnostics** popover in the footer:
+
+- **Copy diagnostics** puts an audio-free support report on the clipboard:
+  app/OS/CPU, the last chain-restore error, the quarantined-plugin list, and
+  every `crash-info.txt` (the current one plus the last three rotated files).
+  It also includes the exact elevated command to enable full WER crash dumps.
+- **Open folder** opens `%APPDATA%\Retrokielto`, where `crash-info.txt`,
+  `crash-info.1..3.txt` and `BluePrinter.properties` live.
+
+The report contains no audio and no personal file paths beyond the module
+paths in a crash backtrace, so it is safe to attach to a bug report. A plugin
+named in the report's quarantine list is skipped at startup until you re-add
+it from its chain's plugin list.
+
 ## Renaming the plugin
 
 Update these together:

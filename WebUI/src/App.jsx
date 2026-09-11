@@ -763,7 +763,38 @@ export default function App() {
       )}
 
       <footer className="app-footer">
-        Takes stay in memory until you save or discard them — pick a library folder so saves have a destination.
+        <span className="app-footer-note">
+          Takes stay in memory until you save or discard them — pick a library folder so saves have a destination.
+        </span>
+        <details className={`diagnostics-help ${vst3.restoreError ? "has-warning" : ""}`}>
+          <summary title="Crash and restore diagnostics">Diagnostics</summary>
+          <div className="diagnostics-panel" role="group" aria-label="Diagnostics">
+            {vst3.restoreError ? (
+              <p className="diagnostics-warning">Last chain restore: {vst3.restoreError}</p>
+            ) : null}
+            <div className="diagnostics-actions">
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={() => emit(FRONTEND_EVENTS.copyDiagnostics)}
+              >
+                Copy diagnostics
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={() => emit(FRONTEND_EVENTS.openDiagnosticsFolder)}
+              >
+                Open folder
+              </button>
+            </div>
+            <p className="diagnostics-hint">
+              App and OS version, crash info, restore errors and the plugin quarantine — no audio
+              or personal files. For full crash dumps, the copied report includes the elevated WER
+              LocalDumps command.
+            </p>
+          </div>
+        </details>
       </footer>
     </main>
   );
