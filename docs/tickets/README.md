@@ -55,7 +55,7 @@ blocked_by: []            # ticket ids that must be closed first, e.g. ["0001"]
 | Ticket | Title | Status | Blocked by |
 | ------ | ----- | ------ | ---------- |
 | [0015](0015-code-signing-release-binaries.md) | Code-sign the installer and binaries | ready-for-human | — |
-| [0016](0016-crash-diagnostics-report-flow.md) | In-app crash diagnostics report flow | in-progress | — |
+| [0016](0016-crash-diagnostics-report-flow.md) | In-app crash diagnostics report flow | done | — |
 | [0017](0017-accessibility-keyboard-nav-pass.md) | Accessibility and keyboard-navigation pass | done | — |
 | [0018](0018-first-run-empty-state-onboarding.md) | First-run empty states and onboarding hints | done | — |
 | [0019](0019-release-checklist-doc.md) | Single ordered release checklist | done | — |
