@@ -55,8 +55,9 @@ next.
 Step 1 removed the click-synthesis lambda from
 `PluginProcessor::resynthesizeClicks` and moved it to
 `Source/ClickSynth.{h,cpp}` (deterministic output, clamping in the module,
-direct unit tests in `Tests/test_ClickSynth.cpp`) without touching the audio
-render path.
+direct unit tests in `Tests/test_ClickSynth.cpp`, including a golden
+sample-for-sample comparison against the original algorithm) without
+touching the audio render path.
 
 ## Acceptance criteria
 

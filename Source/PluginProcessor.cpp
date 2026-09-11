@@ -2445,7 +2445,7 @@ void BluePrinterAudioProcessor::resynthesizeClicks()
 
     accentClickBuffer = std::make_shared<const std::vector<float>> (
         ClickSynth::render (sampleRate,
-                            { clickAccentPitch, clickDecay * 0.78f, 0.055,
+                            { clickAccentPitch, clickDecay * 0.78, 0.055,
                               clickAccentVolume, clickNoise }));
 }
 
