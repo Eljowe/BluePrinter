@@ -31,6 +31,8 @@ const unsub = subscribe(BACKEND_EVENTS.someEvent, (payload) => { ... });
 
 All frontend events are in `FRONTEND_EVENTS`, backend events in `BACKEND_EVENTS`. The C++ side defines matching strings in `WebViewEditor.h` as `static constexpr const char*`. Never hardcode event strings — always use the constants.
 
+The two lists are **machine-checked**: `Tests/check-bridge-events.mjs` (registered as the `BridgeEventParity` CTest case, and run in CI) compares every `frontend*`/`backend*` string in `WebViewEditor.h` against `bridge.js` and fails with a readable one-sided diff. Renaming an event means changing both sides in the same commit.
+
 **Frontend events** (React → C++):
 - `setParameter`, `startRecording`, `stopRecording`, `startPlayback`, `stopPlayback`
 - `updateSnippet`, `deleteSnippet`, `detectSnippetKey`, `saveSnippet`, `saveLoop`, `revealSnippet`
