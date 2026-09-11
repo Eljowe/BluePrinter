@@ -1,7 +1,7 @@
 ---
 id: "0019"
 title: "Single ordered release checklist"
-status: ready-for-agent
+status: done
 blocked_by: []
 ---
 

@@ -1,7 +1,7 @@
 ---
 id: "0025"
 title: "Export audio in multiple formats and bounce a loop to the library"
-status: in-progress
+status: done
 blocked_by: []
 ---
 

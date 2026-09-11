@@ -42,7 +42,9 @@ Get-FileHash .\BluePrinterSetup-1.1.0.exe -Algorithm SHA256
 ```
 
 If you build from source instead, the release bundle can be regenerated with
-the **Build Release Bundle** VS Code task (`installer/build-release.ps1`).
+the **Build Release Bundle** VS Code task (`installer/build-release.ps1`). The
+full ordered release process lives in
+[`docs/release-checklist.md`](docs/release-checklist.md).
 
 ## What it does
 

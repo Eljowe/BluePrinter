@@ -21,6 +21,8 @@ See `.vscode/tasks.json` for 11 pre-configured tasks:
 - Build Release Bundle (script: `installer/build-release.ps1` — builds WebUI + Release targets, compiles the installer with the version parsed from CMakeLists.txt passed as `/DMyAppVersion`, then assembles `build/release/BluePrinter-<version>/` containing the installer, LICENSE, README.md and SHA256SUMS.txt)
 - Create GitHub Release (script: `installer/create-release.ps1` — creates the `v<version>` tag at the default-branch head and a **draft** release with every bundle file as an asset, all via the REST API; needs `$env:GH_TOKEN` with classic `repo` or fine-grained `Contents: read and write` scope; pass `-Published` to skip the draft)
 
+Releasing is a fixed, ordered process: follow [`docs/release-checklist.md`](docs/release-checklist.md). The version is bumped in `CMakeLists.txt` first (the release scripts parse it).
+
 ## Source Code
 - All C++ source in `Source/` directory
 - React source in `WebUI/src/` (entry `main.jsx`, root `App.jsx`, all components in `WebUI/src/components/`)
