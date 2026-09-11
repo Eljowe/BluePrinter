@@ -732,6 +732,7 @@ export default function App() {
               onRenameTag={handleRenameTag}
               playingSnippetId={transport.playingSnippetId}
               playPositionSeconds={playPositionSeconds}
+              folder={transport.libraryFolder}
             />
           </ErrorBoundary>
         </div>

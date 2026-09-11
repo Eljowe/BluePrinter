@@ -1,7 +1,7 @@
 ---
 id: "0018"
 title: "First-run empty states and onboarding hints"
-status: ready-for-agent
+status: in-progress
 blocked_by: []
 ---
 

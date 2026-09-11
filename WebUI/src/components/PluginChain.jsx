@@ -402,8 +402,15 @@ function ChainPanel({
         ].filter(Boolean).join(" · ")}
       </p>
 
-      {slots.length === 0 ? (
-        <p className="fx-chain-empty">No plugins loaded. The signal passes through dry.</p>
+      {slots.length === 0 && pending === 0 ? (
+        <p className="fx-chain-empty">
+          No plugins yet. Use <strong>Add</strong> to pick a .vst3, or
+          {" "}<strong>Scan VST3 folder</strong> and add one from Available plugins.
+        </p>
+      ) : slots.length === 0 ? (
+        <p className="fx-chain-empty">
+          Restoring {pending} plugin{pending === 1 ? "" : "s"}…
+        </p>
       ) : (
         <ol className="fx-chain-slots">
           {slots.map((slot, index) => (
@@ -588,7 +595,7 @@ export function PluginChain({ chainState, inputChannels, chainLevels, availableP
       </p>
 
       {chains.length === 0 ? (
-        <p className="fx-chain-empty">No chains yet. Add one to process your signal.</p>
+        <p className="fx-chain-empty">No chains yet. Use <strong>Add chain</strong> to process your signal.</p>
       ) : (
         <div className="fx-chain-panels">
           {chains.map((chain) => (
