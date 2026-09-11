@@ -47,7 +47,8 @@ next.
 | - | ------ | ---- | ------ |
 | 1 | `ClickSynth` | Pure click-voice synthesis behind `Voice` + `render` | done |
 | 2 | `MetronomePlayer` | Per-block click scheduling + ring-out (owns `activeClicks`) | done |
-| 3 | `MidiClockOutput` | 24-ppqn scheduling + Start/Stop + device open/close | todo |
+| 3a | `MidiClockMath` | 24-ppqn pulse scheduling (pure) | done |
+| 3b | `MidiClockOutput` | Device open/close + Start/Stop + direct send | todo |
 | 4 | `Metering` | Level computation, peak decay, clip latches | todo |
 | 5 | `ChainStatePersistence` | make/apply + migration + quarantine/self-heal | todo |
 | 6 | `TakeRecorder` / `Looper` | capture, grid trim, crop, overdub mix | todo |
