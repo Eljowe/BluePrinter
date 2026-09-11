@@ -38,6 +38,7 @@ public:
     static constexpr const char* frontendStartRecordingEvent   = "frontendStartRecording";
     static constexpr const char* frontendStopRecordingEvent    = "frontendStopRecording";
     static constexpr const char* frontendSetTakePlaybackEvent  = "frontendSetTakePlayback";
+    static constexpr const char* frontendSetTakeOverdubEvent   = "frontendSetTakeOverdub";
     static constexpr const char* frontendSaveTakeEvent         = "frontendSaveTake";
     static constexpr const char* frontendDiscardTakeEvent      = "frontendDiscardTake";
     static constexpr const char* frontendStartPlaybackEvent    = "frontendStartPlayback";

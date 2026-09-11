@@ -1,11 +1,18 @@
 ---
 id: "0026"
 title: "MIDI file (.mid) export"
-status: needs-triage
+status: wontfix
 blocked_by: []
 ---
 
 # MIDI file (.mid) export
+
+## Resolution
+
+**Wontfix (2026-09-12).** BluePrinter stays audio-only; MIDI is used only for
+chain input, clock output and Start/Stop. The `README.md` scope statement already
+says MIDI event recording/quantization and `.mid` export are out of scope, so no
+change is needed. Revisit only if real users ask.
 
 ## Problem
 

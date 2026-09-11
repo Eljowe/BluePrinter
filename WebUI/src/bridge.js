@@ -14,6 +14,9 @@ export const FRONTEND_EVENTS = {
   // Pending-take review: { enabled } toggles take playback; saveTake /
   // discardTake finalise the recorded take after review.
   setTakePlayback: "frontendSetTakePlayback",
+  // Take-recorder overdub: { enabled } layers the next record over the
+  // pending take instead of replacing it (session-only).
+  setTakeOverdub: "frontendSetTakeOverdub",
   saveTake: "frontendSaveTake",
   discardTake: "frontendDiscardTake",
   startPlayback: "frontendStartPlayback",

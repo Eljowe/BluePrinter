@@ -18,6 +18,12 @@ A captured take that has stopped but not yet been saved or discarded. Any new
 capture invalidates it.
 _Avoid_: Unsaved take, take buffer
 
+**Take overdub**:
+Layering a new pass over the pending take instead of replacing it (the Take
+review's Dub toggle, session-only). The new input is captured after the take and
+wrap-mixed into it on stop, so playback and the saved WAV contain every layer.
+_Avoid_: Punch-in, comping, takes-stacking
+
 **Loop**:
 A bar-aligned, repeatable capture of the recording mix, optionally cropped to
 whole beats.
