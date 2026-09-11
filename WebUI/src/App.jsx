@@ -13,6 +13,7 @@ import { SplashScreen } from "./components/SplashScreen";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { BACKEND_EVENTS, FRONTEND_EVENTS, emit, getInitialData, subscribe } from "./bridge";
 import iconUrl from "./icon.svg";
+import { IconArrowDown } from "./components/icons";
 
 const PARAM_IDS = {
   input: "Gain",
@@ -136,6 +137,7 @@ export default function App() {
   const [tagNames, setTagNames] = useState(readInitialTagNames);
   const [transport, setTransport] = useState(readInitialTransport);
   const [notification, setNotification] = useState(null);
+  const [dragActive, setDragActive] = useState(false);
   const [vst3, setVst3] = useState({
     chains: [],
     openEditors: [],
@@ -578,6 +580,54 @@ export default function App() {
     return Math.max(0, Math.round((elapsedMs / restoredDone) * pendingTotal / 1000));
   }, [pendingTotal, restoredDone, vst3.restoring]);
 
+  // Drag-drop import (0024). The WebView can't expose a dropped file's
+  // path, so read the bytes in JS and hand them to C++ as base64. The
+  // FileChooser "Import audio…" path has no size limit; drops are capped.
+  const importDroppedFiles = async (fileList) => {
+    const files = Array.from(fileList ?? []);
+    if (files.length === 0) return;
+
+    const MAX_BYTES = 32 * 1024 * 1024;
+    let queued = 0;
+
+    for (const file of files) {
+      if (file.size > MAX_BYTES) {
+        setNotification({ level: "error", message: `${file.name} is too large to drop (over 32 MB) — use Import audio….` });
+        continue;
+      }
+      try {
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        let binary = "";
+        const chunk = 0x8000;
+        for (let i = 0; i < bytes.length; i += chunk)
+          binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+        emit(FRONTEND_EVENTS.importAudioData, { name: file.name, data: btoa(binary) });
+        queued += 1;
+      } catch {
+        setNotification({ level: "error", message: `Could not read ${file.name}.` });
+      }
+    }
+
+    if (queued > 0)
+      setNotification({ level: "info", message: `Importing ${queued} file${queued === 1 ? "" : "s"}…` });
+  };
+
+  const handleLibraryDragOver = (event) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    if (!dragActive) setDragActive(true);
+  };
+
+  const handleLibraryDragLeave = (event) => {
+    if (!event.currentTarget.contains(event.relatedTarget)) setDragActive(false);
+  };
+
+  const handleLibraryDrop = (event) => {
+    event.preventDefault();
+    setDragActive(false);
+    importDroppedFiles(event.dataTransfer?.files);
+  };
+
   return (
     <main className="app">
       <header className="app-header">
@@ -712,10 +762,26 @@ export default function App() {
         scanState={scanState}
       />
 
-      <section className="bp-section library-section" aria-label="Library">
+      <section
+        className={`bp-section library-section ${dragActive ? "is-drag-target" : ""}`}
+        aria-label="Library"
+        onDragOver={handleLibraryDragOver}
+        onDragEnter={handleLibraryDragOver}
+        onDragLeave={handleLibraryDragLeave}
+        onDrop={handleLibraryDrop}
+      >
         <div className="bp-section-head">
           <span className="section-index" aria-hidden="true">04</span>
           <h2 className="bp-section-title">Library</h2>
+          <button
+            type="button"
+            className="btn btn-sm library-import-btn"
+            onClick={() => emit(FRONTEND_EVENTS.importAudio)}
+            title="Import WAV/AIFF/FLAC/OGG/MP3 files into the library"
+          >
+            <IconArrowDown size={13} />
+            Import audio…
+          </button>
         </div>
         <div className="bp-section-body">
           <ErrorBoundary>

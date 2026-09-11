@@ -607,3 +607,104 @@ bool SnippetLibrary::exportSnippetToFile (const Snippet& snippet,
 
     return true;
 }
+
+int SnippetLibrary::importAudioFile (const juce::File& file, juce::String& outError)
+{
+    if (! file.existsAsFile())
+    {
+        outError = "File not found: " + file.getFileName();
+        return -1;
+    }
+
+    juce::AudioFormatManager formatManager;
+    formatManager.registerBasicFormats();
+
+    return addFromReader (std::unique_ptr<juce::AudioFormatReader> (formatManager.createReaderFor (file)),
+                          file.getFileNameWithoutExtension(),
+                          file.getFullPathName(),
+                          outError);
+}
+
+int SnippetLibrary::importAudioFromStream (std::unique_ptr<juce::InputStream> stream,
+                                           const juce::String& displayName,
+                                           const juce::String& sourceKey,
+                                           juce::String& outError)
+{
+    juce::AudioFormatManager formatManager;
+    formatManager.registerBasicFormats();
+
+    // createReaderFor takes ownership of the stream; a failed open
+    // destroys it.
+    return addFromReader (std::unique_ptr<juce::AudioFormatReader> (
+                              formatManager.createReaderFor (std::move (stream))),
+                          displayName,
+                          sourceKey,
+                          outError);
+}
+
+int SnippetLibrary::addFromReader (std::unique_ptr<juce::AudioFormatReader> reader,
+                                   const juce::String& displayName,
+                                   const juce::String& sourceKey,
+                                   juce::String& outError)
+{
+    if (reader == nullptr)
+    {
+        outError = "Unsupported or corrupt audio file: " + displayName;
+        return -1;
+    }
+
+    if (sourceKey.isNotEmpty())
+    {
+        const std::lock_guard<std::mutex> lock (mutex);
+        for (const auto& s : snippets)
+            if (s->savedPath == sourceKey)
+            {
+                outError = "Already imported: " + displayName;
+                return -1;
+            }
+    }
+
+    const int numChannels = static_cast<int> (reader->numChannels);
+    const auto numSamples = reader->lengthInSamples;
+    const double sampleRate = reader->sampleRate > 0.0 ? reader->sampleRate : 44100.0;
+
+    if (numChannels <= 0 || numSamples <= 0)
+    {
+        outError = "Audio file has no samples: " + displayName;
+        return -1;
+    }
+
+    // Bound the decode at 30 minutes so a malformed reader can't ask for
+    // an unbounded buffer.
+    const auto maxSamples = static_cast<juce::int64> (sampleRate * 60.0 * 30.0);
+    if (numSamples > maxSamples)
+    {
+        outError = "Audio file is too long (over 30 minutes): " + displayName;
+        return -1;
+    }
+
+    auto buffer = std::make_shared<juce::AudioBuffer<float>> (numChannels, static_cast<int> (numSamples));
+    if (! reader->read (buffer.get(), 0, static_cast<int> (numSamples), 0, true, true))
+    {
+        outError = "Could not decode: " + displayName;
+        return -1;
+    }
+
+    auto snippet = addSnippet (std::move (buffer), sampleRate, displayName);
+    if (snippet == nullptr)
+    {
+        outError = "Could not add: " + displayName;
+        return -1;
+    }
+
+    // Track the source so re-importing is a no-op. The library never
+    // writes over an imported file: savedPath only enables duplicate
+    // detection and "Reveal".
+    if (sourceKey.isNotEmpty())
+    {
+        const std::lock_guard<std::mutex> lock (mutex);
+        snippet->savedPath = sourceKey;
+    }
+
+    return snippet->id;
+}

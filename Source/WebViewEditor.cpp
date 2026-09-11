@@ -330,6 +330,16 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
             if (owner != nullptr)
                 owner->handleExportSnippet (data);
         })
+        .withEventListener(BluePrinterWebViewEditor::frontendImportAudioEvent, [owner](juce::var)
+        {
+            if (owner != nullptr)
+                owner->handleImportAudio();
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendImportAudioDataEvent, [owner](juce::var data)
+        {
+            if (owner != nullptr)
+                owner->handleImportAudioData (data);
+        })
         .withEventListener(BluePrinterWebViewEditor::frontendRevealSnippetEvent, [owner](juce::var data)
         {
             if (owner != nullptr)
@@ -1058,6 +1068,78 @@ void BluePrinterWebViewEditor::handleExportSnippet(const juce::var& data)
         if (! start.isDirectory())
             start = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory);
         exportSnippetWithDialog (id, start);
+    }
+}
+
+void BluePrinterWebViewEditor::handleImportAudio()
+{
+    juce::File start (audioProcessor.getLibraryFolder());
+    if (! start.isDirectory())
+        start = juce::File::getSpecialLocation (juce::File::userMusicDirectory);
+
+    activeFileChooser = std::make_unique<juce::FileChooser> (
+        "Import audio files",
+        start,
+        "*.wav;*.aiff;*.aif;*.flac;*.ogg;*.mp3",
+        true);
+
+    auto flags = juce::FileBrowserComponent::openMode
+               | juce::FileBrowserComponent::canSelectFiles
+               | juce::FileBrowserComponent::canSelectMultipleItems;
+
+    activeFileChooser->launchAsync (flags, [this](const juce::FileChooser& chooser)
+    {
+        const auto results = chooser.getResults();
+        activeFileChooser.reset();
+
+        if (results.isEmpty())
+            return;
+
+        int imported = 0, skipped = 0;
+        juce::String firstError;
+
+        for (const auto& file : results)
+        {
+            juce::String error;
+            if (audioProcessor.importAudioFile (file, error) >= 0)
+            {
+                ++imported;
+            }
+            else
+            {
+                ++skipped;
+                if (firstError.isEmpty())
+                    firstError = error;
+            }
+        }
+
+        if (imported > 0 && skipped == 0)
+            sendNotification ("Imported " + juce::String (imported)
+                                  + (imported == 1 ? " file." : " files."), "ok");
+        else if (imported > 0)
+            sendNotification ("Imported " + juce::String (imported) + ", skipped "
+                                  + juce::String (skipped) + ". " + firstError, "info");
+        else
+            sendNotification ("Import failed: "
+                                  + (firstError.isNotEmpty() ? firstError
+                                                             : juce::String ("no files selected.")), "error");
+    });
+}
+
+void BluePrinterWebViewEditor::handleImportAudioData(const juce::var& data)
+{
+    if (auto* obj = data.getDynamicObject())
+    {
+        const auto name = obj->getProperty ("name").toString();
+        const auto base64 = obj->getProperty ("data").toString();
+        if (name.isEmpty() || base64.isEmpty())
+            return;
+
+        juce::String error;
+        if (audioProcessor.importAudioFromBase64 (name, base64, error) >= 0)
+            sendNotification ("Imported " + name + ".", "ok");
+        else
+            sendNotification ("Import failed: " + error, "error");
     }
 }
 

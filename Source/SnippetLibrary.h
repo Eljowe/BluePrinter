@@ -113,8 +113,30 @@ public:
     // WAV first, then lossless alternatives.
     static juce::StringArray supportedExportExtensions();
 
+    // Import an external audio file (WAV/AIFF/FLAC/OGG/MP3 as the build
+    // decodes). Decodes, computes peaks, adds a snippet and records the
+    // file's absolute path so re-importing the same file is a no-op.
+    // Returns the new snippet id, or -1 with outError set on failure.
+    int importAudioFile (const juce::File& file, juce::String& outError);
+
+    // Import audio delivered as an in-memory stream (drag-drop, where the
+    // WebView cannot expose a file path). `sourceKey` is a stable identity
+    // for the source (e.g. "drop:<name>:<size>"), used for duplicate
+    // detection. Returns the new snippet id, or -1 with outError set.
+    int importAudioFromStream (std::unique_ptr<juce::InputStream> stream,
+                               const juce::String& displayName,
+                               const juce::String& sourceKey,
+                               juce::String& outError);
+
 private:
     static bool writeMetadataFile (const Snippet& snippet, const juce::File& jsonFile);
+
+    // Shared decode + add path for both import entry points. `sourceKey`
+    // may be empty. Caps the decoded length at 30 minutes to bound memory.
+    int addFromReader (std::unique_ptr<juce::AudioFormatReader> reader,
+                       const juce::String& displayName,
+                       const juce::String& sourceKey,
+                       juce::String& outError);
 
     static constexpr int peaksPerSnippet = 256;
     static constexpr int maxNameLength = 80;

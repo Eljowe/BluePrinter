@@ -970,6 +970,21 @@ button {
   gap: 14px;
 }
 
+/* Import (0024): button right-aligned in the section head; the whole
+   section highlights while files are dragged over it. */
+.library-import-btn {
+  margin-left: auto;
+}
+
+.library-section.is-drag-target {
+  outline: 3px dashed var(--accent);
+  outline-offset: -3px;
+}
+
+.library-section.is-drag-target .bp-section-body {
+  background: var(--panel-2);
+}
+
 /* ============================================================
    Transport
    ============================================================ */

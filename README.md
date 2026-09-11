@@ -62,6 +62,11 @@ full ordered release process lives in
   time) or discard it. If a library folder is set, "Save to library" writes
   the WAV + sidecar there.
 - **Reveal in Explorer** — opens the saved WAV in Windows Explorer.
+- **Import** — bring in WAV/AIFF/FLAC/OGG/MP3 files with **Import audio…** or
+  by dragging them onto the Library; imported files become normal snippets
+  (rename, comments, colour, gain, export). Re-importing the same file is a
+  no-op. (Dropped files are read in the WebView and are capped at 32 MB; the
+  file chooser has no limit.)
 - **Hands-free transport** — **Space** starts/stops a take or loop capture,
   **Enter** saves a pending take, **Esc** stops playback. Shortcuts are ignored
   while you're typing, and the header's **Keyboard** popover lists them.
