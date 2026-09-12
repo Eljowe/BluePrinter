@@ -128,6 +128,9 @@ export function SyncControls({
   clickDuringCapture,
   onClickDuringCaptureChange,
   clickParams,
+  timeSignatureNumerator,
+  timeSignatureDenominator,
+  onTimeSignatureChange,
   midiClockEnabled,
   onMidiClockChange,
   midiClockOnRecord,
@@ -139,10 +142,36 @@ export function SyncControls({
   const [clickOpen, setClickOpen] = useState(false);
   const devices = Array.isArray(midiOutputDeviceList) ? midiOutputDeviceList : [];
   const selectedDevice = midiOutputDevice || devices[0] || "";
+  const numerator = Number(timeSignatureNumerator ?? 4);
+  const denominator = Number(timeSignatureDenominator ?? 4);
+  const meterValue = `${numerator}/${denominator}`;
+  // Keep a value restored from old/edited state visible even when it isn't one
+  // of the presets (a controlled <select> would otherwise render blank).
+  const METERS = ["2/4", "3/4", "4/4", "5/4", "6/8", "7/8", "9/8", "12/8"];
+  const meterOptions = METERS.includes(meterValue) ? METERS : [meterValue, ...METERS];
 
   return (
     <div className="sync-strip" role="group" aria-label="Click and MIDI clock">
       <div className="sync-group" role="group" aria-label="Click">
+        <label
+          className="sync-device"
+          title="Time signature — beats per bar / note value. BPM stays a quarter-note tempo; the click accents beat 1 of each bar."
+        >
+          <span className="sync-device-label">Meter</span>
+          <select
+            className="midi-device-select meter-select"
+            value={meterValue}
+            onChange={(e) => {
+              const [n, d] = e.target.value.split("/").map(Number);
+              onTimeSignatureChange(n, d);
+            }}
+          >
+            {meterOptions.map((m) => (
+              <option key={m} value={m}>{m}</option>
+            ))}
+          </select>
+        </label>
+
         <button
           type="button"
           className={`sync-toggle ${metronomeEnabled ? "is-on" : ""}`}

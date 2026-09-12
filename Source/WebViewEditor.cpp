@@ -404,6 +404,12 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
             if (auto* obj = data.getDynamicObject())
                 processor.setBpm (static_cast<float> (obj->getProperty ("bpm")));
         })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetTimeSignatureEvent, [&processor](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+                processor.setTimeSignature (static_cast<int> (obj->getProperty ("numerator")),
+                                            static_cast<int> (obj->getProperty ("denominator")));
+        })
         .withEventListener(BluePrinterWebViewEditor::frontendSetCountInBeatsEvent, [&processor](juce::var data)
         {
             if (auto* obj = data.getDynamicObject())
@@ -970,6 +976,8 @@ juce::var BluePrinterWebViewEditor::makeTransportSnapshot() const
     obj->setProperty ("metronomeEnabled", audioProcessor.getMetronomeEnabled());
     obj->setProperty ("bpm",              audioProcessor.getBpm());
     obj->setProperty ("countInBeats",     audioProcessor.getCountInBeats());
+    obj->setProperty ("timeSignatureNumerator",   audioProcessor.getTimeSignatureNumerator());
+    obj->setProperty ("timeSignatureDenominator", audioProcessor.getTimeSignatureDenominator());
     obj->setProperty ("loopLevel",        audioProcessor.getLoopLevel());
     obj->setProperty ("dryLevel",         audioProcessor.getDryLevel());
     obj->setProperty ("overdubLevel",     audioProcessor.getOverdubLevel());

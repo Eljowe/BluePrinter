@@ -103,7 +103,7 @@ and briefed.
 | ------ | ----- | ------ | ---------- |
 | [0030](0030-loop-layer-undo-redo.md) | Undo/redo for looper overdub layers | ready-for-agent | — |
 | [0031](0031-interactive-loop-waveform-crop-zoom.md) | Interactive loop waveform: drag crop handles and zoom | ready-for-agent | — |
-| [0032](0032-time-signatures.md) | Time signatures beyond 4/4 | ready-for-agent | — |
+| [0032](0032-time-signatures.md) | Time signatures beyond 4/4 | done | — |
 | [0033](0033-named-chain-presets.md) | Named VST3 chain presets | ready-for-agent | — |
 | [0034](0034-builtin-tuner.md) | Built-in tuner | ready-for-agent | — |
 | [0035](0035-library-curation-setlists-favorites.md) | Library curation: setlists, favourites and bulk edits | needs-triage | — |

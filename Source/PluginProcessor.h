@@ -16,6 +16,7 @@
 #include "MetronomePlayer.h"
 #include "MidiClockOutput.h"
 #include "Meter.h"
+#include "LooperGridMath.h"
 
 //==============================================================================
 // A dedicated thread that owns every VST3 instantiation so every
@@ -241,12 +242,19 @@ public:
     bool    getMetronomeEnabled() const { return metronomeEnabled.load (std::memory_order_acquire); }
     float   getBpm()              const { return bpm.load (std::memory_order_acquire); }
     int     getCountInBeats()     const { return countInBeats.load (std::memory_order_acquire); }
+    // Notated meter (numerator/denominator); default 4/4. BPM is a
+    // quarter-note tempo, so an eighth beat (6/8) is half a quarter.
+    int     getTimeSignatureNumerator()   const { return timeSignatureNumerator.load (std::memory_order_acquire); }
+    int     getTimeSignatureDenominator() const { return timeSignatureDenominator.load (std::memory_order_acquire); }
     int64_t getTransportPosition() const { return transportPosition.load (std::memory_order_acquire); }
     bool    isPreRollActive()     const { return preRollActive.load (std::memory_order_acquire); }
 
     void setMetronomeEnabled (bool enabled);
     void setBpm (float newBpm);
     void setCountInBeats (int beats);
+    // Set the notated meter (numerator/denominator), clamped to the supported
+    // values. Affects future captures, the grid trim and the click accents.
+    void setTimeSignature (int numerator, int denominator);
 
     // Monitor-only playback level for the looper (dB, -60..+12, 0 =
     // unity). Scales the loop playback without touching the capture or
@@ -620,6 +628,16 @@ private:
     std::atomic<bool>    clickDuringCapture { true };
     std::atomic<float>   bpm              { 120.0f };
     std::atomic<int>     countInBeats     { 4 };
+    // Notated meter (numerator/denominator), default 4/4. Set on the message
+    // thread, read on the audio thread.
+    std::atomic<int>     timeSignatureNumerator   { 4 };
+    std::atomic<int>     timeSignatureDenominator { 4 };
+
+    LooperGrid::TimeSignature currentTimeSignature() const
+    {
+        return { timeSignatureNumerator.load (std::memory_order_acquire),
+                 timeSignatureDenominator.load (std::memory_order_acquire) };
+    }
     std::atomic<float>   loopLevel        { 0.0f };
     std::atomic<float>   dryLevel         { 0.0f };
     std::atomic<float>   overdubLevel     { 0.0f };

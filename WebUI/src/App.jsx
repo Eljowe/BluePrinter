@@ -76,6 +76,7 @@ function readInitialTransport() {
     inputClipped: false, recordClipped: false, outputClipped: false, loopClipped: false,
     libraryFolder: "", lastSaveError: "",
     metronomeEnabled: true, bpm: 120, countInBeats: 4, loopLevel: 0, overdubLevel: 0, dryLevel: 0, clickDuringCapture: true,
+    timeSignatureNumerator: 4, timeSignatureDenominator: 4,
     clickPitch: 1000, clickAccentPitch: 1500, clickDecay: 90, clickVolume: 0.35, clickAccentVolume: 0.5, clickNoise: 0.1,
     midiClockEnabled: false, midiClockOnRecord: false, midiOutputDevice: "", midiOutputDeviceList: [],
      preRollActive: false, transportPosition: 0,
@@ -104,6 +105,8 @@ function readInitialTransport() {
     metronomeEnabled: raw.metronomeEnabled !== false,
     bpm: Number(raw.bpm ?? 120),
     countInBeats: Number(raw.countInBeats ?? 4),
+    timeSignatureNumerator: Number(raw.timeSignatureNumerator ?? 4),
+    timeSignatureDenominator: Number(raw.timeSignatureDenominator ?? 4),
     loopLevel: Number(raw.loopLevel ?? 0),
     overdubLevel: Number(raw.overdubLevel ?? 0),
     dryLevel: Number(raw.dryLevel ?? 0),
@@ -322,6 +325,8 @@ export default function App() {
         metronomeEnabled: payload.metronomeEnabled !== undefined ? Boolean(payload.metronomeEnabled) : prev.metronomeEnabled,
         bpm:              payload.bpm !== undefined              ? Number(payload.bpm)              : prev.bpm,
         countInBeats:     payload.countInBeats !== undefined     ? Number(payload.countInBeats)     : prev.countInBeats,
+        timeSignatureNumerator:   payload.timeSignatureNumerator   !== undefined ? Number(payload.timeSignatureNumerator)   : prev.timeSignatureNumerator,
+        timeSignatureDenominator: payload.timeSignatureDenominator !== undefined ? Number(payload.timeSignatureDenominator) : prev.timeSignatureDenominator,
         loopLevel:        payload.loopLevel !== undefined        ? Number(payload.loopLevel)        : prev.loopLevel,
         dryLevel:         payload.dryLevel !== undefined         ? Number(payload.dryLevel)         : prev.dryLevel,
         overdubLevel:     payload.overdubLevel !== undefined     ? Number(payload.overdubLevel)     : prev.overdubLevel,
@@ -477,6 +482,15 @@ export default function App() {
   const handleBpmChange = (next) => {
     setTransport((prev) => ({ ...prev, bpm: next }));
     emit(FRONTEND_EVENTS.setBpm, { bpm: next });
+  };
+
+  const handleTimeSignatureChange = (numerator, denominator) => {
+    setTransport((prev) => ({
+      ...prev,
+      timeSignatureNumerator: numerator,
+      timeSignatureDenominator: denominator,
+    }));
+    emit(FRONTEND_EVENTS.setTimeSignature, { numerator, denominator });
   };
 
   const handleCountInBeatsChange = (next) => {
@@ -715,6 +729,9 @@ export default function App() {
               clickDuringCapture={transport.clickDuringCapture !== false}
               onClickDuringCaptureChange={handleClickDuringCaptureChange}
               clickParams={transport}
+              timeSignatureNumerator={transport.timeSignatureNumerator}
+              timeSignatureDenominator={transport.timeSignatureDenominator}
+              onTimeSignatureChange={handleTimeSignatureChange}
               midiClockEnabled={Boolean(transport.midiClockEnabled)}
               onMidiClockChange={handleMidiClockChange}
               midiClockOnRecord={Boolean(transport.midiClockOnRecord)}

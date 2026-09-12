@@ -134,3 +134,50 @@ BP_TEST (LooperGrid_padClampsToTheBufferEnd)
     BP_CHECK_NEAR (buffer.getSample (0, 4), 0.0f, 0.0001f);
     BP_CHECK_NEAR (buffer.getSample (0, 5), 0.0f, 0.0001f);
 }
+
+//==============================================================================
+// Meter-aware grid (ticket 0032). BPM is quarter-note referenced, so the beat
+// is the denominator note: an eighth beat (6/8) is half a quarter.
+
+BP_TEST (LooperGrid_meterSamplesPerBeat)
+{
+    // 120 BPM @ 44.1 kHz: quarter = 22050.
+    BP_CHECK_NEAR (LooperGrid::samplesPerBeat (kSampleRate, kBpm, 4), 22050.0, 0.5);
+    BP_CHECK_NEAR (LooperGrid::samplesPerBeat (kSampleRate, kBpm, 8), 11025.0, 0.5);
+    BP_CHECK_NEAR (LooperGrid::samplesPerBeat (kSampleRate, kBpm, 2), 44100.0, 0.5);
+}
+
+BP_TEST (LooperGrid_fixedLengthRespectsMeter)
+{
+    // 3/4 at 120: one bar = 3 quarters.
+    BP_CHECK_EQ (LooperGrid::computeFixedLengthSamples (1, kSampleRate, kBpm, { 3, 4 }), 3 * kBeat);
+    // 6/8 at 120: one bar = 6 eighths = 3 quarters (same wall-clock bar).
+    BP_CHECK_EQ (LooperGrid::computeFixedLengthSamples (1, kSampleRate, kBpm, { 6, 8 }), 3 * kBeat);
+    // 7/8: one bar = 7 eighths.
+    BP_CHECK_EQ (LooperGrid::computeFixedLengthSamples (1, kSampleRate, kBpm, { 7, 8 }), 7 * (kBeat / 2));
+    // Two bars of 6/8.
+    BP_CHECK_EQ (LooperGrid::computeFixedLengthSamples (2, kSampleRate, kBpm, { 6, 8 }), 6 * kBeat);
+}
+
+BP_TEST (LooperGrid_lengthSnapsToMeterBars)
+{
+    // A 6/8 bar is 66150 samples. A capture just over half a bar rounds to one.
+    BP_CHECK_EQ (LooperGrid::computeLength (40000, kSampleRate, kBpm, 1000000, { 6, 8 }), 66150);
+    // An exact 3/4 bar stays.
+    BP_CHECK_EQ (LooperGrid::computeLength (66150, kSampleRate, kBpm, 1000000, { 3, 4 }), 66150);
+}
+
+BP_TEST (LooperGrid_cropUsesMeterBeats)
+{
+    // One bar of 6/8 = 6 eighth-beats; trim one eighth off the front.
+    const auto crop = LooperGrid::computeCrop (66150, kSampleRate, kBpm, 1, 0, { 6, 8 });
+    BP_CHECK_EQ (crop.startBeats, 1);
+    BP_CHECK_EQ (crop.startSamples, 11025);
+    BP_CHECK_EQ (crop.lengthSamples, 66150 - 11025);
+}
+
+BP_TEST (LooperGrid_meterGuardsNonPositiveValues)
+{
+    // A zero beat unit or numerator falls back to 1 so the math stays finite.
+    BP_CHECK_EQ (LooperGrid::computeFixedLengthSamples (1, kSampleRate, kBpm, { 0, 0 }), kBeat);
+}

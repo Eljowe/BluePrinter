@@ -20,8 +20,10 @@ class MetronomePlayer
 public:
     MetronomePlayer();
 
-    // Tempo context for the next renders. Call once per block before render.
-    void setContext (double newSampleRate, double newBpm, int newBeatsPerBar);
+    // Tempo + meter context for the next renders. Call once per block before
+    // render. BPM is a quarter-note tempo; `beatUnit` is the denominator, so
+    // an eighth beat (beatUnit 8) is half a quarter.
+    void setContext (double newSampleRate, double newBpm, int newBeatsPerBar, int newBeatUnit = 4);
 
     // Adds the beats in [startPos, startPos + numSamples) into `buffer`.
     // `tick` / `accent` are the pre-rendered click waveforms (either may be
@@ -53,4 +55,5 @@ private:
     double sampleRate  = 0.0;
     double bpm         = 120.0;
     int    beatsPerBar = 4;
+    int    beatUnit    = 4;
 };
