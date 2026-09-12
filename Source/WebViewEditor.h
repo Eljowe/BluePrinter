@@ -126,6 +126,9 @@ public:
     static constexpr const char* frontendGetVst3ChainEvent     = "frontendGetVst3Chain";
     static constexpr const char* frontendBlockVst3PluginEvent  = "frontendBlockVst3Plugin";
     static constexpr const char* frontendUnblockVst3PluginEvent = "frontendUnblockVst3Plugin";
+    // { file } — clear a plugin-quarantine entry so the next restore/add can
+    // retry it (Plugin manager, 0040).
+    static constexpr const char* frontendClearPluginQuarantineEvent = "frontendClearPluginQuarantine";
     static constexpr const char* frontendAddChainEvent         = "frontendAddChain";
     static constexpr const char* frontendRemoveChainEvent      = "frontendRemoveChain";
     static constexpr const char* frontendRenameChainEvent      = "frontendRenameChain";

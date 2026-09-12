@@ -130,6 +130,9 @@ export const FRONTEND_EVENTS = {
   getVst3Chain: "frontendGetVst3Chain",
   blockVst3Plugin: "frontendBlockVst3Plugin",
   unblockVst3Plugin: "frontendUnblockVst3Plugin",
+  // { file } — clear a plugin-quarantine entry (Plugin manager, 0040) so the
+  // plugin can be retried (re-added from a chain).
+  clearPluginQuarantine: "frontendClearPluginQuarantine",
   // Chain lifecycle. "chain" fields are chain ids; addChain takes
   // { name?, inputs?: [0..7], wantsMidi?, recordOnCapture? }.
   addChain: "frontendAddChain",
