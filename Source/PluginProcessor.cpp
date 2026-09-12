@@ -3589,17 +3589,30 @@ void BluePrinterAudioProcessor::savePluginQuarantine()
 bool BluePrinterAudioProcessor::isPluginQuarantined (const juce::String& fileName)
 {
     loadPluginQuarantine();
-    return pluginQuarantine.contains (fileName);
+    return pluginQuarantine.indexOf (fileName, true) >= 0;
 }
 
 void BluePrinterAudioProcessor::clearPluginQuarantineForFile (const juce::String& fileName)
 {
     loadPluginQuarantine();
-    if (! pluginQuarantine.contains (fileName))
+    if (pluginQuarantine.indexOf (fileName, true) < 0)
         return;
-    while (pluginQuarantine.contains (fileName))
-        pluginQuarantine.removeString (fileName);
+    // Case-insensitive (Windows file names): the UI matches case-insensitively
+    // too, so a stored/scan case difference must not leave a stuck entry.
+    for (int i = pluginQuarantine.size(); --i >= 0;)
+        if (pluginQuarantine[i].equalsIgnoreCase (fileName))
+            pluginQuarantine.remove (i);
     savePluginQuarantine();
+}
+
+juce::var BluePrinterAudioProcessor::getPluginQuarantineSnapshot()
+{
+    loadPluginQuarantine();
+
+    juce::Array<juce::var> arr;
+    for (const auto& n : pluginQuarantine)
+        arr.add (juce::var (n));
+    return juce::var (arr);
 }
 
 // Persist "lastPluginLoadOp" ("<epoch millis>:<plugin file name>")

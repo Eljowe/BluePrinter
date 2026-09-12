@@ -126,6 +126,10 @@ trim monitoring level while recording.
   the deferred restore path.
 - **VST3 scanner** (`Source/Vst3Library.{h,cpp}`) — folder scanning with a
   blocklist and async per-file description.
+- **Plugin manager** (0040, `WebUI/src/components/PluginManager.jsx`) — a
+  footer popover that lists the cached scan result (name/vendor/path) with
+  search, rescan and per-entry quarantine control; metadata-only, never
+  instantiates a plugin.
 - **React + Vite frontend** (`WebUI/`) — transport bar, library folder row,
   snippet list with editable name/comments, waveform, level meter, audio
   looper, plugin-chain panels, toast notifications.
@@ -268,6 +272,7 @@ Events flow through `window.__JUCE__.backend`:
 | `frontendSetVst3MidiPass`                               | Per-chain MIDI pass-through toggle (default: FX chain off) |
 | `frontendScanVst3Folder` / `frontendGetVst3Chain`         | VST3 scan / chain snapshot                        |
 | `frontendBlockVst3Plugin` / `frontendUnblockVst3Plugin`   | Blocklist management                              |
+| `frontendClearPluginQuarantine`                          | Plugin manager: clear a quarantine entry so the plugin can be retried |
 | `frontendSaveChainPreset` / `frontendLoadChainPreset` / `frontendRenameChainPreset` / `frontendDeleteChainPreset` | Named chain presets: save/load/rename/delete a per-chain plugin rig |
 
 | Backend → Frontend       | Purpose                                                  |

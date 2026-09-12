@@ -111,7 +111,7 @@ and briefed.
 | [0037](0037-multi-take-comping.md) | Multi-take recording and comping | needs-triage | — |
 | [0038](0038-stem-per-chain-export.md) | Stem export: render each chain separately | needs-triage | — |
 | [0039](0039-auto-update-check.md) | Update check and in-app upgrade notice | needs-triage | 0015 |
-| [0040](0040-plugin-manager-scan-ui.md) | Plugin manager: scan status, browse and quarantine control | needs-triage | — |
+| [0040](0040-plugin-manager-scan-ui.md) | Plugin manager: scan status, browse and quarantine control | done | — |
 
 ### Backlog / deferred
 

@@ -9,6 +9,7 @@ import { LibraryFolderRow } from "./components/LibraryFolderRow";
 import { SnippetList } from "./components/SnippetList";
 import { Notification } from "./components/Notification";
 import { PluginChain } from "./components/PluginChain";
+import { PluginManager } from "./components/PluginManager";
 import { Looper } from "./components/Looper";
 import { SplashScreen } from "./components/SplashScreen";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -158,6 +159,7 @@ export default function App() {
     inputChannels: 2,
     restoring: false,
     restoreError: "",
+    quarantine: [],
   });
   const [scanState, setScanState] = useState({ active: false, current: 0, total: 0, currentFile: "", folder: "" });
   const [recordingMode, setRecordingMode] = useState(readInitialRecordingMode);
@@ -464,6 +466,7 @@ export default function App() {
           inputChannels,
           restoring: payload.restoring !== undefined ? Boolean(payload.restoring) : prev.restoring,
           restoreError: typeof payload.restoreError === "string" ? payload.restoreError : prev.restoreError,
+          quarantine: Array.isArray(payload.quarantine) ? payload.quarantine : prev.quarantine,
         };
       });
     });
@@ -919,6 +922,16 @@ export default function App() {
         <span className="app-footer-note">
           Takes stay in memory until you save or discard them — pick a library folder so saves have a destination.
         </span>
+        <details className={`plugins-help ${vst3.quarantine.length > 0 ? "has-warning" : ""}`}>
+          <summary title="Discovered plugins and quarantine">Plugins</summary>
+          <PluginManager
+            plugins={vst3.available}
+            quarantine={vst3.quarantine}
+            scanState={scanState}
+            onRescan={() => emit(FRONTEND_EVENTS.scanVst3Folder)}
+            onClearQuarantine={(file) => emit(FRONTEND_EVENTS.clearPluginQuarantine, { file })}
+          />
+        </details>
         <details className={`diagnostics-help ${vst3.restoreError ? "has-warning" : ""}`}>
           <summary title="Crash and restore diagnostics">Diagnostics</summary>
           <div className="diagnostics-panel" role="group" aria-label="Diagnostics">

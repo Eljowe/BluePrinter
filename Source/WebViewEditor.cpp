@@ -706,6 +706,19 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
                 }
             }
         })
+        .withEventListener(BluePrinterWebViewEditor::frontendClearPluginQuarantineEvent, [&processor, owner](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+            {
+                const auto file = obj->getProperty ("file").toString();
+                if (file.isNotEmpty())
+                {
+                    processor.clearPluginQuarantineForFile (file);
+                    if (owner != nullptr)
+                        owner->emitVst3ChainSnapshot();
+                }
+            }
+        })
         .withInitialisationData("parameters", initialData)
         .withInitialisationData("snippets", owner->makeSnippetsSnapshot())
         .withInitialisationData("tagNames", owner->makeTagNamesSnapshot())
@@ -1640,6 +1653,7 @@ void BluePrinterWebViewEditor::emitVst3ChainSnapshot()
     obj->setProperty ("restoreError", audioProcessor.getLastChainRestoreError());
     obj->setProperty ("restoring", audioProcessor.isChainRestoreInProgress());
     obj->setProperty ("chainPresets", audioProcessor.getChainPresetsSnapshot());
+    obj->setProperty ("quarantine", audioProcessor.getPluginQuarantineSnapshot());
 
     webView.emitEventIfBrowserIsVisible (juce::Identifier (backendVst3ChainEvent), juce::var (obj));
 }

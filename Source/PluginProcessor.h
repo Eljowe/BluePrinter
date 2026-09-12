@@ -479,6 +479,9 @@ public:
     // any state is applied.
     bool isPluginQuarantined (const juce::String& fileName);
     void clearPluginQuarantineForFile (const juce::String& fileName);
+    // The quarantined file names as a JSON array, for the Plugin manager UI
+    // (0040). Message-thread only; loads the persisted list lazily.
+    juce::var getPluginQuarantineSnapshot();
 
     // Record the plugin file currently being loaded in the properties
     // file ("lastPluginLoadOp", timestamped) so a crash during the load
