@@ -196,6 +196,7 @@ if(BUILD_TESTING)
         Tests/test_CaptureWrite.cpp
         Tests/test_CaptureCopy.cpp
         Tests/test_PreRollMath.cpp
+        Tests/test_Tuner.cpp
         # Production sources under test. Kept deliberately minimal so the
         # test target never pulls in WebView2, the plugin host, or the
         # audio device layer.
