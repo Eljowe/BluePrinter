@@ -15,6 +15,7 @@
 #include "ClickSynth.h"
 #include "MidiClockMath.h"
 #include "MeterMath.h"
+#include "LoopPlayback.h"
 
 #include <algorithm>
 #include <set>
@@ -936,12 +937,10 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         const auto length = audioLoopLength.load (std::memory_order_acquire);
         if (length > 0 && recordBuffer != nullptr)
         {
-            const int channels = juce::jmin (numChannels, recordBuffer->getNumChannels());
             const int declick = juce::jmin (loopCrossfadeSamples, static_cast<int> (length / 2));
             const bool looping = looperLooping.load (std::memory_order_acquire);
             const float loopGain = juce::Decibels::decibelsToGain (
                 loopLevel.load (std::memory_order_acquire));
-            auto position = audioLoopPosition.load (std::memory_order_acquire);
 
             // Per-sample playback so each cycle can be de-clicked with a
             // short fade in/out at the seam. The old tail-into-head
@@ -951,37 +950,13 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             // This adds only the loop's own contribution on top of whatever
             // the live mix already holds, so direct monitoring is never
             // ducked at the seam either. The phase wraps to 0, so every
-            // cycle starts exactly at audioLoopStart.
+            // cycle starts exactly at audioLoopStart. The DSP lives in
+            // LoopPlayback::render (unit-tested).
             float loopPeakThisBlock = 0.0f;
-            for (int i = 0; i < numSamples; ++i)
-            {
-                if (position >= length)
-                {
-                    if (! looping)
-                        break;
-                    position = 0;
-                }
-
-                float env = 1.0f;
-                if (declick > 0)
-                {
-                    const float fadeIn = static_cast<float> (position + 1)
-                                       / static_cast<float> (declick + 1);
-                    const float fadeOut = static_cast<float> (length - position)
-                                        / static_cast<float> (declick + 1);
-                    env = juce::jmin (1.0f, juce::jmin (fadeIn, fadeOut));
-                }
-
-                const int src = static_cast<int> (start + position);
-                for (int ch = 0; ch < channels; ++ch)
-                {
-                    const float v = recordBuffer->getSample (ch, src) * loopGain * env;
-                    loopPeakThisBlock = juce::jmax (loopPeakThisBlock, std::abs (v));
-                    buffer.addSample (ch, i, v);
-                }
-
-                ++position;
-            }
+            const auto position = LoopPlayback::render (
+                buffer, *recordBuffer, start, length,
+                audioLoopPosition.load (std::memory_order_acquire),
+                looping, loopGain, declick, &loopPeakThisBlock);
 
             // Loop playback meter (post loop-level gain, monitor only).
             // The peak decays between blocks like the other meters; the
@@ -1005,31 +980,11 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         const auto takeLen = takeLength.load (std::memory_order_acquire);
         if (takeLen > 0)
         {
-            const int channels = juce::jmin (numChannels, recordBuffer->getNumChannels());
             const int declick = juce::jmin (loopCrossfadeSamples, static_cast<int> (takeLen / 2));
-            auto position = takeOverdubPlayPos.load (std::memory_order_acquire);
-
-            for (int i = 0; i < numSamples; ++i)
-            {
-                if (position >= takeLen)
-                    position = 0;
-
-                float env = 1.0f;
-                if (declick > 0)
-                {
-                    const float fadeIn = static_cast<float> (position + 1)
-                                       / static_cast<float> (declick + 1);
-                    const float fadeOut = static_cast<float> (takeLen - position)
-                                        / static_cast<float> (declick + 1);
-                    env = juce::jmin (1.0f, juce::jmin (fadeIn, fadeOut));
-                }
-
-                const int src = static_cast<int> (position);
-                for (int ch = 0; ch < channels; ++ch)
-                    buffer.addSample (ch, i, recordBuffer->getSample (ch, src) * env);
-
-                ++position;
-            }
+            const auto position = LoopPlayback::render (
+                buffer, *recordBuffer, 0, takeLen,
+                takeOverdubPlayPos.load (std::memory_order_acquire),
+                true, 1.0f, declick);
 
             takeOverdubPlayPos.store (position, std::memory_order_release);
         }
@@ -1659,29 +1614,19 @@ void BluePrinterAudioProcessor::mixOverdubLayer (int64_t loopStart, int64_t loop
         || layerBase + layerLength > recordBuffer->getNumSamples())
         return;
 
-    const int channels = recordBuffer->getNumChannels();
     // Overdub trim: attenuate each new layer before it piles into the
     // loop (0 dB is a no-op).
     const float layerGain = juce::Decibels::decibelsToGain (
         overdubLevel.load (std::memory_order_acquire));
 
     const juce::ScopedLock sl (recordLock);
-    for (int64_t offset = 0; offset < layerLength;)
-    {
-        const auto cyclePos = offset % loopLength;
-        const auto toMix = juce::jmin (loopLength - cyclePos, layerLength - offset);
-        for (int ch = 0; ch < channels; ++ch)
-            recordBuffer->addFrom (ch, static_cast<int> (loopStart + cyclePos),
-                                   *recordBuffer, ch,
-                                   static_cast<int> (layerBase + offset),
-                                   static_cast<int> (toMix), layerGain);
-        offset += toMix;
-    }
+    LoopPlayback::mixLayer (*recordBuffer, loopStart, loopLength,
+                            layerBase, layerLength, layerGain);
 
     // The mixed loop can now exceed 0 dBFS even if each layer was
     // trimmed — latch the caller's clip indicator so the UI shows it.
     float peak = 0.0f;
-    for (int ch = 0; ch < channels; ++ch)
+    for (int ch = 0; ch < recordBuffer->getNumChannels(); ++ch)
         peak = juce::jmax (peak, recordBuffer->getMagnitude (
             ch, static_cast<int> (loopStart), static_cast<int> (loopLength)));
     if (peak >= 1.0f)
