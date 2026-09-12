@@ -18,6 +18,8 @@
 #include "LoopPlayback.h"
 #include "ChainRouting.h"
 #include "CaptureWrite.h"
+#include "CaptureCopy.h"
+#include "PreRollMath.h"
 
 #include <algorithm>
 #include <set>
@@ -1000,15 +1002,10 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             metronomePlayer.render (buffer, startPos, numSamples, clickBuffer, accentClickBuffer);
 
         const int64_t newPos = startPos + numSamples;
-        const double bpmValue = bpm.load (std::memory_order_acquire);
-        const int beatsTarget = looperCountInBeats.load (std::memory_order_acquire);
-
-        bool done = true;
-        if (bpmValue > 0.0 && currentSampleRate > 0.0)
-        {
-            const double samplesPerBeat = 60.0 / bpmValue * currentSampleRate;
-            done = static_cast<int> (newPos / samplesPerBeat) >= beatsTarget;
-        }
+        const bool done = PreRoll::isComplete (
+            newPos, currentSampleRate,
+            bpm.load (std::memory_order_acquire),
+            looperCountInBeats.load (std::memory_order_acquire));
 
         if (done)
         {
@@ -1049,16 +1046,10 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         metronomePlayer.render (buffer, startPos, numSamples, clickBuffer, accentClickBuffer);
 
         const int64_t newPos = startPos + numSamples;
-        const double bpmValue = bpm.load (std::memory_order_acquire);
-        const int beatsTarget   = countInBeats.load (std::memory_order_acquire);
-
-        bool done = true;
-        if (bpmValue > 0.0 && currentSampleRate > 0.0)
-        {
-            const double samplesPerBeat = 60.0 / bpmValue * currentSampleRate;
-            const int beatsElapsed = static_cast<int> (newPos / samplesPerBeat);
-            done = beatsElapsed >= beatsTarget;
-        }
+        const bool done = PreRoll::isComplete (
+            newPos, currentSampleRate,
+            bpm.load (std::memory_order_acquire),
+            countInBeats.load (std::memory_order_acquire));
 
         if (done)
         {
@@ -1525,13 +1516,13 @@ void BluePrinterAudioProcessor::refreshLooperPeaks()
 
     // Peaks cover the FULL loop (crop regions included) so the UI's crop
     // shading can grey the cropped beat ranges over the actual audio.
-    juce::AudioBuffer<float> region (recordBuffer->getNumChannels(), static_cast<int> (full));
+    std::shared_ptr<juce::AudioBuffer<float>> region;
     {
         const juce::ScopedLock sl (recordLock);
-        for (int ch = 0; ch < region.getNumChannels(); ++ch)
-            region.copyFrom (ch, 0, *recordBuffer, ch, 0, static_cast<int> (full));
+        region = CaptureCopy::copyRegion (*recordBuffer, 0, full);
     }
-    looperPeaks = SnippetLibrary::computePeaks (region, 256);
+    if (region != nullptr)
+        looperPeaks = SnippetLibrary::computePeaks (*region, 256);
 }
 
 void BluePrinterAudioProcessor::trimLooperToMusicalGrid()
@@ -1560,9 +1551,7 @@ void BluePrinterAudioProcessor::trimLooperToMusicalGrid()
         // recordBuffer may still hold a previous take's audio past the
         // capture region, so explicitly silence the padded tail.
         const juce::ScopedLock sl (recordLock);
-        for (int ch = 0; ch < recordBuffer->getNumChannels(); ++ch)
-            recordBuffer->clear (ch, static_cast<int> (captured),
-                                 static_cast<int> (target - captured));
+        LooperGrid::padCaptureTail (*recordBuffer, captured, target);
     }
 
     audioLoopStart.store (0, std::memory_order_release);
@@ -1628,10 +1617,9 @@ int BluePrinterAudioProcessor::saveLoopSnippet()
             || looperPreRollActive.load (std::memory_order_acquire))
             return -1;
 
-        const int channels = recordBuffer->getNumChannels();
-        auto snippetBuffer = std::make_shared<juce::AudioBuffer<float>> (channels, static_cast<int> (captured));
-        for (int ch = 0; ch < channels; ++ch)
-            snippetBuffer->copyFrom (ch, 0, *recordBuffer, ch, static_cast<int> (start), static_cast<int> (captured));
+        const auto snippetBuffer = CaptureCopy::copyRegion (*recordBuffer, start, captured);
+        if (snippetBuffer == nullptr)
+            return -1;
 
         auto defaultName = "Loop " + juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H:%M:%S");
         snippet = library.addSnippet (snippetBuffer, getSampleRate(), defaultName);
@@ -3296,13 +3284,13 @@ void BluePrinterAudioProcessor::refreshTakePeaks()
 
     // Copy the take region out under the lock (guards against a new
     // capture writing concurrently) and downsample for the UI.
-    juce::AudioBuffer<float> region (recordBuffer->getNumChannels(), static_cast<int> (length));
+    std::shared_ptr<juce::AudioBuffer<float>> region;
     {
         const juce::ScopedLock sl (recordLock);
-        for (int ch = 0; ch < region.getNumChannels(); ++ch)
-            region.copyFrom (ch, 0, *recordBuffer, ch, 0, static_cast<int> (length));
+        region = CaptureCopy::copyRegion (*recordBuffer, 0, length);
     }
-    takePeaks = SnippetLibrary::computePeaks (region, 256);
+    if (region != nullptr)
+        takePeaks = SnippetLibrary::computePeaks (*region, 256);
 }
 
 void BluePrinterAudioProcessor::clearPendingTake()
@@ -3384,13 +3372,12 @@ void BluePrinterAudioProcessor::savePendingTake()
 
     {
         const juce::ScopedLock sl (recordLock);
-        const int channels = recordBuffer->getNumChannels();
-        auto snippetBuffer = std::make_shared<juce::AudioBuffer<float>> (channels, static_cast<int> (captured));
-        for (int ch = 0; ch < channels; ++ch)
-            snippetBuffer->copyFrom (ch, 0, *recordBuffer, ch, 0, static_cast<int> (captured));
-
-        auto defaultName = "Snippet " + juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H:%M:%S");
-        snippet = library.addSnippet (snippetBuffer, getSampleRate(), defaultName);
+        auto snippetBuffer = CaptureCopy::copyRegion (*recordBuffer, 0, captured);
+        if (snippetBuffer != nullptr)
+        {
+            auto defaultName = "Snippet " + juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H:%M:%S");
+            snippet = library.addSnippet (snippetBuffer, getSampleRate(), defaultName);
+        }
     }
 
     clearPendingTake();

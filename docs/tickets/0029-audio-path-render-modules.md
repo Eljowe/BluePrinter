@@ -47,20 +47,30 @@ Extract the pure buffer-render steps into modules operating on
    record-bus sum.
 4. `CaptureWrite::write(dest, start, source, numSamples, limit)` — the
    clamped capture-buffer write shared by the take recorder and the loop tap.
+5. `CaptureCopy::copyRegion(source, start, length)` — the locked region copy
+   the finalize paths use (take peaks, saved take, saved loop, loop peaks).
+6. `LooperGrid::padCaptureTail(buffer, captured, target)` — the zero-pad of a
+   short capture up to the grid boundary.
+7. `PreRoll::isComplete(position, sampleRate, bpm, beats)` — the count-in
+   completion test shared by the take and looper pre-rolls.
 
 `processBlock` calls them (loop playback, take-overdub playback,
-`mixOverdubLayer`, the chain scratch/mix, the loop capture tap, and
-`writeRecording`) so the DSP has one definition and is tested directly.
+`mixOverdubLayer`, the chain scratch/mix, the loop capture tap,
+`writeRecording`, both pre-rolls, the grid trim, and the take/loop finalize
+copies) so the DSP has one definition and is tested directly.
 
 ## Acceptance criteria
 
-- `Tests/test_LoopPlayback.cpp`, `Tests/test_ChainRouting.cpp` and
-  `Tests/test_CaptureWrite.cpp` cover, at minimum: a one-shot block, a
-  wrapping block across a cycle boundary, the one-shot early stop, the
-  de-click envelope at the seam, the reported block peak, the wrap-mix with
-  and without a partial second cycle, gain scaling, invalid input; selected
-  vs missing channels and the monitor/record sums; and the capture write's
-  full-block, clamped, full-buffer and shared-channel cases.
+- `Tests/test_LoopPlayback.cpp`, `Tests/test_ChainRouting.cpp`,
+  `Tests/test_CaptureWrite.cpp`, `Tests/test_CaptureCopy.cpp`,
+  `Tests/test_PreRollMath.cpp` and the `LooperGrid` tests cover, at minimum: a
+  one-shot block, a wrapping block across a cycle boundary, the one-shot early
+  stop, the de-click envelope at the seam, the reported block peak, the
+  wrap-mix with and without a partial second cycle, gain scaling, invalid
+  input; selected vs missing channels and the monitor/record sums; the capture
+  write's full-block, clamped, full-buffer and shared-channel cases; the
+  region copy and its bounds; the grid pad (tail, no-op, buffer-end clamp);
+  and the count-in completion edges.
 - `processBlock`'s loop playback, take-overdub playback, chain scratch/mix,
   loop capture tap and take recorder produce the same samples as before
   (behaviour-preserving).
@@ -73,9 +83,12 @@ steps are described there.
 
 ## Files
 
-`Source/LoopPlayback.h`, `Source/ChainRouting.h`, `Source/CaptureWrite.h`
-(new), `Source/PluginProcessor.cpp`, `Tests/test_LoopPlayback.cpp`,
-`Tests/test_ChainRouting.cpp`, `Tests/test_CaptureWrite.cpp` (new),
+`Source/LoopPlayback.h`, `Source/ChainRouting.h`, `Source/CaptureWrite.h`,
+`Source/CaptureCopy.h`, `Source/PreRollMath.h`,
+`Source/LooperGridMath.h/.cpp` (new), `Source/PluginProcessor.cpp`,
+`Tests/test_LoopPlayback.cpp`, `Tests/test_ChainRouting.cpp`,
+`Tests/test_CaptureWrite.cpp`, `Tests/test_CaptureCopy.cpp`,
+`Tests/test_PreRollMath.cpp`, `Tests/test_LooperGridMath.cpp` (new),
 `CMakeLists.txt`, `CONTEXT.md`, `README.md`.
 
 ## Out of scope
