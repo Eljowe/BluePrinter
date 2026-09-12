@@ -94,6 +94,25 @@ blocked_by: []            # ticket ids that must be closed first, e.g. ["0001"]
 | ------ | ----- | ------ | ---------- |
 | [0029](0029-audio-path-render-modules.md) | Audio-path render modules + golden tests | done | 0012 |
 
+### Phase 7 — Candidate roadmap (untriaged)
+
+Brainstormed extensions. They start `needs-triage` and flip per ticket once grilled
+and briefed.
+
+| Ticket | Title | Status | Blocked by |
+| ------ | ----- | ------ | ---------- |
+| [0030](0030-loop-layer-undo-redo.md) | Undo/redo for looper overdub layers | ready-for-agent | — |
+| [0031](0031-interactive-loop-waveform-crop-zoom.md) | Interactive loop waveform: drag crop handles and zoom | ready-for-agent | — |
+| [0032](0032-time-signatures.md) | Time signatures beyond 4/4 | ready-for-agent | — |
+| [0033](0033-named-chain-presets.md) | Named VST3 chain presets | ready-for-agent | — |
+| [0034](0034-builtin-tuner.md) | Built-in tuner | ready-for-agent | — |
+| [0035](0035-library-curation-setlists-favorites.md) | Library curation: setlists, favourites and bulk edits | needs-triage | — |
+| [0036](0036-reverse-halfspeed-loop.md) | Reverse and half-speed loop playback | in-progress | — |
+| [0037](0037-multi-take-comping.md) | Multi-take recording and comping | needs-triage | — |
+| [0038](0038-stem-per-chain-export.md) | Stem export: render each chain separately | needs-triage | — |
+| [0039](0039-auto-update-check.md) | Update check and in-app upgrade notice | needs-triage | 0015 |
+| [0040](0040-plugin-manager-scan-ui.md) | Plugin manager: scan status, browse and quarantine control | needs-triage | — |
+
 ### Backlog / deferred
 
 | Ticket | Title | Status | Blocked by |
@@ -109,3 +128,6 @@ blocked_by: []            # ticket ids that must be closed first, e.g. ["0001"]
 - **Deferred backlog**: 0028 (cross-platform) is recorded for later and must not
   be started until the Windows safety net and release path are stable and its
   open decisions are made. It would supersede ADR-0001 if green-lit.
+- **Phase 7** holds untriaged candidate features spun up from the roadmap
+  brainstorm; triage/grill them before claiming. 0039 sits behind 0015 so update
+  delivery only ever ships signed binaries.
