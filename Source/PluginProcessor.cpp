@@ -940,11 +940,20 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             // ducked at the seam either. The phase wraps to 0, so every
             // cycle starts exactly at audioLoopStart. The DSP lives in
             // LoopPlayback::render (unit-tested).
+            // Reverse / half-speed are playback-only transforms (0036).
+            // Ignored while an overdub is capturing: the layer is aligned to
+            // the forward downbeat, so that path stays forward 1x.
+            const bool overdubCapture = looperOverdubCapture.load (std::memory_order_acquire);
+            const LoopPlayback::PlaybackMode mode {
+                ! overdubCapture && loopPlaybackReverse.load (std::memory_order_acquire),
+                (! overdubCapture && loopPlaybackHalfSpeed.load (std::memory_order_acquire)) ? 0.5 : 1.0
+            };
+
             float loopPeakThisBlock = 0.0f;
-            const auto position = LoopPlayback::render (
+            const auto position = LoopPlayback::renderMode (
                 buffer, *recordBuffer, start, length,
                 audioLoopPosition.load (std::memory_order_acquire),
-                looping, loopGain, declick, &loopPeakThisBlock);
+                looping, loopGain, declick, mode, &loopPeakThisBlock);
 
             // Loop playback meter (post loop-level gain, monitor only).
             // The peak decays between blocks like the other meters; the
@@ -952,7 +961,7 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             loopPlayMeter.setPeak (loopPeakThisBlock);
 
             audioLoopPosition.store (position, std::memory_order_release);
-            if (! looping && position >= length)
+            if (! looping && position >= static_cast<double> (length))
                 audioLoopPlaying.store (false, std::memory_order_release);
         }
     }
@@ -1429,6 +1438,10 @@ void BluePrinterAudioProcessor::setLooperRecording (bool enabled)
             overdubWritePos.store (audioLoopFullLength.load (std::memory_order_acquire),
                                    std::memory_order_release);
             audioLoopPosition.store (0, std::memory_order_release);
+            // Overdub aligns to the forward downbeat: drop any reverse /
+            // half-speed playback mode (0036).
+            loopPlaybackReverse.store (false, std::memory_order_release);
+            loopPlaybackHalfSpeed.store (false, std::memory_order_release);
             // With a count-in, hold the loop silent through it and start it
             // from position 0 when capture arms (processBlock step 8).
             audioLoopPlaying.store (! countIn, std::memory_order_release);
@@ -1681,6 +1694,28 @@ void BluePrinterAudioProcessor::setLooperLooping (bool enabled)
 void BluePrinterAudioProcessor::setLooperOverdub (bool enabled)
 {
     looperOverdub.store (enabled, std::memory_order_release);
+    if (enabled)
+    {
+        // Overdub aligns to the forward downbeat, so drop reverse / half-speed
+        // playback when it is switched on (0036).
+        loopPlaybackReverse.store (false, std::memory_order_release);
+        loopPlaybackHalfSpeed.store (false, std::memory_order_release);
+    }
+    listeners.call ([](Listener& l) { l.transportChanged(); });
+}
+
+// Reverse loop playback (session-only, 0036). Takes effect immediately on the
+// next block; the phase is preserved so playback continues from where it is.
+void BluePrinterAudioProcessor::setLoopPlaybackReverse (bool enabled)
+{
+    loopPlaybackReverse.store (enabled, std::memory_order_release);
+    listeners.call ([](Listener& l) { l.transportChanged(); });
+}
+
+// Tape-style half-speed loop playback (session-only, 0036).
+void BluePrinterAudioProcessor::setLoopPlaybackHalfSpeed (bool enabled)
+{
+    loopPlaybackHalfSpeed.store (enabled, std::memory_order_release);
     listeners.call ([](Listener& l) { l.transportChanged(); });
 }
 
@@ -1716,7 +1751,7 @@ void BluePrinterAudioProcessor::setLoopCrop (int startBeats, int endBeats)
     // Keep the playhead inside the cropped window.
     const auto remaining = audioLoopLength.load (std::memory_order_acquire);
     audioLoopPosition.store (juce::jmin (audioLoopPosition.load (std::memory_order_acquire),
-                                         juce::jmax<int64_t> (0, remaining - 1)),
+                                         static_cast<double> (juce::jmax<int64_t> (0, remaining - 1))),
                              std::memory_order_release);
     if (remaining <= 0)
         audioLoopPlaying.store (false, std::memory_order_release);

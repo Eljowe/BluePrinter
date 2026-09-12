@@ -75,6 +75,24 @@ function formatBeats(beats) {
   return `${beats} beats`;
 }
 
+// A labelled switch for a session-only loop playback mode (0036). Disabled
+// with no loop or during a capture; the backend also ignores it while an
+// overdub captures (recording is always forward 1x).
+function PlaybackToggle({ label, checked, disabled, title, event }) {
+  return (
+    <label className={`looper-loop-switch ${disabled ? "is-disabled" : ""}`} title={title}>
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={(e) => emit(event, { enabled: e.target.checked })}
+      />
+      <span className="looper-switch" />
+      <span>{label}</span>
+    </label>
+  );
+}
+
 export function Looper({ transport, onOverdubChange, onLoopLevelChange, onOverdubLevelChange, onResetClip }) {
   const recording = Boolean(transport?.looperRecording);
   const preRoll = Boolean(transport?.looperPreRoll);
@@ -82,6 +100,10 @@ export function Looper({ transport, onOverdubChange, onLoopLevelChange, onOverdu
   const playing = Boolean(transport?.looperPlaying);
   const looping = transport?.looperLooping !== false;
   const overdub = Boolean(transport?.looperOverdub);
+  // Session-only playback mode (0036): reverse direction and tape-style
+  // half-speed. Disabled while an overdub captures (the backend ignores them).
+  const reverse = Boolean(transport?.loopPlaybackReverse);
+  const halfSpeed = Boolean(transport?.loopPlaybackHalfSpeed);
   const lengthBars = Number(transport?.looperLengthBars ?? 0);
   const fixedBars = lengthBars > 0;
 
@@ -174,9 +196,14 @@ export function Looper({ transport, onOverdubChange, onLoopLevelChange, onOverdu
 
     const sampleRate = Number(transport?.recordingSampleRate ?? 0);
     const snapshotPos = Number(transport?.audioLoopPosition ?? 0);
-    const toPct = (pos) => (fullSamples > 0
-      ? Math.min(100, Math.max(0, ((loopStart + pos) / fullSamples) * 100))
+    // Phase -> source samples. Reverse plays the window mirrored, so the
+    // marker's audible position is (loopLength - phase); half-speed advances
+    // the phase at half the sample rate.
+    const toAudible = (phase) => (reverse ? loopLength - phase : phase);
+    const toPct = (phase) => (fullSamples > 0
+      ? Math.min(100, Math.max(0, ((loopStart + toAudible(phase)) / fullSamples) * 100))
       : 0);
+    const phaseRate = sampleRate * (halfSpeed ? 0.5 : 1.0);
 
     if (!playing || sampleRate <= 0 || loopLength <= 0) {
       node.style.left = `${toPct(snapshotPos)}%`;
@@ -189,41 +216,43 @@ export function Looper({ transport, onOverdubChange, onLoopLevelChange, onOverdu
     // would otherwise pull the marker a hair backwards every tick.
     const now = performance.now();
     const clock = clockRef.current;
-    let elapsed = clock.at > 0 ? ((now - clock.at) / 1000) * sampleRate : 0;
+    let elapsed = clock.at > 0 ? ((now - clock.at) / 1000) * phaseRate : 0;
     const deadband = sampleRate * 0.02;
     if (clock.at === 0 || Math.abs(clock.pos + elapsed - snapshotPos) > deadband) {
       clock.pos = snapshotPos;
       clock.at = now;
       elapsed = 0;
     }
-    lastPosRef.current = looping
+    lastPosRef.current = toAudible(looping
       ? (clock.pos + elapsed) % loopLength
-      : Math.min(clock.pos + elapsed, loopLength);
+      : Math.min(clock.pos + elapsed, loopLength));
 
     let raf = 0;
     const tick = () => {
       const c = clockRef.current;
-      let pos = c.pos + ((performance.now() - c.at) / 1000) * sampleRate;
+      let pos = c.pos + ((performance.now() - c.at) / 1000) * phaseRate;
       if (looping) {
         pos %= loopLength;
-        // A drop of more than half the loop means the phase wrapped; fade
-        // the marker briefly so the reset reads as a cycle, not a glitch.
-        if (lastPosRef.current - pos > loopLength * 0.5) {
-          node.classList.add("is-seam");
-          window.clearTimeout(seamTimerRef.current);
-          seamTimerRef.current = window.setTimeout(
-            () => node.classList.remove("is-seam"), 80);
-        }
       } else {
         pos = Math.min(pos, loopLength);
       }
-      lastPosRef.current = pos;
+      const audible = toAudible(pos);
+      // A jump of more than half the loop means the phase wrapped (backwards
+      // forward, or forwards in reverse); fade the marker briefly so the
+      // reset reads as a cycle, not a glitch.
+      if (looping && Math.abs(audible - lastPosRef.current) > loopLength * 0.5) {
+        node.classList.add("is-seam");
+        window.clearTimeout(seamTimerRef.current);
+        seamTimerRef.current = window.setTimeout(
+          () => node.classList.remove("is-seam"), 80);
+      }
+      lastPosRef.current = audible;
       node.style.left = `${toPct(pos)}%`;
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [playing, hasLoop, looping, loopLength, loopStart, fullSamples, transport?.audioLoopPosition, transport?.recordingSampleRate]);
+  }, [playing, hasLoop, looping, loopLength, loopStart, fullSamples, reverse, halfSpeed, transport?.audioLoopPosition, transport?.recordingSampleRate]);
 
   // Clear a pending seam-fade timer if the component goes away.
   useEffect(() => () => window.clearTimeout(seamTimerRef.current), []);
@@ -414,6 +443,24 @@ export function Looper({ transport, onOverdubChange, onLoopLevelChange, onOverdu
               <span className="looper-switch" />
               <span>Overdub</span>
             </label>
+          </div>
+
+          <div className="looper-setting looper-setting--toggles">
+            <PlaybackToggle
+              label="Reverse"
+              checked={reverse}
+              disabled={!hasLoop || isRecording}
+              event={FRONTEND_EVENTS.setLoopReverse}
+              title="Play the cropped loop backwards (playback only). Overdub always records forward."
+            />
+
+            <PlaybackToggle
+              label="Half speed"
+              checked={halfSpeed}
+              disabled={!hasLoop || isRecording}
+              event={FRONTEND_EVENTS.setLoopHalfSpeed}
+              title="Play the loop at half speed, an octave down (tape-style; playback only). Overdub always records forward."
+            />
           </div>
 
           <div className="looper-setting looper-setting--crop">

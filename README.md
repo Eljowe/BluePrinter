@@ -254,6 +254,7 @@ Events flow through `window.__JUCE__.backend`:
 | `frontendSetLooperClick` / `frontendSetLooperCountIn` / `frontendSetLooperClickDuringCapture` | Looper: click + count-in beats + click-through-capture gate |
 | `frontendSetLooperLengthBars`                             | Looper: capture length — `bars: 0` = Free, `1/2/4/8` = fixed N-bar auto-stop |
 | `frontendSetLoopCrop` / `frontendClearLoop` / `frontendSaveLoop` | Looper: crop start/end **beats** / clear / save as snippet to the library folder |
+| `frontendSetLoopReverse` / `frontendSetLoopHalfSpeed`       | Looper: session-only reverse / tape-style half-speed playback |
 | `frontendAddVst3` / `frontendRemoveVst3` / `frontendMoveVst3` | VST3 chain: add / remove / reorder slots       |
 | `frontendSetVst3Bypass` / `frontendOpenVst3Editor` / `frontendCloseVst3Editor` | Chain slot bypass + native editor |
 | `frontendSetVst3MidiPass`                               | Per-chain MIDI pass-through toggle (default: FX chain off) |
@@ -319,8 +320,13 @@ produce, so the loop sounds exactly like what you heard while recording:
   timeline shows a live waveform of the cropped loop, with the trimmed
   regions shaded.
 - Playback mixes the loop over the live input, post-chain (the loop audio is
-  already processed, so it isn't re-run through the chains), with a
-  precomputed crossfade at the wrap point. Loop/one-shot is toggleable.
+  already processed, so it isn't re-run through the chains), with a seam
+  de-click at the wrap point. Loop/one-shot is toggleable. **Reverse** and
+  **Half speed** change the *playback* only (the captured audio is untouched):
+  reverse plays the cropped window backwards, half speed is tape-style (an
+  octave down) with linear interpolation across the loop seam. Both are
+  session-only and are forced off while an overdub captures (overdub always
+  aligns to the forward downbeat).
 - **Save to library** converts the cropped loop into a library snippet
   (`BluePrinterAudioProcessor::saveLoopSnippet()`, message thread only) and —
   exactly like the take recorder — writes WAV + JSON to the library folder
