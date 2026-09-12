@@ -246,6 +246,14 @@ public:
     // quarter-note tempo, so an eighth beat (6/8) is half a quarter.
     int     getTimeSignatureNumerator()   const { return timeSignatureNumerator.load (std::memory_order_acquire); }
     int     getTimeSignatureDenominator() const { return timeSignatureDenominator.load (std::memory_order_acquire); }
+    // Built-in tuner (0034). The reading is published by a worker thread that
+    // runs only while the popover is open; frequency is 0 when there is no
+    // confident pitch.
+    bool  isTunerOpen() const { return tunerOpen.load (std::memory_order_acquire); }
+    bool  isTunerMonitorMuted() const { return tunerMonitorMute.load (std::memory_order_acquire); }
+    float getTunerFrequency() const { return tunerFrequency.load (std::memory_order_acquire); }
+    float getTunerConfidence() const { return tunerConfidence.load (std::memory_order_acquire); }
+    float getTunerReferencePitch() const { return tunerReferencePitch.load (std::memory_order_acquire); }
     int64_t getTransportPosition() const { return transportPosition.load (std::memory_order_acquire); }
     bool    isPreRollActive()     const { return preRollActive.load (std::memory_order_acquire); }
 
@@ -255,6 +263,11 @@ public:
     // Set the notated meter (numerator/denominator), clamped to the supported
     // values. Affects future captures, the grid trim and the click accents.
     void setTimeSignature (int numerator, int denominator);
+    // Built-in tuner (0034). open starts/stops the analysis worker and is
+    // persisted; monitor mute is session-only and never affects the capture.
+    void setTunerOpen (bool open);
+    void setTunerMonitorMute (bool muted);
+    void setTunerReferencePitch (float hz);
 
     // Monitor-only playback level for the looper (dB, -60..+12, 0 =
     // unity). Scales the loop playback without touching the capture or
@@ -638,6 +651,25 @@ private:
         return { timeSignatureNumerator.load (std::memory_order_acquire),
                  timeSignatureDenominator.load (std::memory_order_acquire) };
     }
+
+    // Built-in tuner (0034). The audio thread is the single producer into
+    // tunerRing (a plain float ring, preallocated in prepareToPlay); the
+    // worker reads the latest tunerWindowSize samples and publishes the
+    // reading. No locks on the audio thread.
+    static constexpr int tunerWindowSize = 4096;
+    static constexpr int tunerRingSize   = 8192;
+    std::atomic<bool>    tunerOpen           { false };
+    std::atomic<bool>    tunerMonitorMute    { false };
+    std::atomic<float>   tunerFrequency      { 0.0f };
+    std::atomic<float>   tunerConfidence     { 0.0f };
+    std::atomic<float>   tunerReferencePitch { 440.0f };
+    std::atomic<double>  tunerSampleRate     { 44100.0 };
+    std::vector<float>   tunerRing;
+    std::atomic<int64_t> tunerRingWrite      { 0 };
+    class TunerWorker;
+    std::unique_ptr<TunerWorker> tunerWorker;
+    void startTunerWorker();
+    void stopTunerWorker();
     std::atomic<float>   loopLevel        { 0.0f };
     std::atomic<float>   dryLevel         { 0.0f };
     std::atomic<float>   overdubLevel     { 0.0f };

@@ -20,6 +20,7 @@
 #include "CaptureWrite.h"
 #include "CaptureCopy.h"
 #include "PreRollMath.h"
+#include "Tuner.h"
 
 #include <algorithm>
 #include <set>
@@ -35,6 +36,67 @@ namespace
 {
     char crashOpBuffer[1024] = "no chain operation in progress";
 }
+
+// Built-in tuner (0034). A single worker thread reads the latest window from
+// the audio-thread ring and publishes a YIN pitch estimate; it runs only
+// while the popover is open. Defined here (before its first use) so the
+// unique_ptr teardown in releaseResources sees a complete type.
+class BluePrinterAudioProcessor::TunerWorker : public juce::Thread
+{
+public:
+    explicit TunerWorker (BluePrinterAudioProcessor& p)
+        : juce::Thread ("BluePrinter tuner"), owner (p) {}
+
+    void run() override
+    {
+        std::vector<float> window (static_cast<size_t> (tunerWindowSize));
+        int64_t lastWrite = -1;
+        int idleTicks = 0;
+
+        while (! threadShouldExit())
+        {
+            const auto write = owner.tunerRingWrite.load (std::memory_order_acquire);
+
+            if (write == lastWrite)
+            {
+                // The host stopped feeding the ring (playback stopped /
+                // processBlock idle): after ~2 ticks report no pitch rather
+                // than republishing a stale reading.
+                if (++idleTicks >= 2)
+                {
+                    owner.tunerFrequency.store (0.0f, std::memory_order_release);
+                    owner.tunerConfidence.store (0.0f, std::memory_order_release);
+                }
+                wait (30);
+                continue;
+            }
+
+            idleTicks = 0;
+            lastWrite = write;
+
+            if (write >= tunerWindowSize && ! owner.tunerRing.empty())
+            {
+                for (int i = 0; i < tunerWindowSize; ++i)
+                {
+                    const auto idx = static_cast<size_t> (
+                        (write - tunerWindowSize + i) % owner.tunerRingSize);
+                    window[static_cast<size_t> (i)] = owner.tunerRing[idx];
+                }
+
+                const auto reading = Tuner::detectPitch (
+                    window.data(), tunerWindowSize,
+                    owner.tunerSampleRate.load (std::memory_order_acquire));
+                owner.tunerFrequency.store (reading.frequency, std::memory_order_release);
+                owner.tunerConfidence.store (reading.confidence, std::memory_order_release);
+            }
+
+            wait (30);
+        }
+    }
+
+private:
+    BluePrinterAudioProcessor& owner;
+};
 
 void BluePrinterAudioProcessor::setCrashOp (const char* op, const char* detail)
 {
@@ -502,6 +564,8 @@ void BluePrinterAudioProcessor::ensureUniqueChainIds()
 BluePrinterAudioProcessor::~BluePrinterAudioProcessor()
 {
     stopTimer();
+    // Stop the tuner worker before the members it reads are destroyed.
+    stopTunerWorker();
     // Persist any debounced chain change so the very last mutation of a
     // session (e.g. a volume knob drag finished moments before closing)
     // is not lost.
@@ -596,6 +660,17 @@ void BluePrinterAudioProcessor::prepareToPlay (double sampleRate, int samplesPer
     recordingMixBuffer.setSize (channels, samplesPerBlock, false, false, true);
     blockChains.clear();
 
+    // Tuner analysis window: a plain single-producer ring, preallocated so
+    // the audio thread never allocates (0034). Stop the worker first in case
+    // the host re-prepares while the popover is open, then restart it.
+    const bool tunerWasOpen = tunerOpen.load (std::memory_order_acquire);
+    stopTunerWorker();
+    tunerRing.assign (static_cast<size_t> (tunerRingSize), 0.0f);
+    tunerRingWrite.store (0, std::memory_order_release);
+    tunerSampleRate.store (sampleRate, std::memory_order_release);
+    if (tunerWasOpen)
+        startTunerWorker();
+
     currentSampleRate = sampleRate;
     loopCrossfadeSamples = juce::jlimit (1, 256, static_cast<int> (sampleRate * 0.003));
 
@@ -626,6 +701,9 @@ void BluePrinterAudioProcessor::prepareToPlay (double sampleRate, int samplesPer
 void BluePrinterAudioProcessor::releaseResources()
 {
     stopTimer();
+
+    // Stop the tuner analysis worker (0034) before the buffers it reads.
+    stopTunerWorker();
     // Flush the debounced chain save; the 30 Hz timer that would do it
     // is being stopped and the host may tear the plugin down.
     flushPendingChainPersist();
@@ -914,6 +992,24 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     //    clears the dry from the monitor buffer) pumps the meter.
     computeLevels (chainInputBuffer, numSamples);
 
+    // Tuner input window (0034): the clean post-gain signal, mono-summed,
+    // filled only while the tuner is open. Single producer (this thread).
+    if (tunerOpen.load (std::memory_order_acquire) && ! tunerRing.empty())
+    {
+        const int tunerChannels = juce::jmax (1, chainInputBuffer.getNumChannels());
+        int64_t write = tunerRingWrite.load (std::memory_order_relaxed);
+        for (int i = 0; i < numSamples; ++i)
+        {
+            float s = 0.0f;
+            for (int ch = 0; ch < tunerChannels; ++ch)
+                s += chainInputBuffer.getSample (ch, i);
+            tunerRing[static_cast<size_t> (write % tunerRingSize)] =
+                s / static_cast<float> (tunerChannels);
+            ++write;
+        }
+        tunerRingWrite.store (write, std::memory_order_release);
+    }
+
     // 6. Audio loop playback. Runs after the chains so the already-
     //    processed loop audio isn't re-processed (it was captured
     //    post-chain). Mixed over the live input rather than replacing
@@ -1178,6 +1274,16 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             apvts.getRawParameterValue ("PlaybackVolume")->load());
         for (int channel = 0; channel < numChannels; ++channel)
             buffer.applyGain (channel, 0, numSamples, outputGain);
+    }
+
+    // 13b. Tuner monitor mute (session-only, 0034): silence what is heard
+    //      while tuning. recordingMixBuffer was written above, so the capture
+    //      is untouched; the OUT meter below then reads the muted signal.
+    if (tunerOpen.load (std::memory_order_acquire)
+        && tunerMonitorMute.load (std::memory_order_acquire))
+    {
+        for (int channel = 0; channel < numChannels; ++channel)
+            buffer.clear (channel, 0, numSamples);
     }
 
     // 14. Output meter: the post-master-Output monitor signal — what the
@@ -2243,6 +2349,57 @@ void BluePrinterAudioProcessor::setTimeSignature (int numerator, int denominator
         return;
     timeSignatureNumerator.store (n, std::memory_order_release);
     timeSignatureDenominator.store (d, std::memory_order_release);
+    listeners.call ([](Listener& l) { l.transportChanged(); });
+}
+
+//==============================================================================
+// Built-in tuner (0034): see the TunerWorker definition near the top of this
+// file.
+void BluePrinterAudioProcessor::setTunerOpen (bool open)
+{
+    if (tunerOpen.load (std::memory_order_acquire) == open)
+        return;
+
+    tunerOpen.store (open, std::memory_order_release);
+    tunerFrequency.store (0.0f, std::memory_order_release);
+    tunerConfidence.store (0.0f, std::memory_order_release);
+    tunerRingWrite.store (0, std::memory_order_release);
+
+    if (open)
+        startTunerWorker();
+    else
+        stopTunerWorker();
+
+    listeners.call ([](Listener& l) { l.transportChanged(); });
+}
+
+void BluePrinterAudioProcessor::startTunerWorker()
+{
+    if (tunerWorker == nullptr)
+        tunerWorker = std::make_unique<TunerWorker> (*this);
+    tunerWorker->startThread();
+}
+
+void BluePrinterAudioProcessor::stopTunerWorker()
+{
+    if (tunerWorker != nullptr)
+    {
+        tunerWorker->signalThreadShouldExit();
+        tunerWorker->notify();
+        tunerWorker->stopThread (500);
+        tunerWorker.reset();
+    }
+}
+
+void BluePrinterAudioProcessor::setTunerMonitorMute (bool muted)
+{
+    tunerMonitorMute.store (muted, std::memory_order_release);
+    listeners.call ([](Listener& l) { l.transportChanged(); });
+}
+
+void BluePrinterAudioProcessor::setTunerReferencePitch (float hz)
+{
+    tunerReferencePitch.store (juce::jlimit (400.0f, 480.0f, hz), std::memory_order_release);
     listeners.call ([](Listener& l) { l.transportChanged(); });
 }
 
@@ -3520,6 +3677,8 @@ void BluePrinterAudioProcessor::getStateInformation (juce::MemoryBlock& destData
     state.setProperty ("looperLengthBars", looperLengthBars.load(), nullptr);
     state.setProperty ("timeSignatureNumerator",   timeSignatureNumerator.load(),   nullptr);
     state.setProperty ("timeSignatureDenominator", timeSignatureDenominator.load(), nullptr);
+    state.setProperty ("tunerReferencePitch",      tunerReferencePitch.load(),      nullptr);
+    state.setProperty ("tunerOpen",                tunerOpen.load(),                nullptr);
     state.setProperty ("loopLevel",        loopLevel.load(),        nullptr);
     state.setProperty ("dryLevel",         dryLevel.load(),         nullptr);
     state.setProperty ("overdubLevel",     overdubLevel.load(),     nullptr);
@@ -3578,6 +3737,9 @@ void BluePrinterAudioProcessor::setStateInformation (const void* data, int sizeI
                                           std::memory_order_release);
             timeSignatureDenominator.store (static_cast<int> (state.getProperty ("timeSignatureDenominator", 4)),
                                             std::memory_order_release);
+            tunerReferencePitch.store (static_cast<float> (state.getProperty ("tunerReferencePitch", 440.0f)),
+                                       std::memory_order_release);
+            setTunerOpen (static_cast<bool> (state.getProperty ("tunerOpen", false)));
             loopLevel.store        (static_cast<float> (state.getProperty ("loopLevel",        0.0f)));
             dryLevel.store         (static_cast<float> (state.getProperty ("dryLevel",         0.0f)));
             overdubLevel.store     (static_cast<float> (state.getProperty ("overdubLevel",     0.0f)));

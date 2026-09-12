@@ -250,6 +250,7 @@ Events flow through `window.__JUCE__.backend`:
 | `frontendRefreshLibrary` / `frontendGetSnippets`          | Re-scan the folder / request a fresh snapshot      |
 | `frontendSetMetronome` / `frontendSetBpm` / `frontendSetCountInBeats` | Metronome + count-in settings        |
 | `frontendSetTimeSignature`                                | Notated meter `{ numerator, denominator }` (default 4/4; drives the click accents, grid trim and crop beats) |
+| `frontendSetTunerOpen` / `frontendSetTunerReferencePitch` / `frontendSetTunerMonitorMute` | Built-in tuner: open (starts the analysis worker) / A4 reference / monitor-only mute |
 | `frontendSetMidiClock` / `frontendSetMidiDevice`          | MIDI clock output on/off + output device           |
 | `frontendSetLooperRecording` / `...Playing` / `...Looping` | Looper: record / play / loop toggle              |
 | `frontendSetLooperClick` / `frontendSetLooperCountIn` / `frontendSetLooperClickDuringCapture` | Looper: click + count-in beats + click-through-capture gate |
@@ -343,6 +344,20 @@ produce, so the loop sounds exactly like what you heard while recording:
   (MIDI-listening chains still play instruments live).
 - The looper and the take recorder share `recordBuffer` and preempt each
   other, so they never capture simultaneously.
+
+## Built-in tuner
+
+The header **Tuner** popover (0034) feeds off the same clean post-gain input
+the IN meter uses (`chainInputBuffer`), so it sees the raw guitar before the
+chains, loop or click. Opening it starts a background worker that reads the
+latest 4096-sample window and runs YIN (`Tuner::detectPitch`) — analysis never
+runs on the audio thread, and the ring is a preallocated single-producer
+buffer filled only while the popover is open. `Tuner::describePitch` maps the
+frequency to a note and cents against the selected **reference pitch**
+(432–442 Hz, default 440; persisted). **Mute monitor** silences what you hear
+while tuning (session-only) and never changes the capture. The reading rides
+the 30 Hz `backendTransport` snapshot (`tunerFrequency` / `tunerConfidence`);
+silence or a decayed note reads "—".
 
 ## Troubleshooting
 
