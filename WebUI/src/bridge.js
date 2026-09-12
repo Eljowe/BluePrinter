@@ -146,6 +146,14 @@ export const FRONTEND_EVENTS = {
   setChainMonitorSolo: "frontendSetChainMonitorSolo",
   setChainMonitorMute: "frontendSetChainMonitorMute",
   setChainMidiChannels: "frontendSetChainMidiChannels",
+  // Named chain presets (0033): save { chain, name, overwrite }, load
+  // { chain, file }, rename { file, name, overwrite }, delete { file }.
+  // `file` is the preset's stable id (a sanitised file stem); the list
+  // rides the chain snapshot as `chainPresets`.
+  saveChainPreset: "frontendSaveChainPreset",
+  loadChainPreset: "frontendLoadChainPreset",
+  renameChainPreset: "frontendRenameChainPreset",
+  deleteChainPreset: "frontendDeleteChainPreset",
   // { dWidth } — device-pixel width delta from the corner resize grip.
   resizeEditor: "frontendResizeEditor",
 };

@@ -21,6 +21,7 @@
 #include "CaptureCopy.h"
 #include "PreRollMath.h"
 #include "Tuner.h"
+#include "ChainPreset.h"
 
 #include <algorithm>
 #include <set>
@@ -367,6 +368,290 @@ PluginChain* BluePrinterAudioProcessor::getChainById (const juce::String& chainI
         if (chain->getChainId() == chainId)
             return chain.get();
     return nullptr;
+}
+
+juce::File BluePrinterAudioProcessor::getChainPresetsFolder() const
+{
+    return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+               .getChildFile ("Retrokielto")
+               .getChildFile ("chain-presets");
+}
+
+juce::var BluePrinterAudioProcessor::getChainPresetsSnapshot() const
+{
+    juce::Array<juce::var> presets;
+    const auto folder = getChainPresetsFolder();
+
+    if (folder.isDirectory())
+    {
+        for (const auto& entry : juce::RangedDirectoryIterator (folder, false, "*.json"))
+        {
+            const auto file = entry.getFile();
+            const auto parsed = juce::JSON::parse (file.loadFileAsString());
+
+            auto name = ChainPreset::getPresetName (parsed);
+            if (name.isEmpty())
+                name = file.getFileNameWithoutExtension();
+
+            auto* obj = new juce::DynamicObject();
+            obj->setProperty ("name", name);
+            obj->setProperty ("file", file.getFileNameWithoutExtension());
+            presets.add (juce::var (obj));
+        }
+    }
+
+    std::sort (presets.begin(), presets.end(), [] (const juce::var& a, const juce::var& b)
+    {
+        return a.getProperty ("name", juce::var()).toString()
+                 .compareIgnoreCase (b.getProperty ("name", juce::var()).toString()) < 0;
+    });
+
+    return juce::var (presets);
+}
+
+bool BluePrinterAudioProcessor::saveChainPreset (const juce::String& chainId,
+                                                 const juce::String& presetName,
+                                                 bool overwrite, juce::String& outError)
+{
+    auto* chain = getChainById (chainId);
+    if (chain == nullptr)
+    {
+        outError = "Chain no longer exists.";
+        return false;
+    }
+
+    if (chain->hasPendingSlots() || isChainRestoreInProgress())
+    {
+        outError = "Wait for the chain to finish restoring before saving a preset.";
+        return false;
+    }
+
+    const auto trimmed = presetName.trim();
+    if (trimmed.isEmpty())
+    {
+        outError = "Enter a preset name.";
+        return false;
+    }
+
+    const auto folder = getChainPresetsFolder();
+    const auto created = folder.createDirectory();
+    if (created.failed())
+    {
+        outError = "Could not create the preset folder: " + created.getErrorMessage();
+        return false;
+    }
+
+    const auto file = folder.getChildFile (ChainPreset::sanitisePresetFileName (trimmed) + ".json");
+    if (file.existsAsFile() && ! overwrite)
+    {
+        // The caller confirms and retries with overwrite = true.
+        outError = "exists";
+        return false;
+    }
+
+    const auto doc = ChainPreset::makeDocument (trimmed, chain->getChainState());
+    if (! file.replaceWithText (juce::JSON::toString (doc, false)))
+    {
+        outError = "Could not write " + file.getFullPathName();
+        return false;
+    }
+
+    listeners.call ([](Listener& l) { l.pluginChainChanged(); });
+    return true;
+}
+
+bool BluePrinterAudioProcessor::renameChainPreset (const juce::String& file,
+                                                   const juce::String& newName,
+                                                   bool overwrite, juce::String& outError)
+{
+    const auto trimmed = newName.trim();
+    if (trimmed.isEmpty())
+    {
+        outError = "Enter a preset name.";
+        return false;
+    }
+
+    const auto folder = getChainPresetsFolder();
+    const auto src = folder.getChildFile (ChainPreset::sanitisePresetFileName (file) + ".json");
+    if (! src.existsAsFile())
+    {
+        outError = "Preset not found.";
+        return false;
+    }
+
+    const auto dst = folder.getChildFile (ChainPreset::sanitisePresetFileName (trimmed) + ".json");
+    if (dst.getFullPathName() != src.getFullPathName())
+    {
+        if (dst.existsAsFile())
+        {
+            if (! overwrite)
+            {
+                outError = "exists";
+                return false;
+            }
+            dst.deleteFile();
+        }
+
+        if (! src.moveFileTo (dst))
+        {
+            outError = "Could not rename the preset.";
+            return false;
+        }
+    }
+
+    // Keep the display name inside the document in step with the file name.
+    auto parsed = juce::JSON::parse (dst.loadFileAsString());
+    if (auto* obj = parsed.getDynamicObject())
+    {
+        obj->setProperty ("name", trimmed);
+        if (! dst.replaceWithText (juce::JSON::toString (parsed, false)))
+        {
+            outError = "Could not update the preset name.";
+            return false;
+        }
+    }
+
+    listeners.call ([](Listener& l) { l.pluginChainChanged(); });
+    return true;
+}
+
+bool BluePrinterAudioProcessor::deleteChainPreset (const juce::String& file, juce::String& outError)
+{
+    const auto target = getChainPresetsFolder().getChildFile (ChainPreset::sanitisePresetFileName (file) + ".json");
+    if (! target.existsAsFile())
+    {
+        outError = "Preset not found.";
+        return false;
+    }
+
+    if (! target.deleteFile())
+    {
+        outError = "Could not delete the preset.";
+        return false;
+    }
+
+    listeners.call ([](Listener& l) { l.pluginChainChanged(); });
+    return true;
+}
+
+bool BluePrinterAudioProcessor::loadChainPreset (const juce::String& chainId,
+                                                 const juce::String& file,
+                                                 juce::String& outError,
+                                                 juce::String& outWarning)
+{
+    auto* chain = getChainById (chainId);
+    if (chain == nullptr)
+    {
+        outError = "Chain no longer exists.";
+        return false;
+    }
+
+    if (isChainRestoreInProgress() || chain->hasPendingSlots())
+    {
+        outError = "This chain is still restoring. Try again in a moment.";
+        return false;
+    }
+
+    const auto target = getChainPresetsFolder().getChildFile (ChainPreset::sanitisePresetFileName (file) + ".json");
+    if (! target.existsAsFile())
+    {
+        outError = "Preset not found.";
+        return false;
+    }
+
+    const auto parsed = juce::JSON::parse (target.loadFileAsString());
+    const auto validation = ChainPreset::validateDocument (parsed);
+    if (! validation.ok)
+    {
+        outError = "Cannot load preset: " + validation.error;
+        return false;
+    }
+    outWarning = validation.warning;
+
+    const auto payload = ChainPreset::getPayload (parsed);
+    auto* src = payload.getDynamicObject();
+    if (src == nullptr)
+    {
+        outError = "Preset has no payload.";
+        return false;
+    }
+
+    // Pre-filter the slots: drop blocklisted / missing / quarantined files and
+    // same-file duplicates, and report them. The deferred driver would skip
+    // them anyway, but doing it here gives the user a per-plugin list and
+    // keeps the queued (pending) count honest for the Save gate.
+    juce::Array<juce::var> keptSlots;
+    juce::StringArray skipped;
+    juce::StringArray seenPaths;
+
+    if (auto* slots = src->getProperty ("slots").getArray())
+    {
+        for (const auto& s : *slots)
+        {
+            auto* slotObj = s.getDynamicObject();
+            if (slotObj == nullptr)
+                continue;
+
+            const juce::String path = slotObj->getProperty ("path").toString();
+            if (path.isEmpty())
+                continue;
+
+            const juce::File f (path);
+            if (vst3Library.isBlocked (f))
+                { skipped.add (f.getFileName() + " (blocked)"); continue; }
+            if (isPluginQuarantined (f.getFileName()))
+                { skipped.add (f.getFileName() + " (quarantined)"); continue; }
+            if (! f.exists())
+                { skipped.add (f.getFileName() + " (missing)"); continue; }
+            if (seenPaths.contains (path))
+                { skipped.add (f.getFileName() + " (duplicate in preset)"); continue; }
+
+            seenPaths.add (path);
+            keptSlots.add (s);
+        }
+    }
+
+    auto* filtered = new juce::DynamicObject();
+    filtered->setProperty ("slots", keptSlots);
+    for (auto* key : { "volume", "muted", "wantsMidi", "midiChannels" })
+        if (src->hasProperty (key))
+            filtered->setProperty (key, src->getProperty (key));
+
+    // A preset load is user-initiated, but it uses the same deferred driver as
+    // a state restore, so mirror the restore's bookkeeping: pause the driver
+    // for the synchronous apply (clear() fires onChanged, which must not echo
+    // a momentarily-empty chain into the properties file), then let it pick up
+    // the queued slots. The crash marker self-heals the next launch if a
+    // plugin dies mid-load; the driver's drain clears it once the slots are
+    // in.
+    const bool wasRestoring = restoreActive;
+    restoreActive = true;
+    if (auto* props = getUserState())
+    {
+        props->setValue ("chainRestoreCrashed", true);
+        props->setValue ("chainRestoreMarkerTime", juce::String (juce::Time::currentTimeMillis()));
+        props->saveIfNeeded();
+    }
+    restoreRequestedThisSession = true;
+
+    juce::String applyError;
+    chain->applyPresetState (juce::var (filtered), applyError);
+    restoreActive = wasRestoring;
+
+    if (! skipped.isEmpty())
+    {
+        if (outWarning.isNotEmpty()) outWarning += " ";
+        outWarning += "Skipped " + juce::String (skipped.size())
+                   + " plugin(s): " + skipped.joinIntoString (", ");
+    }
+    if (applyError.isNotEmpty())
+    {
+        if (outWarning.isNotEmpty()) outWarning += " ";
+        outWarning += applyError;
+    }
+
+    listeners.call ([](Listener& l) { l.pluginChainChanged(); });
+    return true;
 }
 
 juce::String BluePrinterAudioProcessor::addChain (const juce::String& name,

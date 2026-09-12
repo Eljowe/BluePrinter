@@ -21,6 +21,28 @@ function basename(path) {
   return parts[parts.length - 1] || String(path);
 }
 
+// Mirrors ChainPreset::sanitisePresetFileName so the collision check uses the
+// same key the backend writes to disk (distinct display names can collapse to
+// one stem). Keep in step with Source/ChainPreset.cpp.
+const PRESET_RESERVED = new Set([
+  "CON", "PRN", "AUX", "NUL",
+  "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+  "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+]);
+
+function toPresetStem(name) {
+  let out = "";
+  for (const ch of String(name)) {
+    if (ch.charCodeAt(0) < 32) continue;
+    if ('<>:"/\\|?*'.includes(ch)) continue;
+    out += ch;
+  }
+  out = out.trim().replace(/\.+$/, "");
+  if (!out) out = "preset";
+  if (PRESET_RESERVED.has(out.toUpperCase())) out = `_${out}`;
+  return out.slice(0, 120);
+}
+
 function sortedNumbers(values) {
   return [...new Set(values.filter((v) => Number.isFinite(Number(v))).map(Number))].sort((a, b) => a - b);
 }
@@ -127,6 +149,182 @@ function ChainSlotRow({ chain, slot, index, openEditors, onBypassToggle, onRemov
   );
 }
 
+// Per-chain named presets (0033). A small inline menu: Save as… (with an
+// inline name field and overwrite confirmation — WebView2 doesn't show
+// native prompt/confirm dialogs), and a load/rename/delete list. All
+// confirmations are inline too.
+function ChainPresetMenu({ chain, presets, hasContent, busy }) {
+  const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState(null); // "save" | "rename"
+  const [draft, setDraft] = useState("");
+  const [renameTarget, setRenameTarget] = useState(null);
+  const [confirm, setConfirm] = useState(null);
+  const [error, setError] = useState("");
+
+  const reset = () => {
+    setMode(null);
+    setDraft("");
+    setRenameTarget(null);
+    setConfirm(null);
+    setError("");
+  };
+
+  const stem = (value) => toPresetStem(value).toLowerCase();
+  const nameClash = (name, ignoreFile) => presets.some(
+    (p) => p.file !== ignoreFile && (p.file || "").toLowerCase() === stem(name),
+  );
+
+  const beginSave = () => {
+    if (busy) return;
+    setMode("save");
+    setDraft("");
+    setConfirm(null);
+    setError("");
+  };
+
+  const commitSave = () => {
+    const name = draft.trim();
+    if (!name) { setError("Enter a preset name."); return; }
+    if (nameClash(name)) { setConfirm({ kind: "overwrite-save", name }); return; }
+    emit(FRONTEND_EVENTS.saveChainPreset, { chain, name, overwrite: false });
+    reset();
+  };
+
+  const beginRename = (preset) => {
+    setMode("rename");
+    setRenameTarget(preset);
+    setDraft(preset.name || "");
+    setConfirm(null);
+    setError("");
+  };
+
+  const commitRename = () => {
+    const name = draft.trim();
+    if (!name) { setError("Enter a preset name."); return; }
+    if (nameClash(name, renameTarget?.file)) { setConfirm({ kind: "overwrite-rename", name }); return; }
+    emit(FRONTEND_EVENTS.renameChainPreset, { file: renameTarget.file, name, overwrite: false });
+    reset();
+  };
+
+  const requestLoad = (preset) => {
+    if (hasContent) { setConfirm({ kind: "replace", preset }); return; }
+    emit(FRONTEND_EVENTS.loadChainPreset, { chain, file: preset.file });
+    reset();
+    setOpen(false);
+  };
+
+  const commitConfirm = () => {
+    if (!confirm) return;
+    if (confirm.kind === "overwrite-save")
+      emit(FRONTEND_EVENTS.saveChainPreset, { chain, name: confirm.name.trim(), overwrite: true });
+    else if (confirm.kind === "overwrite-rename")
+      emit(FRONTEND_EVENTS.renameChainPreset, { file: renameTarget.file, name: confirm.name.trim(), overwrite: true });
+    else if (confirm.kind === "replace")
+      emit(FRONTEND_EVENTS.loadChainPreset, { chain, file: confirm.preset.file });
+    else if (confirm.kind === "delete")
+      emit(FRONTEND_EVENTS.deleteChainPreset, { file: confirm.preset.file });
+    reset();
+    setOpen(false);
+  };
+
+  return (
+    <details
+      className="fx-presets"
+      open={open}
+      onToggle={(e) => setOpen(e.currentTarget.open)}
+    >
+      <summary title="Save and recall this chain's plugin rig">Presets</summary>
+      <div className="fx-presets-panel">
+        {confirm ? (
+          <div className="fx-presets-confirm" role="alertdialog" aria-label="Confirm preset action">
+            <span>
+              {confirm.kind === "replace"
+                ? `Replace this chain's plugins with "${confirm.preset.name}"?`
+                : confirm.kind === "delete"
+                  ? `Delete preset "${confirm.preset.name}"?`
+                  : `A preset named "${confirm.name}" already exists. Overwrite it?`}
+            </span>
+            <div className="fx-presets-confirm-actions">
+              <button type="button" className="btn btn-sm" autoFocus onClick={commitConfirm}>
+                {confirm.kind === "delete" ? "Delete" : "Confirm"}
+              </button>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setConfirm(null)}>Cancel</button>
+            </div>
+          </div>
+        ) : mode ? (
+          <div className="fx-presets-save">
+            <input
+              type="text"
+              className="fx-presets-input"
+              autoFocus
+              value={draft}
+              placeholder={mode === "rename" ? "New name" : "Preset name"}
+              onChange={(e) => { setDraft(e.target.value); setError(""); }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") (mode === "rename" ? commitRename : commitSave)();
+                if (e.key === "Escape") reset();
+              }}
+            />
+            <button type="button" className="btn btn-sm" onClick={mode === "rename" ? commitRename : commitSave}>
+              {mode === "rename" ? "Rename" : "Save"}
+            </button>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={reset}>Cancel</button>
+            {error ? <span className="fx-presets-error">{error}</span> : null}
+          </div>
+        ) : (
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={beginSave}
+            disabled={busy}
+            title={busy ? "Wait for the chain to finish restoring" : "Save this rig as a named preset"}
+          >
+            Save as…
+          </button>
+        )}
+
+        {presets.length === 0 ? (
+          <p className="fx-presets-empty">No presets yet.</p>
+        ) : (
+          <ul className="fx-presets-list">
+            {presets.map((p) => (
+              <li key={p.file}>
+                <span className="fx-presets-name" title={p.name}>{p.name}</span>
+                <button
+                  type="button"
+                  className="fx-presets-action"
+                  onClick={() => requestLoad(p)}
+                  title={`Load "${p.name}" into this chain`}
+                >
+                  Load
+                </button>
+                <button
+                  type="button"
+                  className="icon-btn"
+                  onClick={() => beginRename(p)}
+                  aria-label={`Rename ${p.name}`}
+                  title="Rename"
+                >
+                  <IconEdit size={12} />
+                </button>
+                <button
+                  type="button"
+                  className="icon-btn icon-btn-danger"
+                  onClick={() => setConfirm({ kind: "delete", preset: p })}
+                  aria-label={`Delete ${p.name}`}
+                  title="Delete"
+                >
+                  <IconTrash size={12} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </details>
+  );
+}
+
 // One chain panel. The "chain" prop is the stable chain id; the parent
 // passes closure factories so every action carries the chain id.
 function ChainPanel({
@@ -155,6 +353,8 @@ function ChainPanel({
   onCloseEditor,
   onMove,
   onRemoveChain,
+  presets,
+  restoring,
 }) {
   const [showAvailable, setShowAvailable] = useState(false);
   const [showMidiChannels, setShowMidiChannels] = useState(false);
@@ -288,6 +488,12 @@ function ChainPanel({
         >
           Ch
         </button>
+        <ChainPresetMenu
+          chain={chain}
+          presets={presets}
+          hasContent={slots.length + pending > 0}
+          busy={pending > 0 || restoring}
+        />
         <button
           type="button"
           className="btn btn-sm"
@@ -491,7 +697,9 @@ export function PluginChain({ chainState, inputChannels, chainLevels, availableP
   //     plugins:    [...],          // the folder scan result
   //     blocklist:  ["...\\Foo.vst3"],
   //     openEditors: [{ chain, index }, ...],
-  //     restoreError: "..."
+  //     restoreError: "...",
+  //     restoring: false,
+  //     chainPresets: [{ name, file }, ...]   // named rigs (0033)
   //   }
   // chainLevels (from the 30 Hz transport push) carries the live meters:
   //   [{ chain, level, peak }, ...]
@@ -626,6 +834,8 @@ export function PluginChain({ chainState, inputChannels, chainLevels, availableP
               onCloseEditor={makeCloseEditorHandler(chain.id)}
               onMove={makeMoveHandler(chain.id)(Array.isArray(chain.slots) ? chain.slots : [])}
               onRemoveChain={() => handleRemoveChain(chain.id)}
+              presets={Array.isArray(chainState?.chainPresets) ? chainState.chainPresets : []}
+              restoring={Boolean(chainState?.restoring)}
             />
           ))}
         </div>

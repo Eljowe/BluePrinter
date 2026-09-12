@@ -1,7 +1,7 @@
 ---
 id: "0033"
 title: "Named VST3 chain presets"
-status: ready-for-agent
+status: done
 blocked_by: []
 ---
 
@@ -89,6 +89,20 @@ reusable, per-chain preset and no UI to save/load/manage one.
       chain has pending slots.
 - [ ] Presets are stored one-per-file, survive restart, and can be renamed and deleted.
 - [ ] Unknown fields / version mismatch produce a warning, not a silent partial apply.
+
+## Implementation notes
+
+- A version mismatch is **refused** (fatal, with the expected/actual versions in
+  the message) rather than warned-and-applied — refusing can never half-apply.
+  Unknown *fields* on a current-version document warn and are ignored.
+- Duplicate files **within** a preset are skipped and reported (the rest of the
+  rig loads); combined with replace semantics there is no "plugin already in the
+  chain" otherwise. A missing/quarantined/blocked slot is skipped and named.
+- The target-chain-by-name collision is detected on the **sanitised file stem**
+  (case-insensitively, as Windows is), mirrored in `PluginChain.jsx`
+  (`toPresetStem`), so two display names that collapse to one file still prompt.
+- `ChainPreset_*` tests cover the document shape, validation, payload and the
+  file-name sanitiser.
 
 ## Docs
 
