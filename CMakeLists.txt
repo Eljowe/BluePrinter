@@ -191,6 +191,7 @@ if(BUILD_TESTING)
         Tests/test_MidiClockMath.cpp
         Tests/test_MeterMath.cpp
         Tests/test_Meter.cpp
+        Tests/test_LoopPlayback.cpp
         # Production sources under test. Kept deliberately minimal so the
         # test target never pulls in WebView2, the plugin host, or the
         # audio device layer.

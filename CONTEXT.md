@@ -155,6 +155,7 @@ _Avoid_: Message, IPC event
 | Metronome click synthesis | `Source/ClickSynth.h/.cpp` |
 | Metronome click scheduling + ring-out | `Source/MetronomePlayer.h/.cpp` |
 | MIDI clock pulse scheduling | `Source/MidiClockMath.h` |
+| Loop playback + overdub wrap-mix | `Source/LoopPlayback.h` |
 | MIDI output device + direct sends | `Source/MidiClockOutput.h/.cpp` |
 | Metering math | `Source/MeterMath.h` |
 | Per-meter level/peak/clip state | `Source/Meter.h` |

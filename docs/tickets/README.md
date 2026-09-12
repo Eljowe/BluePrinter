@@ -88,6 +88,12 @@ blocked_by: []            # ticket ids that must be closed first, e.g. ["0001"]
 | ------ | ----- | ------ | ---------- |
 | [0027](0027-decompose-pluginprocessor-deep-modules.md) | Decompose PluginProcessor into deep modules | in-progress | 0011, 0012 |
 
+### Phase 6 — Test depth
+
+| Ticket | Title | Status | Blocked by |
+| ------ | ----- | ------ | ---------- |
+| [0029](0029-audio-path-render-modules.md) | Audio-path render modules + golden tests | done | 0012 |
+
 ### Backlog / deferred
 
 | Ticket | Title | Status | Blocked by |
