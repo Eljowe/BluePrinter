@@ -1,7 +1,7 @@
 ---
 id: "0034"
 title: "Built-in tuner"
-status: in-progress
+status: done
 blocked_by: []
 ---
 

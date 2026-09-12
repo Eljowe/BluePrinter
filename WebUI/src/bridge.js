@@ -101,6 +101,12 @@ export const FRONTEND_EVENTS = {
   // (octave-down). Ignored while an overdub captures.
   setLoopReverse: "frontendSetLoopReverse",
   setLoopHalfSpeed: "frontendSetLoopHalfSpeed",
+  // Built-in tuner (0034): { enabled } opens/closes the popover (starts the
+  // analysis worker), { pitch } sets the reference (Hz), { enabled } mutes the
+  // monitor only.
+  setTunerOpen: "frontendSetTunerOpen",
+  setTunerReferencePitch: "frontendSetTunerReferencePitch",
+  setTunerMonitorMute: "frontendSetTunerMonitorMute",
   setLooperCountIn: "frontendSetLooperCountIn",
   // Fixed capture length: { bars } — 0 = Free, else the capture auto-stops
   // after exactly that many bars (1/2/4/8).

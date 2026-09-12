@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { Transport } from "./components/Transport";
 import { HeaderControls } from "./components/HeaderControls";
 import { SyncControls } from "./components/SyncControls";
+import { Tuner } from "./components/Tuner";
 import { TakeReview } from "./components/TakeReview";
 import { LibraryFolderRow } from "./components/LibraryFolderRow";
 import { SnippetList } from "./components/SnippetList";
@@ -79,6 +80,7 @@ function readInitialTransport() {
     timeSignatureNumerator: 4, timeSignatureDenominator: 4,
     clickPitch: 1000, clickAccentPitch: 1500, clickDecay: 90, clickVolume: 0.35, clickAccentVolume: 0.5, clickNoise: 0.1,
     midiClockEnabled: false, midiClockOnRecord: false, midiOutputDevice: "", midiOutputDeviceList: [],
+    tunerOpen: false, tunerMonitorMute: false, tunerFrequency: 0, tunerConfidence: 0, tunerReferencePitch: 440, tunerNote: "", tunerCents: 0,
      preRollActive: false, transportPosition: 0,
      takePending: false, takeLength: 0, takePlaying: false, takePosition: 0, takePeaks: [],
      looperRecording: false, looperPreRoll: false, looperPlaying: false, looperLooping: true, looperOverdub: false, looperCountInBeats: 4, looperCropStartBeats: 0, looperCropEndBeats: 0, audioLoopStart: 0, audioLoopPosition: 0, audioLoopLength: 0, audioLoopPeaks: [], chainLevels: [], maxRecordSamples: 0,
@@ -107,6 +109,13 @@ function readInitialTransport() {
     countInBeats: Number(raw.countInBeats ?? 4),
     timeSignatureNumerator: Number(raw.timeSignatureNumerator ?? 4),
     timeSignatureDenominator: Number(raw.timeSignatureDenominator ?? 4),
+    tunerOpen: Boolean(raw.tunerOpen),
+    tunerMonitorMute: Boolean(raw.tunerMonitorMute),
+    tunerFrequency: Number(raw.tunerFrequency ?? 0),
+    tunerConfidence: Number(raw.tunerConfidence ?? 0),
+    tunerReferencePitch: Number(raw.tunerReferencePitch ?? 440),
+    tunerNote: raw.tunerNote ?? "",
+    tunerCents: Number(raw.tunerCents ?? 0),
     loopLevel: Number(raw.loopLevel ?? 0),
     overdubLevel: Number(raw.overdubLevel ?? 0),
     dryLevel: Number(raw.dryLevel ?? 0),
@@ -327,6 +336,13 @@ export default function App() {
         countInBeats:     payload.countInBeats !== undefined     ? Number(payload.countInBeats)     : prev.countInBeats,
         timeSignatureNumerator:   payload.timeSignatureNumerator   !== undefined ? Number(payload.timeSignatureNumerator)   : prev.timeSignatureNumerator,
         timeSignatureDenominator: payload.timeSignatureDenominator !== undefined ? Number(payload.timeSignatureDenominator) : prev.timeSignatureDenominator,
+        tunerOpen:          payload.tunerOpen          !== undefined ? Boolean(payload.tunerOpen)          : prev.tunerOpen,
+        tunerMonitorMute:   payload.tunerMonitorMute   !== undefined ? Boolean(payload.tunerMonitorMute)   : prev.tunerMonitorMute,
+        tunerFrequency:     payload.tunerFrequency     !== undefined ? Number(payload.tunerFrequency)     : prev.tunerFrequency,
+        tunerConfidence:    payload.tunerConfidence    !== undefined ? Number(payload.tunerConfidence)    : prev.tunerConfidence,
+        tunerReferencePitch: payload.tunerReferencePitch !== undefined ? Number(payload.tunerReferencePitch) : prev.tunerReferencePitch,
+        tunerNote:          payload.tunerNote          !== undefined ? String(payload.tunerNote)          : prev.tunerNote,
+        tunerCents:         payload.tunerCents         !== undefined ? Number(payload.tunerCents)         : prev.tunerCents,
         loopLevel:        payload.loopLevel !== undefined        ? Number(payload.loopLevel)        : prev.loopLevel,
         dryLevel:         payload.dryLevel !== undefined         ? Number(payload.dryLevel)         : prev.dryLevel,
         overdubLevel:     payload.overdubLevel !== undefined     ? Number(payload.overdubLevel)     : prev.overdubLevel,
@@ -493,6 +509,21 @@ export default function App() {
     emit(FRONTEND_EVENTS.setTimeSignature, { numerator, denominator });
   };
 
+  const handleTunerOpenChange = (open) => {
+    setTransport((prev) => ({ ...prev, tunerOpen: open }));
+    emit(FRONTEND_EVENTS.setTunerOpen, { enabled: open });
+  };
+
+  const handleTunerReferenceChange = (pitch) => {
+    setTransport((prev) => ({ ...prev, tunerReferencePitch: pitch }));
+    emit(FRONTEND_EVENTS.setTunerReferencePitch, { pitch });
+  };
+
+  const handleTunerMonitorMuteChange = (enabled) => {
+    setTransport((prev) => ({ ...prev, tunerMonitorMute: enabled }));
+    emit(FRONTEND_EVENTS.setTunerMonitorMute, { enabled });
+  };
+
   const handleCountInBeatsChange = (next) => {
     setTransport((prev) => ({ ...prev, countInBeats: next }));
     emit(FRONTEND_EVENTS.setCountInBeats, { beats: next });
@@ -652,14 +683,36 @@ export default function App() {
             <p>Record a take, name it, note what to work on.</p>
           </div>
         </div>
-        <details className="shortcut-help">
-          <summary title="Keyboard shortcuts">Keyboard</summary>
-          <dl className="shortcut-list">
-            <div><dt>Space</dt><dd>Start / stop capture (Take or Loop tab)</dd></div>
-            <div><dt>Enter</dt><dd>Save the pending take</dd></div>
-            <div><dt>Esc</dt><dd>Stop playback</dd></div>
-          </dl>
-        </details>
+        <div className="header-tools">
+          <div className="tuner-help">
+            <button
+              type="button"
+              className={`header-tool ${transport.tunerOpen ? "is-open" : ""}`}
+              onClick={() => handleTunerOpenChange(!transport.tunerOpen)}
+              aria-expanded={Boolean(transport.tunerOpen)}
+              title="Built-in tuner — feed it the clean input"
+            >
+              Tuner
+            </button>
+            {transport.tunerOpen ? (
+              <Tuner
+                transport={transport}
+                onReferenceChange={handleTunerReferenceChange}
+                onMonitorMuteChange={handleTunerMonitorMuteChange}
+                onClose={() => handleTunerOpenChange(false)}
+              />
+            ) : null}
+          </div>
+
+          <details className="shortcut-help">
+            <summary title="Keyboard shortcuts">Keyboard</summary>
+            <dl className="shortcut-list">
+              <div><dt>Space</dt><dd>Start / stop capture (Take or Loop tab)</dd></div>
+              <div><dt>Enter</dt><dd>Save the pending take</dd></div>
+              <div><dt>Esc</dt><dd>Stop playback</dd></div>
+            </dl>
+          </details>
+        </div>
       </header>
 
       <section className="bp-section control-deck" aria-label="Monitoring controls">

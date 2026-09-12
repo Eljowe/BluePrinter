@@ -101,6 +101,12 @@ public:
     // tape-style half-speed. { enabled }
     static constexpr const char* frontendSetLoopReverseEvent   = "frontendSetLoopReverse";
     static constexpr const char* frontendSetLoopHalfSpeedEvent = "frontendSetLoopHalfSpeed";
+    // Built-in tuner (0034): { enabled } opens/closes the popover (starts the
+    // analysis worker), { pitch } sets the reference, { enabled } mutes the
+    // monitor.
+    static constexpr const char* frontendSetTunerOpenEvent           = "frontendSetTunerOpen";
+    static constexpr const char* frontendSetTunerReferencePitchEvent = "frontendSetTunerReferencePitch";
+    static constexpr const char* frontendSetTunerMonitorMuteEvent    = "frontendSetTunerMonitorMute";
     static constexpr const char* frontendSetLooperCountInEvent   = "frontendSetLooperCountIn";
     // Fixed capture length in bars (0 = Free, else 1/2/4/8).
     static constexpr const char* frontendSetLooperLengthBarsEvent = "frontendSetLooperLengthBars";
