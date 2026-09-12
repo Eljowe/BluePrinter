@@ -16,6 +16,8 @@
 #include "MidiClockMath.h"
 #include "MeterMath.h"
 #include "LoopPlayback.h"
+#include "ChainRouting.h"
+#include "CaptureWrite.h"
 
 #include <algorithm>
 #include <set>
@@ -789,17 +791,8 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             continue;
         }
 
-        chainScratchBuffer.clear();
-        const int mask = chain->getInputMask();
-        const int scratchCh = chainScratchBuffer.getNumChannels();
-        for (int ch = 0; ch < scratchCh; ++ch)
-        {
-            // Only copy channels the chain selected AND that actually
-            // exist in this block (mono layout: other channels stay
-            // silent).
-            if ((mask & (1 << ch)) != 0 && ch < numChannels)
-                chainScratchBuffer.copyFrom (ch, 0, chainInputBuffer, ch, 0, numSamples);
-        }
+        ChainRouting::copyInputChannels (chainScratchBuffer, chainInputBuffer,
+                                         chain->getInputMask(), numChannels, numSamples);
 
         // Per-chain MIDI copy so one chain's generated notes can't leak
         // into another. Copies into the member's existing storage (no
@@ -823,8 +816,6 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         }
         chain->processBlock (chainScratchBuffer, *midiForChain);
 
-        const int sumCh = juce::jmin (numChannels, chainScratchBuffer.getNumChannels());
-
         // Output volume + hard mute. Muted chains still run (their
         // plugins keep internal state consistent) but contribute nothing
         // to the mix or the capture.
@@ -840,15 +831,10 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                                && ! chain->isMonitorMuted();
         const float monitorGain = monitorOn ? hardGain : 0.0f;
 
-        for (int ch = 0; ch < sumCh; ++ch)
-            buffer.addFrom (ch, 0, chainScratchBuffer, ch, 0, numSamples, monitorGain);
+        ChainRouting::sumInto (buffer, chainScratchBuffer, monitorGain, numSamples, numChannels);
 
         if (chain->isRecordOnCapture() && hardGain > 0.0f)
-        {
-            const int mixCh = juce::jmin (recordingMixBuffer.getNumChannels(), sumCh);
-            for (int ch = 0; ch < mixCh; ++ch)
-                recordingMixBuffer.addFrom (ch, 0, chainScratchBuffer, ch, 0, numSamples, hardGain);
-        }
+            ChainRouting::sumInto (recordingMixBuffer, chainScratchBuffer, hardGain, numSamples, numChannels);
 
         // Per-chain output meter (post-volume; muted chains read 0).
         // Independent of solo/monitor-mute.
@@ -875,15 +861,15 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         const auto writePos = overdubCapture
             ? overdubWritePos.load (std::memory_order_relaxed)
             : audioLoopLength.load (std::memory_order_relaxed);
-        const auto toCopy = juce::jmin (numSamples, maxRecordSamples - static_cast<int> (writePos));
-        if (toCopy > 0)
+        const auto newWritePos = CaptureWrite::write (*recordBuffer, writePos,
+                                                      recordingMixBuffer, numSamples,
+                                                      maxRecordSamples);
+        if (newWritePos != writePos)
         {
-            for (int ch = 0; ch < juce::jmin (numChannels, recordBuffer->getNumChannels()); ++ch)
-                recordBuffer->copyFrom (ch, static_cast<int> (writePos), recordingMixBuffer, ch, 0, toCopy);
             if (overdubCapture)
-                overdubWritePos.store (writePos + toCopy, std::memory_order_release);
+                overdubWritePos.store (newWritePos, std::memory_order_release);
             else
-                audioLoopLength.store (writePos + toCopy, std::memory_order_release);
+                audioLoopLength.store (newWritePos, std::memory_order_release);
         }
 
         // Fixed-length capture (0022): once a fresh capture has reached the
@@ -1200,17 +1186,9 @@ void BluePrinterAudioProcessor::writeRecording (const juce::AudioBuffer<float>& 
     if (recordBuffer == nullptr || maxRecordSamples <= 0)
         return;
 
-    auto writePos = static_cast<int> (recordWritePos.load (std::memory_order_acquire));
-    if (writePos >= maxRecordSamples)
-        return;
-
-    const int channels = juce::jmin (source.getNumChannels(), recordBuffer->getNumChannels());
-    const int toCopy   = juce::jmin (numSamples, maxRecordSamples - writePos);
-
-    for (int ch = 0; ch < channels; ++ch)
-        recordBuffer->copyFrom (ch, writePos, source, ch, 0, toCopy);
-
-    writePos += toCopy;
+    const auto writePos = CaptureWrite::write (*recordBuffer,
+                                               recordWritePos.load (std::memory_order_acquire),
+                                               source, numSamples, maxRecordSamples);
     recordWritePos.store (writePos, std::memory_order_release);
 
     if (writePos >= maxRecordSamples)
