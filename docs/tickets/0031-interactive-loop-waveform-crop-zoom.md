@@ -1,7 +1,7 @@
 ---
 id: "0031"
 title: "Interactive loop waveform: drag crop handles and zoom"
-status: ready-for-agent
+status: done
 blocked_by: []
 ---
 

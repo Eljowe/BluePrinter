@@ -3637,3 +3637,71 @@ html:has(.bp-splash) {
   font-size: 0.6rem;
   color: var(--ink-3);
 }
+
+/* Interactive loop waveform (0031): the timeline children live on a track
+   scaled by zoom and slid by pan; crop handles drag whole-beat bounds. */
+.looper-track {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  transform-origin: left center;
+  will-change: transform;
+}
+
+.looper-crop-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 16px;
+  margin-left: -8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: ew-resize;
+  z-index: 4;
+  touch-action: none;
+}
+
+.looper-crop-handle::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 7px;
+  width: 2px;
+  background: var(--accent);
+}
+
+.looper-crop-handle:disabled,
+.looper-crop-handle[aria-disabled="true"] {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.looper-crop-handle:focus-visible::before {
+  background: var(--ink);
+  width: 3px;
+  left: 6px;
+}
+
+.looper-zoom {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.looper-zoom-level {
+  font-variant-numeric: tabular-nums;
+}
+
+.looper-zoom-hint {
+  margin-left: auto;
+  opacity: 0.7;
+}

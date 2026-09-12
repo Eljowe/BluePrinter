@@ -321,7 +321,10 @@ produce, so the loop sounds exactly like what you heard while recording:
   **Crop start / end** steppers trim in **whole beats** (one per denominator
   note) off either side — the audible window is
   `[audioLoopStart, audioLoopStart + audioLoopLength)`. The timeline shows a
-  live waveform of the cropped loop, with the trimmed regions shaded.
+  live waveform of the cropped loop, with the trimmed regions shaded. Drag the
+  waveform's crop **handles** to trim directly (arrow keys nudge one beat,
+  Home/End jump to the extremes); the mouse **wheel zooms** and **Shift+wheel
+  pans**, with **Fit** resetting the view.
 - The **Meter** selector in the sync strip sets the time signature
   (2/4, 3/4, 4/4, 5/4, 6/8, 7/8, 9/8, 12/8; default 4/4). BPM stays a
   quarter-note tempo, so in 6/8 the beat is an eighth (half a quarter). The

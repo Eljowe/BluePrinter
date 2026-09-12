@@ -47,18 +47,18 @@ function NumberInput({ value, min, max, step, className, onChange, suffix, title
   );
 }
 
-function Stepper({ label, value, min, max, onChange, title }) {
+function Stepper({ label, value, min, max, onChange, title, disabled }) {
   const step = (delta) => {
     const next = Math.max(min, Math.min(max, value + delta));
     if (next !== value) onChange(next);
   };
   return (
-    <div className="looper-stepper" title={title}>
+    <div className={`looper-stepper ${disabled ? "is-disabled" : ""}`} title={title}>
       <span className="looper-stepper-label">{label}</span>
       <div className="looper-stepper-control">
-        <button type="button" className="looper-stepper-btn" disabled={value <= min} onClick={() => step(-1)} aria-label={`${label}: decrease`}>−</button>
+        <button type="button" className="looper-stepper-btn" disabled={disabled || value <= min} onClick={() => step(-1)} aria-label={`${label}: decrease`}>−</button>
         <span className="looper-stepper-value">{value}</span>
-        <button type="button" className="looper-stepper-btn" disabled={value >= max} onClick={() => step(1)} aria-label={`${label}: increase`}>+</button>
+        <button type="button" className="looper-stepper-btn" disabled={disabled || value >= max} onClick={() => step(1)} aria-label={`${label}: increase`}>+</button>
       </div>
     </div>
   );
@@ -130,6 +130,15 @@ export function Looper({ transport, onOverdubChange, onLoopLevelChange, onOverdu
   const clockRef = useRef({ pos: 0, at: 0 });
   const lastPosRef = useRef(0);
   const seamTimerRef = useRef(null);
+
+  // Interactive crop editing (0031): the loop waveform sits on a track scaled
+  // by `zoom` (1..8) and slid by `pan` (0..1). Crop handles drag whole-beat
+  // bounds; wheel zooms, shift+wheel pans.
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState(0);
+  const trackRef = useRef(null);
+  const timelineRef = useRef(null);
+  const dragRef = useRef(null);
 
   // A capture layers over the loop when overdub is on, looping is on and
   // a loop exists — matches the backend's condition at capture start.
@@ -277,6 +286,112 @@ export function Looper({ transport, onOverdubChange, onLoopLevelChange, onOverdu
   const setPlaying = (enabled) => emit(FRONTEND_EVENTS.setLooperPlaying, { enabled });
   const emitCrop = (startBeats, endBeats) => emit(FRONTEND_EVENTS.setLoopCrop, { startBeats, endBeats });
 
+  // --- Interactive crop editing (0031) -------------------------------------
+  const maxCropStart = Math.max(0, totalBeats - 1 - cropEndBeats);
+  const maxCropEnd = Math.max(0, totalBeats - 1 - cropStartBeats);
+
+  const setView = (nextZoom, nextPan) => {
+    const z = Math.max(1, Math.min(8, nextZoom));
+    setZoom(z);
+    setPan(z <= 1 ? 0 : Math.max(0, Math.min(1, nextPan)));
+  };
+
+  const handleZoomWheel = (e) => {
+    if (!hasLoop || isRecording) return;
+    e.preventDefault();
+    const rect = e.currentTarget.getBoundingClientRect();
+    const anchor = rect.width > 0
+      ? Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+      : 0.5;
+
+    if (e.shiftKey) {
+      setView(zoom, pan + (e.deltaY > 0 ? 0.15 : -0.15));
+      return;
+    }
+
+    const next = Math.max(1, Math.min(8, zoom * (e.deltaY < 0 ? 1.25 : 0.8)));
+    const viewFrac = 1 / zoom;
+    const nextViewFrac = 1 / next;
+    const anchorBeat = pan * (1 - viewFrac) + anchor * viewFrac;
+    const nextPan = next <= 1 ? 0 : (anchorBeat - anchor * nextViewFrac) / (1 - nextViewFrac);
+    setView(next, nextPan);
+  };
+
+  const beatAtPointer = (clientX) => {
+    const rect = trackRef.current?.getBoundingClientRect();
+    if (!rect || rect.width <= 0 || totalBeats <= 0) return 0;
+    return ((clientX - rect.left) / rect.width) * totalBeats;
+  };
+
+  const beginHandleDrag = (e, which) => {
+    if (isRecording || !hasLoop) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    dragRef.current = which;
+  };
+
+  const moveHandleDrag = (e) => {
+    const which = dragRef.current;
+    if (!which) return;
+    const beat = Math.round(beatAtPointer(e.clientX));
+    if (which === "start") {
+      const start = Math.max(0, Math.min(beat, maxCropStart));
+      if (start !== cropStartBeats) emitCrop(start, cropEndBeats);
+    } else {
+      const audibleEnd = Math.max(cropStartBeats + 1, Math.min(beat, totalBeats));
+      const end = totalBeats - audibleEnd;
+      if (end !== cropEndBeats) emitCrop(cropStartBeats, end);
+    }
+  };
+
+  const endHandleDrag = (e) => {
+    if (!dragRef.current) return;
+    dragRef.current = null;
+    if (e.currentTarget.hasPointerCapture?.(e.pointerId))
+      e.currentTarget.releasePointerCapture?.(e.pointerId);
+  };
+
+  const handleCropKey = (e, which) => {
+    if (isRecording) return;
+    const isStart = which === "start";
+    const cur = isStart ? cropStartBeats : cropEndBeats;
+    const max = isStart ? maxCropStart : maxCropEnd;
+    // Spatial: the handle moves with the arrow key. Right increases the start
+    // crop but decreases the end crop (the handle moves toward the loop end).
+    const right = e.key === "ArrowRight" || e.key === "ArrowUp";
+    const left = e.key === "ArrowLeft" || e.key === "ArrowDown";
+    let next = cur;
+    if (right) next = cur + (isStart ? 1 : -1);
+    else if (left) next = cur + (isStart ? -1 : 1);
+    else if (e.key === "Home") next = isStart ? 0 : max;
+    else if (e.key === "End") next = isStart ? max : 0;
+    else return;
+    e.preventDefault();
+    next = Math.max(0, Math.min(next, max));
+    if (next === cur) return;
+    if (isStart) emitCrop(next, cropEndBeats);
+    else emitCrop(cropStartBeats, next);
+  };
+
+  // The zoomed track always spans the full loop; when there is no loop yet it
+  // stays at 1x so the ruler and capture-progress bar span the timeline.
+  const trackStyle = {
+    width: `${zoom * 100}%`,
+    transform: `translateX(-${(pan * (zoom - 1) / zoom) * 100}%)`,
+  };
+
+  // Non-passive wheel listener (React's onWheel is passive, so preventDefault
+  // there is ignored and the page would scroll while zooming).
+  useEffect(() => {
+    const node = timelineRef.current;
+    if (!node || !hasLoop) return undefined;
+    const onWheel = (e) => handleZoomWheel(e);
+    node.addEventListener("wheel", onWheel, { passive: false });
+    return () => node.removeEventListener("wheel", onWheel);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasLoop, zoom, pan, isRecording, totalBeats, beatsPerBar]);
+
   return (
     <section className={`looper ${isRecording ? "is-recording" : ""} ${playing ? "is-playing" : ""} ${preRoll ? "is-counting-in" : ""}`}>
       <div className="looper-header">
@@ -290,35 +405,84 @@ export function Looper({ transport, onOverdubChange, onLoopLevelChange, onOverdu
         </div>
       </div>
 
-      <div className={`looper-timeline ${preRoll ? "is-counting-in" : ""}`} aria-label={`${formatBeats(croppedBeats, beatsPerBar)} loop`}>
+      <div ref={timelineRef} className={`looper-timeline ${preRoll ? "is-counting-in" : ""}`} aria-label={`${formatBeats(croppedBeats, beatsPerBar)} loop`}>
         <div
-          className="looper-ruler"
-          style={hasLoop && totalBeats > 0 ? {
-            "--beat-width": showBeatTicks ? `${100 / totalBeats}%` : `${(100 * beatsPerBar) / totalBeats}%`,
-            "--bar-width": `${(100 * beatsPerBar) / totalBeats}%`,
-          } : undefined}
-        />
-        {isRecording && !isOverdubbing && capturePct > 0 ? (
-          <div className="looper-capture-progress" style={{ width: `${capturePct}%` }} />
-        ) : null}
-        {hasLoop ? (
-          <div className="looper-waveform">
-            <Waveform peaks={transport.audioLoopPeaks ?? []} width={360} height={88} />
-          </div>
-        ) : null}
+          className="looper-track"
+          ref={trackRef}
+          style={trackStyle}
+        >
+          <div
+            className="looper-ruler"
+            style={hasLoop && totalBeats > 0 ? {
+              "--beat-width": showBeatTicks ? `${100 / totalBeats}%` : `${(100 * beatsPerBar) / totalBeats}%`,
+              "--bar-width": `${(100 * beatsPerBar) / totalBeats}%`,
+            } : undefined}
+          />
+          {isRecording && !isOverdubbing && capturePct > 0 ? (
+            <div className="looper-capture-progress" style={{ width: `${capturePct}%` }} />
+          ) : null}
+          {hasLoop ? (
+            <div className="looper-waveform">
+              <Waveform peaks={transport.audioLoopPeaks ?? []} width={360} height={88} />
+            </div>
+          ) : null}
+          {hasLoop ? <div className="looper-crop-left" style={{ width: `${cropStartPct}%` }} /> : null}
+          {hasLoop ? <div className="looper-crop-right" style={{ width: `${cropEndPct}%` }} /> : null}
+          {hasLoop ? <div ref={playheadRef} className="looper-playhead" /> : null}
+          {hasLoop ? (
+            <div className="looper-ruler-labels" aria-hidden="true">
+              {barNumberLabels.map((b) => (
+                <span key={b.bar} className="looper-ruler-label" style={{ left: `${b.pct}%` }}>{b.bar}</span>
+              ))}
+            </div>
+          ) : null}
+          {hasLoop ? (
+            <button
+              type="button"
+              className="looper-crop-handle looper-crop-handle--start"
+              style={{ left: `${cropStartPct}%` }}
+              role="slider"
+              aria-label="Crop start"
+              aria-valuemin={0}
+              aria-valuemax={maxCropStart}
+              aria-valuenow={cropStartBeats}
+              aria-valuetext={`Start at beat ${cropStartBeats}`}
+              aria-disabled={isRecording}
+              onPointerDown={(e) => beginHandleDrag(e, "start")}
+              onPointerMove={moveHandleDrag}
+              onPointerUp={endHandleDrag}
+              onPointerCancel={endHandleDrag}
+              onLostPointerCapture={endHandleDrag}
+              onKeyDown={(e) => handleCropKey(e, "start")}
+              title="Drag to trim the loop start (arrow keys nudge one beat)"
+            />
+          ) : null}
+          {hasLoop ? (
+            <button
+              type="button"
+              className="looper-crop-handle looper-crop-handle--end"
+              style={{ left: `${100 - cropEndPct}%` }}
+              role="slider"
+              aria-label="Crop end"
+              aria-valuemin={0}
+              aria-valuemax={maxCropEnd}
+              aria-valuenow={cropEndBeats}
+              aria-valuetext={`End at beat ${totalBeats - cropEndBeats}`}
+              aria-disabled={isRecording}
+              onPointerDown={(e) => beginHandleDrag(e, "end")}
+              onPointerMove={moveHandleDrag}
+              onPointerUp={endHandleDrag}
+              onPointerCancel={endHandleDrag}
+              onLostPointerCapture={endHandleDrag}
+              onKeyDown={(e) => handleCropKey(e, "end")}
+              title="Drag to trim the loop end (arrow keys nudge one beat)"
+            />
+          ) : null}
+        </div>
+
         {preRoll && countdown != null ? (
           <div className="looper-countdown" key={countdown} aria-hidden="true">
             {countdown}
-          </div>
-        ) : null}
-        {hasLoop ? <div className="looper-crop-left" style={{ width: `${cropStartPct}%` }} /> : null}
-        {hasLoop ? <div className="looper-crop-right" style={{ width: `${cropEndPct}%` }} /> : null}
-        {hasLoop ? <div ref={playheadRef} className="looper-playhead" /> : null}
-        {hasLoop ? (
-          <div className="looper-ruler-labels" aria-hidden="true">
-            {barNumberLabels.map((b) => (
-              <span key={b.bar} className="looper-ruler-label" style={{ left: `${b.pct}%` }}>{b.bar}</span>
-            ))}
           </div>
         ) : null}
         <div className="looper-timeline-caption">
@@ -326,6 +490,16 @@ export function Looper({ transport, onOverdubChange, onLoopLevelChange, onOverdu
           <span>{looping ? "LOOP" : "ONE SHOT"}</span>
         </div>
       </div>
+
+      {hasLoop ? (
+        <div className="looper-zoom" role="group" aria-label="Waveform zoom">
+          <button type="button" className="btn btn-ghost btn-sm" disabled={isRecording || zoom <= 1} onClick={() => setView(zoom / 1.5, pan)} title="Zoom out">−</button>
+          <button type="button" className="btn btn-ghost btn-sm" disabled={isRecording || zoom >= 8} onClick={() => setView(zoom * 1.5, pan)} title="Zoom in">+</button>
+          <span className="looper-zoom-level">{zoom.toFixed(1)}×</span>
+          <button type="button" className="btn btn-ghost btn-sm" disabled={isRecording || zoom <= 1} onClick={() => setView(1, 0)} title="Fit the whole loop">Fit</button>
+          <span className="looper-zoom-hint">Wheel zoom · Shift+wheel pan</span>
+        </div>
+      ) : null}
 
       <div className="looper-controls">
         <div className="looper-primary-controls">
@@ -502,7 +676,8 @@ export function Looper({ transport, onOverdubChange, onLoopLevelChange, onOverdu
               label="Crop start"
               value={cropStartBeats}
               min={0}
-              max={!recording && totalBeats > 0 ? Math.max(0, totalBeats - 1 - cropEndBeats) : 0}
+              max={maxCropStart}
+              disabled={isRecording}
               onChange={(beats) => emitCrop(beats, cropEndBeats)}
               title={`Beats to trim off the start of the loop (${beatsPerBar} beats per bar)`}
             />
@@ -511,7 +686,8 @@ export function Looper({ transport, onOverdubChange, onLoopLevelChange, onOverdu
               label="Crop end"
               value={cropEndBeats}
               min={0}
-              max={!recording && totalBeats > 0 ? Math.max(0, totalBeats - 1 - cropStartBeats) : 0}
+              max={maxCropEnd}
+              disabled={isRecording}
               onChange={(beats) => emitCrop(cropStartBeats, beats)}
               title={`Beats to trim off the end of the loop (${beatsPerBar} beats per bar)`}
             />
