@@ -17,6 +17,7 @@
 #include "MidiClockOutput.h"
 #include "Meter.h"
 #include "LooperGridMath.h"
+#include <deque>
 
 //==============================================================================
 // A dedicated thread that owns every VST3 instantiation so every
@@ -356,6 +357,13 @@ public:
     // BPM), clamped so the window never fully collapses.
     void    setLoopCrop (int startBeats, int endBeats);
     void    clearLoop();
+    // Loop layer undo/redo (0030). Undo restores the loop audio to before the
+    // last overdub layer; redo re-applies it. Disabled while playing or
+    // capturing. Session-only.
+    bool    isLoopUndoAvailable() const { return ! loopUndoStack.empty(); }
+    bool    isLoopRedoAvailable() const { return ! loopRedoStack.empty(); }
+    void    undoLoopLayer();
+    void    redoLoopLayer();
     // Converts the captured (cropped) loop into a library snippet and
     // writes WAV + JSON to the library folder when one is set — mirrors
     // the take recorder's save (one click, no dialog). Message thread
@@ -670,6 +678,19 @@ private:
     std::unique_ptr<TunerWorker> tunerWorker;
     void startTunerWorker();
     void stopTunerWorker();
+
+    // Loop layer undo/redo (0030). Message-thread only: snapshots of the full
+    // loop region, bounded by step count and total bytes.
+    std::deque<std::shared_ptr<juce::AudioBuffer<float>>> loopUndoStack;
+    std::deque<std::shared_ptr<juce::AudioBuffer<float>>> loopRedoStack;
+    size_t loopUndoBytes = 0;
+    void pushLoopUndoSnapshot();
+    void applyLoopSnapshot (const std::shared_ptr<juce::AudioBuffer<float>>& snapshot);
+    void clearLoopHistory();
+    void updateLoopClipLatch();
+    bool canEditLoopHistory() const;
+    std::shared_ptr<juce::AudioBuffer<float>> snapshotCurrentLoopRegion();
+    void trimLoopHistoryStacks();
     std::atomic<float>   loopLevel        { 0.0f };
     std::atomic<float>   dryLevel         { 0.0f };
     std::atomic<float>   overdubLevel     { 0.0f };

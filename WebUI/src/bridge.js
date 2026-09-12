@@ -115,6 +115,10 @@ export const FRONTEND_EVENTS = {
   // (4 per bar at the current BPM).
   setLoopCrop: "frontendSetLoopCrop",
   clearLoop: "frontendClearLoop",
+  // Loop layer undo/redo (0030), session-only. Undo restores the loop to
+  // before the last overdub layer; redo re-applies it.
+  loopUndo: "frontendLoopUndo",
+  loopRedo: "frontendLoopRedo",
   addVst3: "frontendAddVst3",
   removeVst3: "frontendRemoveVst3",
   moveVst3: "frontendMoveVst3",

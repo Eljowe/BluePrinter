@@ -1,7 +1,7 @@
 ---
 id: "0030"
 title: "Undo/redo for looper overdub layers"
-status: ready-for-agent
+status: done
 blocked_by: []
 ---
 
