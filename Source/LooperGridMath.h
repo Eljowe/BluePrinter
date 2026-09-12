@@ -48,4 +48,26 @@ namespace LooperGrid
                       float bpm,
                       int startBeats,
                       int endBeats);
+
+    // Silences [captured, target) in every channel, so a short capture is
+    // zero-padded out to the grid boundary. No-op when target <= captured
+    // (audio past the target is truncated by the caller setting the loop
+    // length). Clamps to the buffer's end. Header-inline so it can be tested
+    // with a synthetic buffer.
+    inline void padCaptureTail (juce::AudioBuffer<float>& buffer,
+                                int64_t captured,
+                                int64_t target)
+    {
+        if (target <= captured || captured < 0)
+            return;
+
+        const int from = static_cast<int> (captured);
+        int count = static_cast<int> (target - captured);
+        count = juce::jmin (count, buffer.getNumSamples() - from);
+        if (count <= 0)
+            return;
+
+        for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+            buffer.clear (ch, from, count);
+    }
 }

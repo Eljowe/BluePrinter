@@ -97,3 +97,40 @@ BP_TEST (LooperGrid_cropRejectsInvalidInput)
     BP_CHECK_EQ (LooperGrid::computeCrop (kBar, 0.0, kBpm, 1, 1).lengthSamples,
                  static_cast<int64_t> (0));
 }
+
+BP_TEST (LooperGrid_padsTheTailToTheTarget)
+{
+    juce::AudioBuffer<float> buffer (2, 8);
+    for (int ch = 0; ch < 2; ++ch)
+        for (int i = 0; i < 8; ++i)
+            buffer.setSample (ch, i, 1.0f);
+
+    LooperGrid::padCaptureTail (buffer, 4, 6);
+    BP_CHECK_NEAR (buffer.getSample (0, 3), 1.0f, 0.0001f);   // kept
+    BP_CHECK_NEAR (buffer.getSample (0, 4), 0.0f, 0.0001f);   // padded
+    BP_CHECK_NEAR (buffer.getSample (1, 5), 0.0f, 0.0001f);   // padded
+    BP_CHECK_NEAR (buffer.getSample (0, 6), 1.0f, 0.0001f);   // beyond target, kept
+}
+
+BP_TEST (LooperGrid_padIsNoOpWhenTargetNotLarger)
+{
+    juce::AudioBuffer<float> buffer (1, 8);
+    for (int i = 0; i < 8; ++i)
+        buffer.setSample (0, i, 1.0f);
+
+    LooperGrid::padCaptureTail (buffer, 6, 4);
+    for (int i = 0; i < 8; ++i)
+        BP_CHECK_NEAR (buffer.getSample (0, i), 1.0f, 0.0001f);
+}
+
+BP_TEST (LooperGrid_padClampsToTheBufferEnd)
+{
+    juce::AudioBuffer<float> buffer (1, 6);
+    for (int i = 0; i < 6; ++i)
+        buffer.setSample (0, i, 1.0f);
+
+    LooperGrid::padCaptureTail (buffer, 4, 100);
+    BP_CHECK_NEAR (buffer.getSample (0, 3), 1.0f, 0.0001f);
+    BP_CHECK_NEAR (buffer.getSample (0, 4), 0.0f, 0.0001f);
+    BP_CHECK_NEAR (buffer.getSample (0, 5), 0.0f, 0.0001f);
+}

@@ -158,6 +158,8 @@ _Avoid_: Message, IPC event
 | Loop playback + overdub wrap-mix | `Source/LoopPlayback.h` |
 | Chain input select + monitor/record sum | `Source/ChainRouting.h` |
 | Capture-buffer write clamp | `Source/CaptureWrite.h` |
+| Capture-region copy (finalize) | `Source/CaptureCopy.h` |
+| Count-in completion test | `Source/PreRollMath.h` |
 | MIDI output device + direct sends | `Source/MidiClockOutput.h/.cpp` |
 | Metering math | `Source/MeterMath.h` |
 | Per-meter level/peak/clip state | `Source/Meter.h` |
