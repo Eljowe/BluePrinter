@@ -135,3 +135,147 @@ BP_TEST (LoopPlayback_mixLayerRejectsOutOfBounds)
     for (int i = 0; i < 4; ++i)
         BP_CHECK_NEAR (buffer.getSample (0, i), 1.0f, 0.0001f);
 }
+
+//==============================================================================
+// Reverse / half-speed (ticket 0036). The phase always advances forward and
+// wraps at the window end; direction only mirrors the read, so the seam and
+// one-shot-stop contracts match the forward path.
+
+BP_TEST (LoopPlayback_reverseReadsWindowBackwards)
+{
+    auto source = makeMono ({ 0.1f, 0.2f, 0.3f, 0.4f });
+    juce::AudioBuffer<float> dest (1, 4);
+    dest.clear();
+
+    const auto pos = LoopPlayback::renderMode (dest, source, 0, 4, 0.0, false, 1.0f, 0, { true, 1.0 });
+    BP_CHECK_EQ (pos, 4.0);
+    const float expected[] = { 0.4f, 0.3f, 0.2f, 0.1f };
+    for (int i = 0; i < 4; ++i)
+        BP_CHECK_NEAR (dest.getSample (0, i), expected[i], 0.0001f);
+}
+
+BP_TEST (LoopPlayback_reverseOneShotStopsAtWindowStart)
+{
+    auto source = makeMono ({ 0.1f, 0.2f, 0.3f, 0.4f });
+    juce::AudioBuffer<float> dest (1, 6);
+    dest.clear();
+
+    // Not looping: only the window is written; the rest of the block stays
+    // silent and the returned phase lands on the end (the caller stops).
+    const auto pos = LoopPlayback::renderMode (dest, source, 0, 4, 0.0, false, 1.0f, 0, { true, 1.0 });
+    BP_CHECK_EQ (pos, 4.0);
+    BP_CHECK_NEAR (dest.getSample (0, 4), 0.0f, 0.0001f);
+    BP_CHECK_NEAR (dest.getSample (0, 5), 0.0f, 0.0001f);
+}
+
+BP_TEST (LoopPlayback_reverseLoopWraps)
+{
+    auto source = makeMono ({ 0.1f, 0.2f, 0.3f, 0.4f });
+    juce::AudioBuffer<float> dest (1, 8);
+    dest.clear();
+
+    const auto pos = LoopPlayback::renderMode (dest, source, 0, 4, 0.0, true, 1.0f, 0, { true, 1.0 });
+    BP_CHECK_EQ (pos, 4.0);
+    const float expected[] = { 0.4f, 0.3f, 0.2f, 0.1f, 0.4f, 0.3f, 0.2f, 0.1f };
+    for (int i = 0; i < 8; ++i)
+        BP_CHECK_NEAR (dest.getSample (0, i), expected[i], 0.0001f);
+}
+
+BP_TEST (LoopPlayback_halfSpeedInterpolates)
+{
+    auto source = makeMono ({ 0.0f, 1.0f, 2.0f, 3.0f });
+    juce::AudioBuffer<float> dest (1, 4);
+    dest.clear();
+
+    // Phase 0, 0.5, 1.0, 1.5 -> 0, 0.5, 1, 1.5.
+    const auto pos = LoopPlayback::renderMode (dest, source, 0, 4, 0.0, false, 1.0f, 0, { false, 0.5 });
+    BP_CHECK_EQ (pos, 2.0);
+    const float expected[] = { 0.0f, 0.5f, 1.0f, 1.5f };
+    for (int i = 0; i < 4; ++i)
+        BP_CHECK_NEAR (dest.getSample (0, i), expected[i], 0.0001f);
+}
+
+BP_TEST (LoopPlayback_halfSpeedTakesTwiceAsLongOneShot)
+{
+    auto source = makeMono ({ 0.0f, 1.0f, 2.0f, 3.0f });
+    juce::AudioBuffer<float> dest (1, 8);
+    dest.clear();
+
+    // The 4-sample window is covered in 8 output samples; the fractional tail
+    // holds the last sample (not looping, no seam to cross).
+    const auto pos = LoopPlayback::renderMode (dest, source, 0, 4, 0.0, false, 1.0f, 0, { false, 0.5 });
+    BP_CHECK_EQ (pos, 4.0);
+    const float expected[] = { 0.0f, 0.5f, 1.0f, 1.5f, 2.0f, 2.5f, 3.0f, 3.0f };
+    for (int i = 0; i < 8; ++i)
+        BP_CHECK_NEAR (dest.getSample (0, i), expected[i], 0.0001f);
+}
+
+BP_TEST (LoopPlayback_halfSpeedWrapsWithSeamInterpolation)
+{
+    auto source = makeMono ({ 0.0f, 1.0f, 2.0f, 3.0f });
+    juce::AudioBuffer<float> dest (1, 10);
+    dest.clear();
+
+    const auto pos = LoopPlayback::renderMode (dest, source, 0, 4, 0.0, true, 1.0f, 0, { false, 0.5 });
+    BP_CHECK_EQ (pos, 1.0);
+    // Phase 3.5 interpolates across the seam: source[3] -> source[0] at 0.5.
+    const float expected[] = { 0.0f, 0.5f, 1.0f, 1.5f, 2.0f, 2.5f, 3.0f, 1.5f, 0.0f, 0.5f };
+    for (int i = 0; i < 10; ++i)
+        BP_CHECK_NEAR (dest.getSample (0, i), expected[i], 0.0001f);
+}
+
+BP_TEST (LoopPlayback_reverseHalfInterpolates)
+{
+    auto source = makeMono ({ 0.0f, 1.0f, 2.0f, 3.0f });
+    juce::AudioBuffer<float> dest (1, 4);
+    dest.clear();
+
+    // Mirrored read at phase 0, 0.5, 1.0, 1.5 -> source 3, 2.5, 2, 1.5.
+    const auto pos = LoopPlayback::renderMode (dest, source, 0, 4, 0.0, false, 1.0f, 0, { true, 0.5 });
+    BP_CHECK_EQ (pos, 2.0);
+    const float expected[] = { 3.0f, 2.5f, 2.0f, 1.5f };
+    for (int i = 0; i < 4; ++i)
+        BP_CHECK_NEAR (dest.getSample (0, i), expected[i], 0.0001f);
+}
+
+BP_TEST (LoopPlayback_reverseHalfSeamInterpolates)
+{
+    auto source = makeMono ({ 0.0f, 1.0f, 2.0f, 3.0f });
+    juce::AudioBuffer<float> dest (1, 8);
+    dest.clear();
+
+    // Reverse half-speed: phases 0..3.5 read source 3, 2.5, 2, 1.5, 1, 0.5, 0
+    // then the mirrored phase -0.5 crosses the seam (source[3] -> source[0]).
+    const auto pos = LoopPlayback::renderMode (dest, source, 0, 4, 0.0, true, 1.0f, 0, { true, 0.5 });
+    BP_CHECK_EQ (pos, 4.0);
+    const float expected[] = { 3.0f, 2.5f, 2.0f, 1.5f, 1.0f, 0.5f, 0.0f, 1.5f };
+    for (int i = 0; i < 8; ++i)
+        BP_CHECK_NEAR (dest.getSample (0, i), expected[i], 0.0001f);
+}
+
+BP_TEST (LoopPlayback_reverseDeclickUsesPhase)
+{
+    auto source = makeMono ({ 0.1f, 0.2f, 0.3f, 0.4f });
+    juce::AudioBuffer<float> dest (1, 4);
+    dest.clear();
+
+    // Same seam envelope as forward (0.5 1 1 0.5) over the mirrored reads.
+    LoopPlayback::renderMode (dest, source, 0, 4, 0.0, true, 1.0f, 1, { true, 1.0 });
+    BP_CHECK_NEAR (dest.getSample (0, 0), 0.2f, 0.0001f);
+    BP_CHECK_NEAR (dest.getSample (0, 1), 0.3f, 0.0001f);
+    BP_CHECK_NEAR (dest.getSample (0, 2), 0.2f, 0.0001f);
+    BP_CHECK_NEAR (dest.getSample (0, 3), 0.05f, 0.0001f);
+}
+
+BP_TEST (LoopPlayback_renderModeRejectsInvalidInput)
+{
+    auto source = makeMono ({ 0.1f, 0.2f });
+    juce::AudioBuffer<float> dest (1, 4);
+    dest.clear();
+
+    // Window past the source, a zero-length window, and a non-positive rate:
+    // position unchanged.
+    BP_CHECK_EQ (LoopPlayback::renderMode (dest, source, 0, 4, 2.0, false, 1.0f, 0, { true, 0.5 }), 2.0);
+    BP_CHECK_EQ (LoopPlayback::renderMode (dest, source, 0, 0, 2.0, false, 1.0f, 0, { true, 0.5 }), 2.0);
+    BP_CHECK_EQ (LoopPlayback::renderMode (dest, source, 0, 2, 1.0, false, 1.0f, 0, { true, 0.0 }), 1.0);
+}

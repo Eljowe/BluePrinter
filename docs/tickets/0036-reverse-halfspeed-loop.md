@@ -1,7 +1,7 @@
 ---
 id: "0036"
 title: "Reverse and half-speed loop playback"
-status: in-progress
+status: done
 blocked_by: []
 ---
 

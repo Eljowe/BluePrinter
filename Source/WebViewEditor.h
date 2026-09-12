@@ -95,6 +95,10 @@ public:
     static constexpr const char* frontendSetLooperPlayingEvent   = "frontendSetLooperPlaying";
     static constexpr const char* frontendSetLooperLoopingEvent   = "frontendSetLooperLooping";
     static constexpr const char* frontendSetLooperOverdubEvent   = "frontendSetLooperOverdub";
+    // Session-only loop playback mode (0036): reverse direction and
+    // tape-style half-speed. { enabled }
+    static constexpr const char* frontendSetLoopReverseEvent   = "frontendSetLoopReverse";
+    static constexpr const char* frontendSetLoopHalfSpeedEvent = "frontendSetLoopHalfSpeed";
     static constexpr const char* frontendSetLooperCountInEvent   = "frontendSetLooperCountIn";
     // Fixed capture length in bars (0 = Free, else 1/2/4/8).
     static constexpr const char* frontendSetLooperLengthBarsEvent = "frontendSetLooperLengthBars";

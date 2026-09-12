@@ -308,7 +308,12 @@ public:
     int     getLooperCropStartBeats() const { return looperCropStartBeats; }
     int     getLooperCropEndBeats() const { return looperCropEndBeats; }
     bool    hasAudioLoop() const { return audioLoopLength.load() > 0; }
-    int64_t getAudioLoopPosition() const { return audioLoopPosition.load(); }
+    double  getAudioLoopPosition() const { return audioLoopPosition.load(); }
+    // Session-only playback mode (ticket 0036): reverse direction and
+    // tape-style half-speed. Both default off (forward 1x) each launch and
+    // are ignored while an overdub captures.
+    bool    isLoopPlaybackReverse() const { return loopPlaybackReverse.load(); }
+    bool    isLoopPlaybackHalfSpeed() const { return loopPlaybackHalfSpeed.load(); }
     int64_t getAudioLoopLength() const { return audioLoopLength.load(); }
     int64_t getAudioLoopStart() const { return audioLoopStart.load(); }
     // Total record-buffer capacity in samples (bounds a fresh capture;
@@ -321,6 +326,8 @@ public:
     void    setLooperPlaying (bool enabled);
     void    setLooperLooping (bool enabled);
     void    setLooperOverdub (bool enabled);
+    void    setLoopPlaybackReverse (bool enabled);
+    void    setLoopPlaybackHalfSpeed (bool enabled);
     void    setLooperCountInBeats (int beats);
     void    setLooperLengthBars (int bars);
     void    setClickDuringCapture (bool enabled);
@@ -648,7 +655,11 @@ private:
     std::atomic<int64_t> overdubWritePos        { 0 };
     std::atomic<int64_t> audioLoopStart   { 0 };
     std::atomic<int64_t> audioLoopLength  { 0 };
-    std::atomic<int64_t> audioLoopPosition { 0 };
+    std::atomic<double>  audioLoopPosition { 0.0 };
+    // Session-only playback mode (0036). Set on the message thread, read on
+    // the audio thread. Forced forward/1x while an overdub is capturing.
+    std::atomic<bool>    loopPlaybackReverse   { false };
+    std::atomic<bool>    loopPlaybackHalfSpeed { false };
     // Full captured (grid-trimmed) loop extent — the reference the crop
     // beats are measured against. Crops derive audioLoopStart/Length from
     // this every time, so cropping is reversible: moving the start crop

@@ -93,6 +93,11 @@ export const FRONTEND_EVENTS = {
   // { enabled } — overdub mode: with a loop captured and looping on,
   // record layers the new input over the loop instead of replacing it.
   setLooperOverdub: "frontendSetLooperOverdub",
+  // Session-only loop playback mode (0036), both default off. Reverse
+  // plays the cropped window backwards; half-speed is tape-style
+  // (octave-down). Ignored while an overdub captures.
+  setLoopReverse: "frontendSetLoopReverse",
+  setLoopHalfSpeed: "frontendSetLoopHalfSpeed",
   setLooperCountIn: "frontendSetLooperCountIn",
   // Fixed capture length: { bars } — 0 = Free, else the capture auto-stops
   // after exactly that many bars (1/2/4/8).

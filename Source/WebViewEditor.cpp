@@ -470,6 +470,10 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
         { if (auto* obj = data.getDynamicObject()) processor.setLooperLooping (static_cast<bool> (obj->getProperty ("enabled"))); })
         .withEventListener(BluePrinterWebViewEditor::frontendSetLooperOverdubEvent, [&processor](juce::var data)
         { if (auto* obj = data.getDynamicObject()) processor.setLooperOverdub (static_cast<bool> (obj->getProperty ("enabled"))); })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetLoopReverseEvent, [&processor](juce::var data)
+        { if (auto* obj = data.getDynamicObject()) processor.setLoopPlaybackReverse (static_cast<bool> (obj->getProperty ("enabled"))); })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetLoopHalfSpeedEvent, [&processor](juce::var data)
+        { if (auto* obj = data.getDynamicObject()) processor.setLoopPlaybackHalfSpeed (static_cast<bool> (obj->getProperty ("enabled"))); })
         .withEventListener(BluePrinterWebViewEditor::frontendSetLooperCountInEvent, [&processor](juce::var data)
         { if (auto* obj = data.getDynamicObject()) processor.setLooperCountInBeats (static_cast<int> (obj->getProperty ("beats"))); })
         .withEventListener(BluePrinterWebViewEditor::frontendSetLooperLengthBarsEvent, [&processor](juce::var data)
@@ -1006,6 +1010,8 @@ juce::var BluePrinterWebViewEditor::makeTransportSnapshot() const
     obj->setProperty ("looperPlaying", audioProcessor.isLooperPlaying());
     obj->setProperty ("looperLooping", audioProcessor.isLooperLooping());
     obj->setProperty ("looperOverdub", audioProcessor.isLooperOverdub());
+    obj->setProperty ("loopPlaybackReverse", audioProcessor.isLoopPlaybackReverse());
+    obj->setProperty ("loopPlaybackHalfSpeed", audioProcessor.isLoopPlaybackHalfSpeed());
     obj->setProperty ("looperCountInBeats", audioProcessor.getLooperCountInBeats());
     obj->setProperty ("looperLengthBars", audioProcessor.getLooperLengthBars());
     obj->setProperty ("looperCropStartBeats", audioProcessor.getLooperCropStartBeats());

@@ -107,7 +107,7 @@ and briefed.
 | [0033](0033-named-chain-presets.md) | Named VST3 chain presets | ready-for-agent | — |
 | [0034](0034-builtin-tuner.md) | Built-in tuner | ready-for-agent | — |
 | [0035](0035-library-curation-setlists-favorites.md) | Library curation: setlists, favourites and bulk edits | needs-triage | — |
-| [0036](0036-reverse-halfspeed-loop.md) | Reverse and half-speed loop playback | in-progress | — |
+| [0036](0036-reverse-halfspeed-loop.md) | Reverse and half-speed loop playback | done | — |
 | [0037](0037-multi-take-comping.md) | Multi-take recording and comping | needs-triage | — |
 | [0038](0038-stem-per-chain-export.md) | Stem export: render each chain separately | needs-triage | — |
 | [0039](0039-auto-update-check.md) | Update check and in-app upgrade notice | needs-triage | 0015 |
