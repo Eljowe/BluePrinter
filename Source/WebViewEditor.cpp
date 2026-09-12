@@ -495,6 +495,10 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
         { if (auto* obj = data.getDynamicObject()) processor.setLoopCrop (static_cast<int> (obj->getProperty ("startBeats")), static_cast<int> (obj->getProperty ("endBeats"))); })
         .withEventListener(BluePrinterWebViewEditor::frontendClearLoopEvent, [&processor](juce::var)
         { processor.clearLoop(); })
+        .withEventListener(BluePrinterWebViewEditor::frontendLoopUndoEvent, [&processor](juce::var)
+        { processor.undoLoopLayer(); })
+        .withEventListener(BluePrinterWebViewEditor::frontendLoopRedoEvent, [&processor](juce::var)
+        { processor.redoLoopLayer(); })
         .withEventListener(BluePrinterWebViewEditor::frontendAddVst3Event, [owner](juce::var data)
         {
             if (owner == nullptr)
@@ -1046,6 +1050,8 @@ juce::var BluePrinterWebViewEditor::makeTransportSnapshot() const
     }
     obj->setProperty ("looperCountInBeats", audioProcessor.getLooperCountInBeats());
     obj->setProperty ("looperLengthBars", audioProcessor.getLooperLengthBars());
+    obj->setProperty ("loopUndoAvailable", audioProcessor.isLoopUndoAvailable());
+    obj->setProperty ("loopRedoAvailable", audioProcessor.isLoopRedoAvailable());
     obj->setProperty ("looperCropStartBeats", audioProcessor.getLooperCropStartBeats());
     obj->setProperty ("looperCropEndBeats", audioProcessor.getLooperCropEndBeats());
     obj->setProperty ("maxRecordSamples", audioProcessor.getMaxRecordSamples());

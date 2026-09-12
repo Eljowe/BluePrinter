@@ -83,7 +83,7 @@ function readInitialTransport() {
     tunerOpen: false, tunerMonitorMute: false, tunerFrequency: 0, tunerConfidence: 0, tunerReferencePitch: 440, tunerNote: "", tunerCents: 0,
      preRollActive: false, transportPosition: 0,
      takePending: false, takeLength: 0, takePlaying: false, takePosition: 0, takePeaks: [],
-     looperRecording: false, looperPreRoll: false, looperPlaying: false, looperLooping: true, looperOverdub: false, looperCountInBeats: 4, looperCropStartBeats: 0, looperCropEndBeats: 0, audioLoopStart: 0, audioLoopPosition: 0, audioLoopLength: 0, audioLoopPeaks: [], chainLevels: [], maxRecordSamples: 0,
+     looperRecording: false, looperPreRoll: false, looperPlaying: false, looperLooping: true, looperOverdub: false, looperCountInBeats: 4, looperCropStartBeats: 0, looperCropEndBeats: 0, audioLoopStart: 0, audioLoopPosition: 0, audioLoopLength: 0, audioLoopPeaks: [], chainLevels: [], maxRecordSamples: 0, loopUndoAvailable: false, loopRedoAvailable: false,
   };
   return {
     ...raw,
@@ -137,7 +137,7 @@ function readInitialTransport() {
      takePlaying: Boolean(raw.takePlaying),
      takePosition: Number(raw.takePosition ?? 0),
      takePeaks: Array.isArray(raw.takePeaks) ? raw.takePeaks : [],
-     looperRecording: Boolean(raw.looperRecording), looperPreRoll: Boolean(raw.looperPreRoll), looperPlaying: Boolean(raw.looperPlaying), looperLooping: raw.looperLooping !== false, looperOverdub: Boolean(raw.looperOverdub), looperCountInBeats: Number(raw.looperCountInBeats ?? 4), looperLengthBars: Number(raw.looperLengthBars ?? 0), looperCropStartBeats: Number(raw.looperCropStartBeats ?? 0), looperCropEndBeats: Number(raw.looperCropEndBeats ?? 0), audioLoopStart: Number(raw.audioLoopStart ?? 0), audioLoopPosition: Number(raw.audioLoopPosition ?? 0), audioLoopLength: Number(raw.audioLoopLength ?? 0), audioLoopPeaks: Array.isArray(raw.audioLoopPeaks) ? raw.audioLoopPeaks : [], chainLevels: Array.isArray(raw.chainLevels) ? raw.chainLevels : [], maxRecordSamples: Number(raw.maxRecordSamples ?? 0),
+     looperRecording: Boolean(raw.looperRecording), looperPreRoll: Boolean(raw.looperPreRoll), looperPlaying: Boolean(raw.looperPlaying), looperLooping: raw.looperLooping !== false, looperOverdub: Boolean(raw.looperOverdub), looperCountInBeats: Number(raw.looperCountInBeats ?? 4), looperLengthBars: Number(raw.looperLengthBars ?? 0), looperCropStartBeats: Number(raw.looperCropStartBeats ?? 0), looperCropEndBeats: Number(raw.looperCropEndBeats ?? 0), audioLoopStart: Number(raw.audioLoopStart ?? 0), audioLoopPosition: Number(raw.audioLoopPosition ?? 0), audioLoopLength: Number(raw.audioLoopLength ?? 0), audioLoopPeaks: Array.isArray(raw.audioLoopPeaks) ? raw.audioLoopPeaks : [], chainLevels: Array.isArray(raw.chainLevels) ? raw.chainLevels : [], maxRecordSamples: Number(raw.maxRecordSamples ?? 0), loopUndoAvailable: Boolean(raw.loopUndoAvailable), loopRedoAvailable: Boolean(raw.loopRedoAvailable),
   };
 }
 
@@ -193,8 +193,23 @@ export default function App() {
       && el.closest("button, a, [role='button'], [role='tab'], [role='switch']"));
 
     const onKeyDown = (e) => {
-      if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
-      if (isEditable(e.target) || isEditable(document.activeElement)) return;
+      if (e.defaultPrevented) return;
+
+      const editable = isEditable(e.target) || isEditable(document.activeElement);
+
+      // Loop layer undo/redo (0030), Loop tab only: Ctrl/Cmd+Z, Ctrl+Shift+Z
+      // or Ctrl+Y. Skipped while a text field is focused so native undo works.
+      if (!editable && (e.ctrlKey || e.metaKey) && !e.altKey
+          && (e.key === "z" || e.key === "Z" || e.key === "y" || e.key === "Y")) {
+        if (recordingMode !== "loop") return;
+        e.preventDefault();
+        const redo = e.shiftKey || e.key === "y" || e.key === "Y";
+        emit(redo ? FRONTEND_EVENTS.loopRedo : FRONTEND_EVENTS.loopUndo);
+        return;
+      }
+
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (editable) return;
 
       if (e.key === " ") {
         if (isControl(document.activeElement)) return;
@@ -369,6 +384,8 @@ export default function App() {
          looperPlaying: payload.looperPlaying !== undefined ? Boolean(payload.looperPlaying) : prev.looperPlaying,
          looperLooping: payload.looperLooping !== undefined ? Boolean(payload.looperLooping) : prev.looperLooping,
          looperOverdub: payload.looperOverdub !== undefined ? Boolean(payload.looperOverdub) : prev.looperOverdub,
+         loopUndoAvailable: payload.loopUndoAvailable !== undefined ? Boolean(payload.loopUndoAvailable) : prev.loopUndoAvailable,
+         loopRedoAvailable: payload.loopRedoAvailable !== undefined ? Boolean(payload.loopRedoAvailable) : prev.loopRedoAvailable,
          maxRecordSamples: payload.maxRecordSamples !== undefined ? Number(payload.maxRecordSamples) : prev.maxRecordSamples,
          looperCountInBeats: payload.looperCountInBeats !== undefined ? Number(payload.looperCountInBeats) : prev.looperCountInBeats,
          looperLengthBars: payload.looperLengthBars !== undefined ? Number(payload.looperLengthBars) : prev.looperLengthBars,

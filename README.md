@@ -256,6 +256,7 @@ Events flow through `window.__JUCE__.backend`:
 | `frontendSetLooperClick` / `frontendSetLooperCountIn` / `frontendSetLooperClickDuringCapture` | Looper: click + count-in beats + click-through-capture gate |
 | `frontendSetLooperLengthBars`                             | Looper: capture length — `bars: 0` = Free, `1/2/4/8` = fixed N-bar auto-stop |
 | `frontendSetLoopCrop` / `frontendClearLoop` / `frontendSaveLoop` | Looper: crop start/end **beats** / clear / save as snippet to the library folder |
+| `frontendLoopUndo` / `frontendLoopRedo`                   | Looper: undo / redo the last overdub layer (session-only) |
 | `frontendSetLoopReverse` / `frontendSetLoopHalfSpeed`       | Looper: session-only reverse / tape-style half-speed playback |
 | `frontendAddVst3` / `frontendRemoveVst3` / `frontendMoveVst3` | VST3 chain: add / remove / reorder slots       |
 | `frontendSetVst3Bypass` / `frontendOpenVst3Editor` / `frontendCloseVst3Editor` | Chain slot bypass + native editor |
@@ -335,6 +336,11 @@ produce, so the loop sounds exactly like what you heard while recording:
   octave down) with linear interpolation across the loop seam. Both are
   session-only and are forced off while an overdub captures (overdub always
   aligns to the forward downbeat).
+- Every overdub layer is snapshotted (the full loop region) before it is
+  mixed in, so the last passes can be undone and redone — **Undo** / **Redo**,
+  or Ctrl+Z / Ctrl+Shift+Z (Ctrl+Y) on the Loop tab. History keeps the last 10
+  layers (and ~64 MB), is session-only, and is cleared by a fresh capture.
+  Undo/redo are disabled while playing or capturing.
 - **Save to library** converts the cropped loop into a library snippet
   (`BluePrinterAudioProcessor::saveLoopSnippet()`, message thread only) and —
   exactly like the take recorder — writes WAV + JSON to the library folder

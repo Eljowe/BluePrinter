@@ -101,7 +101,7 @@ and briefed.
 
 | Ticket | Title | Status | Blocked by |
 | ------ | ----- | ------ | ---------- |
-| [0030](0030-loop-layer-undo-redo.md) | Undo/redo for looper overdub layers | ready-for-agent | — |
+| [0030](0030-loop-layer-undo-redo.md) | Undo/redo for looper overdub layers | done | — |
 | [0031](0031-interactive-loop-waveform-crop-zoom.md) | Interactive loop waveform: drag crop handles and zoom | ready-for-agent | — |
 | [0032](0032-time-signatures.md) | Time signatures beyond 4/4 | done | — |
 | [0033](0033-named-chain-presets.md) | Named VST3 chain presets | ready-for-agent | — |

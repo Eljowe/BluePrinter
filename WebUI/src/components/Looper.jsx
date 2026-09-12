@@ -363,6 +363,24 @@ export function Looper({ transport, onOverdubChange, onLoopLevelChange, onOverdu
           <button type="button" className="btn btn-ghost btn-sm" disabled={!hasLoop} onClick={() => emit(FRONTEND_EVENTS.saveLoop)}>
             <IconSave size={13} /> Save to library
           </button>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            disabled={!transport?.loopUndoAvailable || isRecording || playing}
+            onClick={() => emit(FRONTEND_EVENTS.loopUndo)}
+            title="Undo the last overdub layer (Ctrl+Z on the Loop tab)"
+          >
+            Undo
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            disabled={!transport?.loopRedoAvailable || isRecording || playing}
+            onClick={() => emit(FRONTEND_EVENTS.loopRedo)}
+            title="Redo the last undone layer (Ctrl+Shift+Z on the Loop tab)"
+          >
+            Redo
+          </button>
         </div>
 
         <div className="looper-settings">

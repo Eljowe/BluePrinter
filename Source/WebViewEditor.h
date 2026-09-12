@@ -112,6 +112,9 @@ public:
     static constexpr const char* frontendSetLooperLengthBarsEvent = "frontendSetLooperLengthBars";
     static constexpr const char* frontendSetLoopCropEvent        = "frontendSetLoopCrop";
     static constexpr const char* frontendClearLoopEvent          = "frontendClearLoop";
+    // Loop layer undo/redo (0030) — no payload.
+    static constexpr const char* frontendLoopUndoEvent          = "frontendLoopUndo";
+    static constexpr const char* frontendLoopRedoEvent          = "frontendLoopRedo";
     static constexpr const char* frontendAddVst3Event          = "frontendAddVst3";
     static constexpr const char* frontendRemoveVst3Event       = "frontendRemoveVst3";
     static constexpr const char* frontendMoveVst3Event         = "frontendMoveVst3";

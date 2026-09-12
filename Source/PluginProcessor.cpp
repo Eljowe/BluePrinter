@@ -1559,7 +1559,9 @@ void BluePrinterAudioProcessor::setLooperRecording (bool enabled)
         }
         else
         {
-            // Fresh capture: wipe the loop and start from sample 0.
+            // Fresh capture: wipe the loop and start from sample 0. The layer
+            // history no longer applies (0030).
+            clearLoopHistory();
             looperPreRollActive.store (false, std::memory_order_release);
             looperCaptureArmed.store (false, std::memory_order_release);
             audioLoopRecording.store (false, std::memory_order_release);
@@ -1608,6 +1610,8 @@ void BluePrinterAudioProcessor::setLooperRecording (bool enabled)
         if (looperOverdubCapture.exchange (false, std::memory_order_acq_rel))
         {
             audioLoopPlaying.store (false, std::memory_order_release);
+            // Snapshot the pre-layer loop for undo before mixing (0030).
+            pushLoopUndoSnapshot();
             const auto loopLength = audioLoopLength.load (std::memory_order_acquire);
             const auto layerBase  = audioLoopFullLength.load (std::memory_order_acquire);
             const auto layerLength = overdubWritePos.load (std::memory_order_acquire) - layerBase;
@@ -1654,6 +1658,8 @@ void BluePrinterAudioProcessor::trimLooperToMusicalGrid()
     const auto captured = audioLoopLength.load (std::memory_order_acquire);
     if (captured <= 0 || currentSampleRate <= 0.0)
         return;
+
+    // A fresh capture replaces the loop: its layer history no longer applies.
 
     // Snap to a whole number of bars so the loop's downbeat stays on the
     // beat grid on every cycle. The old code clamped the snapped length
@@ -1872,8 +1878,152 @@ void BluePrinterAudioProcessor::setLoopCrop (int startBeats, int endBeats)
     listeners.call ([](Listener& l) { l.transportChanged(); });
 }
 
+//==============================================================================
+// Loop layer undo/redo (0030). Snapshots cover the FULL loop region and live
+// on the message thread only; the audio thread never touches the stacks.
+namespace
+{
+size_t loopSnapshotBytes (const juce::AudioBuffer<float>& b)
+{
+    return static_cast<size_t> (b.getNumSamples())
+         * static_cast<size_t> (b.getNumChannels())
+         * sizeof (float);
+}
+} // namespace
+
+void BluePrinterAudioProcessor::pushLoopUndoSnapshot()
+{
+    const auto snapshot = snapshotCurrentLoopRegion();
+    if (snapshot == nullptr)
+        return;
+
+    loopUndoStack.push_back (snapshot);
+    loopUndoBytes += loopSnapshotBytes (*snapshot);
+    trimLoopHistoryStacks();
+    loopRedoStack.clear();
+}
+
+void BluePrinterAudioProcessor::trimLoopHistoryStacks()
+{
+    while (loopUndoStack.size() > 10
+           || (loopUndoBytes > 64u * 1024u * 1024u && loopUndoStack.size() > 1))
+    {
+        loopUndoBytes -= loopSnapshotBytes (*loopUndoStack.front());
+        loopUndoStack.pop_front();
+    }
+
+    while (loopRedoStack.size() > 10)
+        loopRedoStack.pop_front();
+}
+
+bool BluePrinterAudioProcessor::canEditLoopHistory() const
+{
+    // Playback/capture must be idle, and the take recorder shares
+    // recordBuffer so its capture counts too.
+    return ! (audioLoopPlaying.load (std::memory_order_acquire)
+           || audioLoopRecording.load (std::memory_order_acquire)
+           || looperPreRollActive.load (std::memory_order_acquire)
+           || looperOverdubCapture.load (std::memory_order_acquire)
+           || looperCaptureArmed.load (std::memory_order_acquire)
+           || recordingRequested.load (std::memory_order_acquire)
+           || preRollActive.load (std::memory_order_acquire));
+}
+
+std::shared_ptr<juce::AudioBuffer<float>> BluePrinterAudioProcessor::snapshotCurrentLoopRegion()
+{
+    const auto full = audioLoopFullLength.load (std::memory_order_acquire);
+    if (recordBuffer == nullptr || full <= 0)
+        return nullptr;
+
+    const juce::ScopedLock sl (recordLock);
+    return CaptureCopy::copyRegion (*recordBuffer, 0, full);
+}
+
+void BluePrinterAudioProcessor::applyLoopSnapshot (const std::shared_ptr<juce::AudioBuffer<float>>& snapshot)
+{
+    const auto full = audioLoopFullLength.load (std::memory_order_acquire);
+    if (recordBuffer == nullptr || snapshot == nullptr || full <= 0)
+        return;
+
+    const int channels = juce::jmin (recordBuffer->getNumChannels(), snapshot->getNumChannels());
+    const int count = static_cast<int> (juce::jmin (full, static_cast<int64_t> (snapshot->getNumSamples())));
+    {
+        const juce::ScopedLock sl (recordLock);
+        for (int ch = 0; ch < channels; ++ch)
+            recordBuffer->copyFrom (ch, 0, *snapshot, ch, 0, count);
+    }
+}
+
+void BluePrinterAudioProcessor::clearLoopHistory()
+{
+    loopUndoStack.clear();
+    loopRedoStack.clear();
+    loopUndoBytes = 0;
+}
+
+void BluePrinterAudioProcessor::updateLoopClipLatch()
+{
+    const auto full = audioLoopFullLength.load (std::memory_order_acquire);
+    if (recordBuffer == nullptr || full <= 0)
+        return;
+
+    float peak = 0.0f;
+    {
+        const juce::ScopedLock sl (recordLock);
+        const int count = static_cast<int> (full);
+        for (int ch = 0; ch < recordBuffer->getNumChannels(); ++ch)
+            peak = juce::jmax (peak, recordBuffer->getMagnitude (ch, 0, count));
+    }
+
+    if (peak >= 1.0f)
+        loopPlayMeter.setPeak (peak);   // latches the clip indicator
+    else
+        loopPlayMeter.resetClip();
+}
+
+void BluePrinterAudioProcessor::undoLoopLayer()
+{
+    if (loopUndoStack.empty() || ! canEditLoopHistory())
+        return;
+
+    if (auto current = snapshotCurrentLoopRegion())
+        loopRedoStack.push_back (current);
+
+    const auto snapshot = loopUndoStack.back();
+    loopUndoStack.pop_back();
+    loopUndoBytes -= loopSnapshotBytes (*snapshot);
+
+    trimLoopHistoryStacks();
+    applyLoopSnapshot (snapshot);
+    refreshLooperPeaks();
+    updateLoopClipLatch();
+    listeners.call ([](Listener& l) { l.transportChanged(); });
+}
+
+void BluePrinterAudioProcessor::redoLoopLayer()
+{
+    if (loopRedoStack.empty() || ! canEditLoopHistory())
+        return;
+
+    if (auto current = snapshotCurrentLoopRegion())
+    {
+        loopUndoStack.push_back (current);
+        loopUndoBytes += loopSnapshotBytes (*current);
+    }
+
+    const auto snapshot = loopRedoStack.back();
+    loopRedoStack.pop_back();
+
+    trimLoopHistoryStacks();
+    applyLoopSnapshot (snapshot);
+    refreshLooperPeaks();
+    updateLoopClipLatch();
+    listeners.call ([](Listener& l) { l.transportChanged(); });
+}
+
 void BluePrinterAudioProcessor::clearLoop()
 {
+    clearLoopHistory();
     looperAutoStopPending.store (false, std::memory_order_release);
     looperPreRollActive.store (false, std::memory_order_release);
     looperCaptureArmed.store (false, std::memory_order_release);
