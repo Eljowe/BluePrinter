@@ -33,26 +33,37 @@ the capture is only ever caught by ear, and the remaining 0027 extractions
 
 ## Required change
 
-Extract the pure buffer-render steps into a `LoopPlayback` module operating on
-`juce::AudioBuffer<float>`, and cover it with headless golden tests:
+Extract the pure buffer-render steps into modules operating on
+`juce::AudioBuffer<float>`, and cover them with headless golden tests:
 
 1. `LoopPlayback::render(dest, source, start, length, position, looping,
    gain, declick, outBlockPeak)` — additive render of one block with the
    seam de-click, phase wrap, one-shot stop, and the post-gain block peak.
 2. `LoopPlayback::mixLayer(buffer, loopStart, loopLength, layerBase,
    layerLength, gain)` — the wrap-mix used by the looper and take overdubs.
+3. `ChainRouting::copyInputChannels(dest, source, mask, numChannels,
+   numSamples)` — a chain's selected-channel scratch build; and
+   `ChainRouting::sumInto(dest, source, gain, numSamples)` — the monitor /
+   record-bus sum.
+4. `CaptureWrite::write(dest, start, source, numSamples, limit)` — the
+   clamped capture-buffer write shared by the take recorder and the loop tap.
 
-`processBlock` calls them (loop playback, take-overdub playback, and
-`mixOverdubLayer`) so the DSP has one definition and is tested directly.
+`processBlock` calls them (loop playback, take-overdub playback,
+`mixOverdubLayer`, the chain scratch/mix, the loop capture tap, and
+`writeRecording`) so the DSP has one definition and is tested directly.
 
 ## Acceptance criteria
 
-- `Tests/test_LoopPlayback.cpp` covers, at minimum: a one-shot block, a
+- `Tests/test_LoopPlayback.cpp`, `Tests/test_ChainRouting.cpp` and
+  `Tests/test_CaptureWrite.cpp` cover, at minimum: a one-shot block, a
   wrapping block across a cycle boundary, the one-shot early stop, the
   de-click envelope at the seam, the reported block peak, the wrap-mix with
-  and without a partial second cycle, gain scaling, and invalid input.
-- `processBlock`'s loop playback and take-overdub playback produce the same
-  samples as before (behaviour-preserving).
+  and without a partial second cycle, gain scaling, invalid input; selected
+  vs missing channels and the monitor/record sums; and the capture write's
+  full-block, clamped, full-buffer and shared-channel cases.
+- `processBlock`'s loop playback, take-overdub playback, chain scratch/mix,
+  loop capture tap and take recorder produce the same samples as before
+  (behaviour-preserving).
 - `ctest` stays green and the WebUI/plugin targets still build in CI.
 
 ## Docs
@@ -62,9 +73,10 @@ steps are described there.
 
 ## Files
 
-`Source/LoopPlayback.h` (new), `Source/PluginProcessor.cpp`,
-`Tests/test_LoopPlayback.cpp` (new), `CMakeLists.txt`, `CONTEXT.md`,
-`README.md`.
+`Source/LoopPlayback.h`, `Source/ChainRouting.h`, `Source/CaptureWrite.h`
+(new), `Source/PluginProcessor.cpp`, `Tests/test_LoopPlayback.cpp`,
+`Tests/test_ChainRouting.cpp`, `Tests/test_CaptureWrite.cpp` (new),
+`CMakeLists.txt`, `CONTEXT.md`, `README.md`.
 
 ## Out of scope
 

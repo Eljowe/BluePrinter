@@ -371,8 +371,9 @@ grid quantization and crop math, snippet gain/normalize math and sidecar
 round-tripping,
 chain-state migration, the MIDI channel filter, metronome click synthesis,
 metronome click scheduling/ring-out, MIDI clock pulse scheduling, metering
-math, the meter level/peak/clip state, and the loop playback / overdub
-wrap-mix render. It builds a standalone
+math, the meter level/peak/clip state, the loop playback / overdub
+wrap-mix render, chain routing, and the capture-buffer write clamp. It
+builds a standalone
 console target with no WebView2, plugin host, or audio device, so it runs
 fast and everywhere.
 
