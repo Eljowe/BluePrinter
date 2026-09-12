@@ -4,13 +4,14 @@
 
 namespace LooperGrid
 {
-int64_t computeLength (int64_t capturedSamples, double sampleRate, float bpm, int64_t maxSamples)
+int64_t computeLength (int64_t capturedSamples, double sampleRate, float bpm, int64_t maxSamples,
+                       TimeSignature meter)
 {
     if (capturedSamples <= 0 || sampleRate <= 0.0)
         return 0;
 
-    const auto beat = 60.0 * sampleRate / juce::jmax (1.0f, bpm);
-    const auto bar  = beat * 4.0;
+    const auto beat = samplesPerBeat (sampleRate, bpm, meter.beatUnit);
+    const auto bar  = beat * juce::jmax (1, meter.beatsPerBar);
 
     auto target = static_cast<int64_t> (std::llround (static_cast<double> (capturedSamples) / bar) * bar);
     if (target <= 0)
@@ -19,23 +20,24 @@ int64_t computeLength (int64_t capturedSamples, double sampleRate, float bpm, in
     return juce::jlimit<int64_t> (1, juce::jmax<int64_t> (1, maxSamples), target);
 }
 
-int64_t computeFixedLengthSamples (int bars, double sampleRate, float bpm)
+int64_t computeFixedLengthSamples (int bars, double sampleRate, float bpm, TimeSignature meter)
 {
     if (bars <= 0 || sampleRate <= 0.0)
         return 0;
 
-    const auto beat = 60.0 * sampleRate / juce::jmax (1.0f, bpm);
-    return static_cast<int64_t> (std::llround (static_cast<double> (bars) * 4.0 * beat));
+    const auto beat = samplesPerBeat (sampleRate, bpm, meter.beatUnit);
+    return static_cast<int64_t> (std::llround (
+        static_cast<double> (bars) * juce::jmax (1, meter.beatsPerBar) * beat));
 }
 
 Crop computeCrop (int64_t fullSamples, double sampleRate, float bpm,
-                  int startBeats, int endBeats)
+                  int startBeats, int endBeats, TimeSignature meter)
 {
     Crop crop;
     if (fullSamples <= 0 || sampleRate <= 0.0)
         return crop;
 
-    const auto beat = 60.0 * sampleRate / juce::jmax (1.0f, bpm);
+    const auto beat = samplesPerBeat (sampleRate, bpm, meter.beatUnit);
     // Total beats of the FULL loop — crops are measured against this, never
     // against the already-cropped window, so moving a crop handle back
     // toward 0 restores the region it cut off.

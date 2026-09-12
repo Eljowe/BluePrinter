@@ -1,4 +1,5 @@
 #include "MetronomePlayer.h"
+#include "LooperGridMath.h"
 
 #include <algorithm>
 #include <cmath>
@@ -10,11 +11,12 @@ MetronomePlayer::MetronomePlayer()
     activeClicks.reserve (16);
 }
 
-void MetronomePlayer::setContext (double newSampleRate, double newBpm, int newBeatsPerBar)
+void MetronomePlayer::setContext (double newSampleRate, double newBpm, int newBeatsPerBar, int newBeatUnit)
 {
     sampleRate  = newSampleRate;
     bpm         = newBpm;
     beatsPerBar = newBeatsPerBar;
+    beatUnit    = newBeatUnit > 0 ? newBeatUnit : 4;
 }
 
 void MetronomePlayer::reset()
@@ -70,7 +72,9 @@ void MetronomePlayer::render (juce::AudioBuffer<float>& buffer,
     if (bpm <= 0.0 || sampleRate <= 0.0)
         return;
 
-    const double samplesPerBeat = 60.0 / bpm * sampleRate;
+    // BPM is quarter-note referenced; the shared grid helper derives the beat
+    // from the denominator.
+    const double samplesPerBeat = LooperGrid::samplesPerBeat (sampleRate, static_cast<float> (bpm), beatUnit);
     if (samplesPerBeat <= 0.0)
         return;
 
@@ -104,8 +108,7 @@ void MetronomePlayer::render (juce::AudioBuffer<float>& buffer,
      && (accentClick == nullptr || accentClick->empty()))
         return;
 
-    // Accent the first beat of every bar. Falls back to 4-beat bars when
-    // the count-in is disabled so the accent still works while recording.
+    // Accent the first beat of every bar, sized by the current numerator.
     const int barLength = juce::jmax (1, beatsPerBar);
 
     const int firstBeat = static_cast<int> (std::ceil (static_cast<double> (startPos) / samplesPerBeat));

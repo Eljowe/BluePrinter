@@ -86,3 +86,25 @@ BP_TEST (MetronomePlayer_resetAndBackwardJumpDropRingingClicks)
     player.render (b, 24064, 64, tick, accent); // no beat in range
     BP_CHECK_NEAR (sumAbs (b), 0.0f, 0.0001f);
 }
+
+BP_TEST (MetronomePlayer_accentsFirstBeatOfAMeterBar)
+{
+    // 6/8 at 120 BPM @ 48 kHz: the beat is an eighth = 12000 samples and a bar
+    // is 6 beats. Distinguish accent from tick by value.
+    auto tick = makeClickBuffer (10, 1.0f);
+    auto accent = makeClickBuffer (10, 2.0f);
+
+    auto renderBeat = [&] (juce::int64 pos)
+    {
+        MetronomePlayer p;
+        p.setContext (48000.0, 120.0, 6, 8);
+        juce::AudioBuffer<float> block (1, 10);
+        block.clear();
+        p.render (block, pos, 10, tick, accent);
+        return block.getSample (0, 0);
+    };
+
+    BP_CHECK_NEAR (renderBeat (0),     2.0f, 0.001f);   // bar downbeat
+    BP_CHECK_NEAR (renderBeat (12000), 1.0f, 0.001f);   // beat 2
+    BP_CHECK_NEAR (renderBeat (72000), 2.0f, 0.001f);   // next bar downbeat
+}

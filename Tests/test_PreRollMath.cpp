@@ -17,3 +17,10 @@ BP_TEST (PreRoll_completesImmediatelyWithNothingToCount)
     BP_CHECK (PreRoll::isComplete (0, 48000.0, 0.0f, 4));
     BP_CHECK (PreRoll::isComplete (0, 0.0, 120.0f, 4));
 }
+
+BP_TEST (PreRoll_countsDenominatorBeats)
+{
+    // 6/8 at 120 BPM @ 48 kHz: the beat is an eighth = 12000 samples.
+    BP_CHECK (! PreRoll::isComplete (36000, 48000.0, 120.0f, 4, 8));   // 3 eighths
+    BP_CHECK (PreRoll::isComplete (48000, 48000.0, 120.0f, 4, 8));     // 4 eighths
+}

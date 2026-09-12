@@ -705,10 +705,12 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     // the same block) advances exactly once per block.
     bool clockAdvancedThisBlock = false;
 
-    // Tempo context for the metronome player, read once per block.
+    // Tempo + meter context for the metronome player, read once per block.
+    const auto meter = currentTimeSignature();
     metronomePlayer.setContext (currentSampleRate,
                                 bpm.load (std::memory_order_acquire),
-                                countInBeats.load (std::memory_order_acquire));
+                                meter.beatsPerBar,
+                                meter.beatUnit);
 
     // Apply the input trim (the record level). This is the post-DSP
     // signal we want to record and the pass-through signal when nothing
@@ -885,7 +887,8 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             const auto target = juce::jmin (
                 LooperGrid::computeFixedLengthSamples (looperLengthBars.load (std::memory_order_acquire),
                                                        currentSampleRate,
-                                                       bpm.load (std::memory_order_acquire)),
+                                                       bpm.load (std::memory_order_acquire),
+                                                       meter),
                 static_cast<int64_t> (maxRecordSamples));
 
             if (target > 0 && audioLoopLength.load (std::memory_order_acquire) >= target)
@@ -1014,7 +1017,8 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         const bool done = PreRoll::isComplete (
             newPos, currentSampleRate,
             bpm.load (std::memory_order_acquire),
-            looperCountInBeats.load (std::memory_order_acquire));
+            looperCountInBeats.load (std::memory_order_acquire),
+            meter.beatUnit);
 
         if (done)
         {
@@ -1058,7 +1062,8 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         const bool done = PreRoll::isComplete (
             newPos, currentSampleRate,
             bpm.load (std::memory_order_acquire),
-            countInBeats.load (std::memory_order_acquire));
+            countInBeats.load (std::memory_order_acquire),
+            meter.beatUnit);
 
         if (done)
         {
@@ -1555,7 +1560,8 @@ void BluePrinterAudioProcessor::trimLooperToMusicalGrid()
     // is preserved. The math lives in LooperGrid::computeLength so it can
     // be unit tested.
     const auto target = LooperGrid::computeLength (captured, currentSampleRate, bpm.load(),
-                                                   static_cast<int64_t> (maxRecordSamples));
+                                                   static_cast<int64_t> (maxRecordSamples),
+                                                   currentTimeSignature());
     if (target <= 0)
         return;
 
@@ -1741,7 +1747,8 @@ void BluePrinterAudioProcessor::setLoopCrop (int startBeats, int endBeats)
     // Crop math (whole beats measured against the FULL loop, so moving a
     // handle back restores what it cut) lives in LooperGrid::computeCrop.
     const auto crop = LooperGrid::computeCrop (full, currentSampleRate,
-                                               bpm.load(), startBeats, endBeats);
+                                               bpm.load(), startBeats, endBeats,
+                                               currentTimeSignature());
     looperCropStartBeats = crop.startBeats;
     looperCropEndBeats   = crop.endBeats;
 
@@ -2207,6 +2214,35 @@ void BluePrinterAudioProcessor::setBpm (float newBpm)
     if (juce::approximatelyEqual (bpm.load (std::memory_order_acquire), clamped))
         return;
     bpm.store (clamped, std::memory_order_release);
+    listeners.call ([](Listener& l) { l.transportChanged(); });
+}
+
+// Notated meter. Only standard denominators are accepted; anything else falls
+// back to 4. Changing it never re-times existing loop audio — the grid trim,
+// fixed-length target, crop beats and click accents use it going forward.
+void BluePrinterAudioProcessor::setTimeSignature (int numerator, int denominator)
+{
+    // Only the supported meters are accepted (mirrors the UI selector); any
+    // other pair falls back to 4/4.
+    static const std::pair<int, int> supported[] = {
+        { 2, 4 }, { 3, 4 }, { 4, 4 }, { 5, 4 }, { 6, 8 }, { 7, 8 }, { 9, 8 }, { 12, 8 }
+    };
+    int n = 4, d = 4;
+    for (const auto& m : supported)
+    {
+        if (m.first == numerator && m.second == denominator)
+        {
+            n = numerator;
+            d = denominator;
+            break;
+        }
+    }
+
+    if (timeSignatureNumerator.load (std::memory_order_acquire) == n
+        && timeSignatureDenominator.load (std::memory_order_acquire) == d)
+        return;
+    timeSignatureNumerator.store (n, std::memory_order_release);
+    timeSignatureDenominator.store (d, std::memory_order_release);
     listeners.call ([](Listener& l) { l.transportChanged(); });
 }
 
@@ -3482,6 +3518,8 @@ void BluePrinterAudioProcessor::getStateInformation (juce::MemoryBlock& destData
     state.setProperty ("bpm",              bpm.load(),              nullptr);
     state.setProperty ("countInBeats",     countInBeats.load(),     nullptr);
     state.setProperty ("looperLengthBars", looperLengthBars.load(), nullptr);
+    state.setProperty ("timeSignatureNumerator",   timeSignatureNumerator.load(),   nullptr);
+    state.setProperty ("timeSignatureDenominator", timeSignatureDenominator.load(), nullptr);
     state.setProperty ("loopLevel",        loopLevel.load(),        nullptr);
     state.setProperty ("dryLevel",         dryLevel.load(),         nullptr);
     state.setProperty ("overdubLevel",     overdubLevel.load(),     nullptr);
@@ -3536,6 +3574,10 @@ void BluePrinterAudioProcessor::setStateInformation (const void* data, int sizeI
             countInBeats.store     (static_cast<int>   (state.getProperty ("countInBeats",     4)));
             looperLengthBars.store (static_cast<int>   (state.getProperty ("looperLengthBars", 0)),
                                     std::memory_order_release);
+            timeSignatureNumerator.store (static_cast<int> (state.getProperty ("timeSignatureNumerator", 4)),
+                                          std::memory_order_release);
+            timeSignatureDenominator.store (static_cast<int> (state.getProperty ("timeSignatureDenominator", 4)),
+                                            std::memory_order_release);
             loopLevel.store        (static_cast<float> (state.getProperty ("loopLevel",        0.0f)));
             dryLevel.store         (static_cast<float> (state.getProperty ("dryLevel",         0.0f)));
             overdubLevel.store     (static_cast<float> (state.getProperty ("overdubLevel",     0.0f)));

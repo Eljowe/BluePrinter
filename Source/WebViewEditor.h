@@ -78,6 +78,8 @@ public:
     static constexpr const char* frontendRenameTagEvent        = "frontendRenameTag";
     static constexpr const char* frontendSetMetronomeEvent     = "frontendSetMetronome";
     static constexpr const char* frontendSetBpmEvent           = "frontendSetBpm";
+    // Notated meter: { numerator, denominator } (e.g. { 6, 8 }).
+    static constexpr const char* frontendSetTimeSignatureEvent  = "frontendSetTimeSignature";
     static constexpr const char* frontendSetCountInBeatsEvent  = "frontendSetCountInBeats";
     static constexpr const char* frontendSetDryLevelEvent      = "frontendSetDryLevel";
     static constexpr const char* frontendSetLoopLevelEvent     = "frontendSetLoopLevel";

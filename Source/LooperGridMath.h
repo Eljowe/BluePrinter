@@ -8,26 +8,44 @@
 // tested without an audio device. Stateless and free of processor state.
 namespace LooperGrid
 {
+    // Notated time signature. BPM is a quarter-note tempo (the MIDI/DAW
+    // convention), so the beat is the denominator note: an eighth beat in 6/8
+    // is half a quarter.
+    struct TimeSignature
+    {
+        int beatsPerBar = 4;   // numerator
+        int beatUnit   = 4;    // denominator (note value that gets the beat)
+    };
+
+    // Samples per notated beat at `bpm` (quarter-note referenced).
+    inline double samplesPerBeat (double sampleRate, float bpm, int beatUnit = 4)
+    {
+        const auto quarter = 60.0 * sampleRate / juce::jmax (1.0f, bpm);
+        const int unit = beatUnit > 0 ? beatUnit : 4;
+        return quarter * 4.0 / static_cast<double> (unit);
+    }
+
     // Whole-bar-snapped length (in samples) for a raw capture.
     //
     // The loop length is rounded to the nearest whole bar at the given
-    // tempo (4 beats per bar); a capture shorter than half a bar falls
-    // back to whole beats so it still lands on the grid; the result is
-    // clamped to [1, maxSamples]. Returns 0 when the capture or sample
-    // rate is non-positive (nothing to trim). A short capture is expected
-    // to be zero-padded by the caller, and an overlong one truncated.
+    // tempo and meter; a capture shorter than half a bar falls back to whole
+    // beats so it still lands on the grid; the result is clamped to
+    // [1, maxSamples]. Returns 0 when the capture or sample rate is
+    // non-positive (nothing to trim). A short capture is expected to be
+    // zero-padded by the caller, and an overlong one truncated.
     int64_t computeLength (int64_t capturedSamples,
                            double sampleRate,
                            float bpm,
-                           int64_t maxSamples);
+                           int64_t maxSamples,
+                           TimeSignature meter = {});
 
-    // Fixed capture target (0022) in samples for `bars` bars (4 beats
-    // each) at the given tempo/sample rate. Returns 0 for a non-positive
-    // bar count or invalid sample rate. The caller clamps to its record
-    // buffer capacity.
+    // Fixed capture target (0022) in samples for `bars` bars at the given
+    // tempo/sample rate. Returns 0 for a non-positive bar count or invalid
+    // sample rate. The caller clamps to its record buffer capacity.
     int64_t computeFixedLengthSamples (int bars,
                                        double sampleRate,
-                                       float bpm);
+                                       float bpm,
+                                       TimeSignature meter = {});
 
     // A whole-beat crop of a captured loop. `startBeats` is trimmed off the
     // front, `endBeats` off the back; the caller plays
@@ -47,7 +65,8 @@ namespace LooperGrid
                       double sampleRate,
                       float bpm,
                       int startBeats,
-                      int endBeats);
+                      int endBeats,
+                      TimeSignature meter = {});
 
     // Silences [captured, target) in every channel, so a short capture is
     // zero-padded out to the grid boundary. No-op when target <= captured

@@ -61,6 +61,9 @@ export const FRONTEND_EVENTS = {
   renameTag: "frontendRenameTag",
   setMetronome: "frontendSetMetronome",
   setBpm: "frontendSetBpm",
+  // Notated meter: { numerator, denominator } (e.g. { 6, 8 }). BPM stays a
+  // quarter-note tempo; an eighth beat is half a quarter.
+  setTimeSignature: "frontendSetTimeSignature",
   setCountInBeats: "frontendSetCountInBeats",
   // Monitor-only playback level for the looper in dB (-60..+12).
   // { level }

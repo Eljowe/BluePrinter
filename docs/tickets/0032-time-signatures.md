@@ -1,7 +1,7 @@
 ---
 id: "0032"
 title: "Time signatures beyond 4/4"
-status: ready-for-agent
+status: done
 blocked_by: []
 ---
 

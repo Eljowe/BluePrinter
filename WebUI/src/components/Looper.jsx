@@ -66,13 +66,21 @@ function Stepper({ label, value, min, max, onChange, title }) {
 
 // Formats a beat count for captions: whole bars when possible, beats
 // otherwise (crop is beat-granular).
-function formatBeats(beats) {
+function formatBeats(beats, beatsPerBar = 4) {
   if (beats <= 0) return "0 beats";
-  if (beats % 4 === 0) {
-    const bars = beats / 4;
+  if (beats % beatsPerBar === 0) {
+    const bars = beats / beatsPerBar;
     return `${bars} bar${bars === 1 ? "" : "s"}`;
   }
   return `${beats} beats`;
+}
+
+// Samples per notated beat at `bpm` (a quarter-note tempo): an eighth beat
+// (beatUnit 8) is half a quarter. Shared by the loop waveform/beat math and
+// the count-in countdown so they agree with the backend grid.
+function meterBeatSamples(bpm, sampleRate, beatUnit) {
+  if (!(bpm > 0) || !(sampleRate > 0)) return 0;
+  return (60.0 / bpm) * sampleRate * (4 / Math.max(1, beatUnit));
 }
 
 // A labelled switch for a session-only loop playback mode (0036). Disabled
@@ -106,6 +114,10 @@ export function Looper({ transport, onOverdubChange, onLoopLevelChange, onOverdu
   const halfSpeed = Boolean(transport?.loopPlaybackHalfSpeed);
   const lengthBars = Number(transport?.looperLengthBars ?? 0);
   const fixedBars = lengthBars > 0;
+  // Notated meter. BPM is a quarter-note tempo, so the beat is the
+  // denominator note (an eighth in 6/8, half a quarter).
+  const beatsPerBar = Math.max(1, Number(transport?.timeSignatureNumerator ?? 4));
+  const beatUnit = Math.max(1, Number(transport?.timeSignatureDenominator ?? 4));
 
   const loopLength = Number(transport?.audioLoopLength ?? 0);
   const hasLoop = loopLength > 0;
@@ -129,15 +141,16 @@ export function Looper({ transport, onOverdubChange, onLoopLevelChange, onOverdu
 
   // The captured loop is trimmed to whole bars, so the beat count can be
   // derived from the current BPM/sample rate.
-  const beatSamples = Number(transport?.bpm ?? 120) > 0 && Number(transport?.recordingSampleRate ?? 0) > 0
-    ? (60.0 / Number(transport.bpm)) * Number(transport.recordingSampleRate)
-    : 0;
+  const beatSamples = meterBeatSamples(
+    Number(transport?.bpm ?? 120),
+    Number(transport?.recordingSampleRate ?? 0),
+    beatUnit);
 
   // Fresh-capture progress: the timeline fills as the capture grows toward
   // the record buffer's capacity — or, in fixed-length mode, toward the
   // chosen bar count so the auto-stop is visible.
   const captureMax = Number(transport?.maxRecordSamples ?? 0);
-  const captureTarget = fixedBars && beatSamples > 0 ? lengthBars * 4 * beatSamples : 0;
+  const captureTarget = fixedBars && beatSamples > 0 ? lengthBars * beatsPerBar * beatSamples : 0;
   const captureDenominator = fixedBars && captureTarget > 0 ? captureTarget : captureMax;
   const capturePct = captureDenominator > 0 && isRecording && !isOverdubbing
     ? Math.min(100, Math.max(0, (loopLength / captureDenominator) * 100))
@@ -156,12 +169,12 @@ export function Looper({ transport, onOverdubChange, onLoopLevelChange, onOverdu
   // X-axis ruler: a tick per beat with the bar boundaries emphasised, and a
   // number under each bar. Long loops thin the numbers out so they never
   // collide, and drop the per-beat ticks once they'd read as noise.
-  const totalBars = totalBeats > 0 ? Math.ceil(totalBeats / 4) : 0;
+  const totalBars = totalBeats > 0 ? Math.ceil(totalBeats / beatsPerBar) : 0;
   const showBeatTicks = totalBeats > 0 && totalBeats <= 32;
   const barLabelStep = totalBars > 24 ? 4 : totalBars > 12 ? 2 : 1;
   const barNumberLabels = [];
   for (let bar = 0; bar < totalBars; bar += barLabelStep) {
-    const centerBeat = bar * 4 + 2;
+    const centerBeat = bar * beatsPerBar + beatsPerBar / 2;
     if (centerBeat > totalBeats) break;
     const pct = (centerBeat / totalBeats) * 100;
     if (pct > 97) break;
@@ -180,7 +193,10 @@ export function Looper({ transport, onOverdubChange, onLoopLevelChange, onOverdu
   // count down from the configured count-in length.
   let countdown = null;
   if (preRoll && Number(transport?.bpm ?? 0) > 0 && Number(transport?.recordingSampleRate ?? 0) > 0) {
-    const samplesPerBeat = (60.0 / Number(transport.bpm)) * Number(transport.recordingSampleRate);
+    const samplesPerBeat = meterBeatSamples(
+      Number(transport.bpm),
+      Number(transport.recordingSampleRate),
+      beatUnit);
     const currentBeat = Math.floor((Number(transport.transportPosition ?? 0)) / samplesPerBeat);
     countdown = Math.max(1, countInBeats - currentBeat);
   }
@@ -270,16 +286,16 @@ export function Looper({ transport, onOverdubChange, onLoopLevelChange, onOverdu
         </div>
         <div className="looper-state" aria-live="polite">
           <span className="looper-state-dot" />
-          {preRoll ? "Count-in" : isOverdubbing ? "Overdub" : recording ? (fixedBars ? `Recording · ${lengthBars} bar${lengthBars === 1 ? "" : "s"}` : "Recording") : playing ? "Playing" : hasLoop ? `${formatBeats(croppedBeats)} loop ready` : "Empty"}
+          {preRoll ? "Count-in" : isOverdubbing ? "Overdub" : recording ? (fixedBars ? `Recording · ${lengthBars} bar${lengthBars === 1 ? "" : "s"}` : "Recording") : playing ? "Playing" : hasLoop ? `${formatBeats(croppedBeats, beatsPerBar)} loop ready` : "Empty"}
         </div>
       </div>
 
-      <div className={`looper-timeline ${preRoll ? "is-counting-in" : ""}`} aria-label={`${formatBeats(croppedBeats)} loop`}>
+      <div className={`looper-timeline ${preRoll ? "is-counting-in" : ""}`} aria-label={`${formatBeats(croppedBeats, beatsPerBar)} loop`}>
         <div
           className="looper-ruler"
           style={hasLoop && totalBeats > 0 ? {
-            "--beat-width": showBeatTicks ? `${100 / totalBeats}%` : `${400 / totalBeats}%`,
-            "--bar-width": `${400 / totalBeats}%`,
+            "--beat-width": showBeatTicks ? `${100 / totalBeats}%` : `${(100 * beatsPerBar) / totalBeats}%`,
+            "--bar-width": `${(100 * beatsPerBar) / totalBeats}%`,
           } : undefined}
         />
         {isRecording && !isOverdubbing && capturePct > 0 ? (
@@ -306,7 +322,7 @@ export function Looper({ transport, onOverdubChange, onLoopLevelChange, onOverdu
           </div>
         ) : null}
         <div className="looper-timeline-caption">
-          <span>{hasLoop ? formatBeats(croppedBeats) : "No loop captured yet"}</span>
+          <span>{hasLoop ? formatBeats(croppedBeats, beatsPerBar) : "No loop captured yet"}</span>
           <span>{looping ? "LOOP" : "ONE SHOT"}</span>
         </div>
       </div>
@@ -410,7 +426,7 @@ export function Looper({ transport, onOverdubChange, onLoopLevelChange, onOverdu
                 className="looper-length-select"
                 value={fixedBars ? String(lengthBars) : "0"}
                 onChange={(e) => emit(FRONTEND_EVENTS.setLooperLengthBars, { bars: Number(e.target.value) })}
-                title="Fixed capture length — the capture stops itself after this many bars (4 beats each). Free stops when you stop."
+                title={`Fixed capture length — the capture stops itself after this many bars (${beatsPerBar} beat${beatsPerBar === 1 ? "" : "s"} each). Free stops when you stop.`}
               >
                 <option value="0">Free</option>
                 <option value="1">1 bar</option>
@@ -470,7 +486,7 @@ export function Looper({ transport, onOverdubChange, onLoopLevelChange, onOverdu
               min={0}
               max={!recording && totalBeats > 0 ? Math.max(0, totalBeats - 1 - cropEndBeats) : 0}
               onChange={(beats) => emitCrop(beats, cropEndBeats)}
-              title="Beats to trim off the start of the loop (4 beats per bar)"
+              title={`Beats to trim off the start of the loop (${beatsPerBar} beats per bar)`}
             />
 
             <Stepper
@@ -479,7 +495,7 @@ export function Looper({ transport, onOverdubChange, onLoopLevelChange, onOverdu
               min={0}
               max={!recording && totalBeats > 0 ? Math.max(0, totalBeats - 1 - cropStartBeats) : 0}
               onChange={(beats) => emitCrop(cropStartBeats, beats)}
-              title="Beats to trim off the end of the loop (4 beats per bar)"
+              title={`Beats to trim off the end of the loop (${beatsPerBar} beats per bar)`}
             />
           </div>
         </div>

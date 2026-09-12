@@ -249,6 +249,7 @@ Events flow through `window.__JUCE__.backend`:
 | `frontendChooseLibraryFolder` / `frontendOpenLibraryFolder` | Pick / open the library folder                   |
 | `frontendRefreshLibrary` / `frontendGetSnippets`          | Re-scan the folder / request a fresh snapshot      |
 | `frontendSetMetronome` / `frontendSetBpm` / `frontendSetCountInBeats` | Metronome + count-in settings        |
+| `frontendSetTimeSignature`                                | Notated meter `{ numerator, denominator }` (default 4/4; drives the click accents, grid trim and crop beats) |
 | `frontendSetMidiClock` / `frontendSetMidiDevice`          | MIDI clock output on/off + output device           |
 | `frontendSetLooperRecording` / `...Playing` / `...Looping` | Looper: record / play / loop toggle              |
 | `frontendSetLooperClick` / `frontendSetLooperCountIn` / `frontendSetLooperClickDuringCapture` | Looper: click + count-in beats + click-through-capture gate |
@@ -309,16 +310,22 @@ produce, so the loop sounds exactly like what you heard while recording:
   field, and the **Clock** / **Clock: on record** MIDI clock toggles — plus
   the global **Click sound** tuning (pitch/snap/volume) in the sync strip
   beside the recording tabs, which the take and the looper share.
-- On stop, the captured length is trimmed to the nearest full 4/4 bar
-  (beat-length fallback). The **Length** selector picks **Free** (stop when
-  you stop) or a fixed **1 / 2 / 4 / 8 bars**: in fixed mode the capture
-  stops itself once that many bars have been recorded (driven off the same
-  BPM/sample-rate bar math as the count-in), then the usual grid trim stores
-  exactly N bars so the loop never drifts. **Crop start / end** steppers trim
-  in **whole beats** (4 per bar at the current BPM) off either side — the
-  audible window is `[audioLoopStart, audioLoopStart + audioLoopLength)`. The
-  timeline shows a live waveform of the cropped loop, with the trimmed
-  regions shaded.
+- On stop, the captured length is trimmed to the nearest whole bar in the
+  current **meter** (beat-length fallback). The **Length** selector picks
+  **Free** (stop when you stop) or a fixed **1 / 2 / 4 / 8 bars**: in fixed
+  mode the capture stops itself once that many bars have been recorded
+  (driven off the same BPM/sample-rate/meter bar math as the count-in), then
+  the usual grid trim stores exactly N bars so the loop never drifts.
+  **Crop start / end** steppers trim in **whole beats** (one per denominator
+  note) off either side — the audible window is
+  `[audioLoopStart, audioLoopStart + audioLoopLength)`. The timeline shows a
+  live waveform of the cropped loop, with the trimmed regions shaded.
+- The **Meter** selector in the sync strip sets the time signature
+  (2/4, 3/4, 4/4, 5/4, 6/8, 7/8, 9/8, 12/8; default 4/4). BPM stays a
+  quarter-note tempo, so in 6/8 the beat is an eighth (half a quarter). The
+  meter drives the grid trim, the fixed-length target, the crop beats and
+  the click's bar accents. Changing it never re-times existing loop audio —
+  it applies to future captures and the click.
 - Playback mixes the loop over the live input, post-chain (the loop audio is
   already processed, so it isn't re-run through the chains), with a seam
   de-click at the wrap point. Loop/one-shot is toggleable. **Reverse** and
