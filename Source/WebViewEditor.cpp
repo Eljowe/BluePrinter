@@ -643,6 +643,26 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
             if (owner != nullptr)
                 owner->handleSetChainMidiChannels (data);
         })
+        .withEventListener(BluePrinterWebViewEditor::frontendSaveChainPresetEvent, [owner](juce::var data)
+        {
+            if (owner != nullptr)
+                owner->handleSaveChainPreset (data);
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendLoadChainPresetEvent, [owner](juce::var data)
+        {
+            if (owner != nullptr)
+                owner->handleLoadChainPreset (data);
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendRenameChainPresetEvent, [owner](juce::var data)
+        {
+            if (owner != nullptr)
+                owner->handleRenameChainPreset (data);
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendDeleteChainPresetEvent, [owner](juce::var data)
+        {
+            if (owner != nullptr)
+                owner->handleDeleteChainPreset (data);
+        })
         .withEventListener(BluePrinterWebViewEditor::frontendResizeEditorEvent, [owner](juce::var data)
         {
             if (owner != nullptr)
@@ -1619,6 +1639,7 @@ void BluePrinterWebViewEditor::emitVst3ChainSnapshot()
 
     obj->setProperty ("restoreError", audioProcessor.getLastChainRestoreError());
     obj->setProperty ("restoring", audioProcessor.isChainRestoreInProgress());
+    obj->setProperty ("chainPresets", audioProcessor.getChainPresetsSnapshot());
 
     webView.emitEventIfBrowserIsVisible (juce::Identifier (backendVst3ChainEvent), juce::var (obj));
 }
@@ -1772,6 +1793,78 @@ void BluePrinterWebViewEditor::handleSetChainMidiChannels (const juce::var& data
     }
     if (chainId.isNotEmpty())
         audioProcessor.setChainMidiChannels (chainId, mask);
+}
+
+void BluePrinterWebViewEditor::handleSaveChainPreset (const juce::var& data)
+{
+    const auto chainId = getStringProp (data, "chain", defaultChainId());
+    const auto name = getStringProp (data, "name", {});
+    const bool overwrite = static_cast<bool> (data.getProperty ("overwrite", false));
+
+    juce::String error;
+    if (! audioProcessor.saveChainPreset (chainId, name, overwrite, error))
+    {
+        sendNotification (error == "exists"
+                              ? "A preset named \"" + name.trim() + "\" already exists."
+                              : (error.isNotEmpty() ? error : "Could not save the preset."),
+                          "error");
+        return;
+    }
+
+    sendNotification ("Saved preset \"" + name.trim() + "\".", "ok");
+    emitVst3ChainSnapshot();
+}
+
+void BluePrinterWebViewEditor::handleLoadChainPreset (const juce::var& data)
+{
+    const auto chainId = getStringProp (data, "chain", defaultChainId());
+    const auto file = getStringProp (data, "file", {});
+
+    juce::String error, warning;
+    if (! audioProcessor.loadChainPreset (chainId, file, error, warning))
+    {
+        sendNotification (error.isNotEmpty() ? error : "Could not load the preset.", "error");
+        return;
+    }
+
+    sendNotification (warning.isNotEmpty() ? warning : juce::String ("Loaded preset."),
+                      warning.isNotEmpty() ? "info" : "ok");
+    emitVst3ChainSnapshot();
+}
+
+void BluePrinterWebViewEditor::handleRenameChainPreset (const juce::var& data)
+{
+    const auto file = getStringProp (data, "file", {});
+    const auto name = getStringProp (data, "name", {});
+    const bool overwrite = static_cast<bool> (data.getProperty ("overwrite", false));
+
+    juce::String error;
+    if (! audioProcessor.renameChainPreset (file, name, overwrite, error))
+    {
+        sendNotification (error == "exists"
+                              ? "A preset named \"" + name.trim() + "\" already exists."
+                              : (error.isNotEmpty() ? error : "Could not rename the preset."),
+                          "error");
+        return;
+    }
+
+    sendNotification ("Renamed preset to \"" + name.trim() + "\".", "ok");
+    emitVst3ChainSnapshot();
+}
+
+void BluePrinterWebViewEditor::handleDeleteChainPreset (const juce::var& data)
+{
+    const auto file = getStringProp (data, "file", {});
+
+    juce::String error;
+    if (! audioProcessor.deleteChainPreset (file, error))
+    {
+        sendNotification (error.isNotEmpty() ? error : "Could not delete the preset.", "error");
+        return;
+    }
+
+    sendNotification ("Deleted preset.", "ok");
+    emitVst3ChainSnapshot();
 }
 
 void BluePrinterWebViewEditor::handleResizeEditor (const juce::var& data)

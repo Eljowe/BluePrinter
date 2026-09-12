@@ -234,6 +234,32 @@ public:
     // the UI.
     void setChainWantsMidi (const juce::String& chainId, bool enabled);
 
+    // Named chain presets (0033). One JSON file per preset under
+    // %APPDATA%/Retrokielto/chain-presets; the payload is the chain's rig
+    // only (see ChainPreset.h). Message-thread only.
+    // Snapshot shape: [{ name, file }] where `file` is the stable id.
+    juce::var getChainPresetsSnapshot() const;
+    juce::File getChainPresetsFolder() const;
+    // Save the chain's rig as a named preset. When a preset of that file
+    // name already exists and overwrite is false, returns false with
+    // outError == "exists" so the caller can ask for confirmation. Refused
+    // while the chain still has pending (restoring) slots.
+    bool saveChainPreset (const juce::String& chainId, const juce::String& presetName,
+                          bool overwrite, juce::String& outError);
+    // Load a preset into a chain, replacing its slots via the deferred
+    // restore driver. Returns false (outError set) when the target chain is
+    // busy or the document is invalid. outWarning reports non-fatal problems
+    // (unknown fields, skipped/missing/quarantined plugins) while the rest
+    // still load.
+    bool loadChainPreset (const juce::String& chainId, const juce::String& file,
+                          juce::String& outError, juce::String& outWarning);
+    // Rename / delete a preset by its file stem. Rename overwrites an
+    // existing target only when `overwrite` is true (else outError ==
+    // "exists").
+    bool renameChainPreset (const juce::String& file, const juce::String& newName,
+                            bool overwrite, juce::String& outError);
+    bool deleteChainPreset (const juce::String& file, juce::String& outError);
+
     // Folder-wide VST3 metadata shared between both chains: the
     // blocklist of plugins to skip and the cached scan result.
     Vst3Library&       getVst3Library()       { return vst3Library; }

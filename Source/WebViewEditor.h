@@ -137,6 +137,12 @@ public:
     static constexpr const char* frontendSetChainMonitorSoloEvent = "frontendSetChainMonitorSolo";
     static constexpr const char* frontendSetChainMonitorMuteEvent = "frontendSetChainMonitorMute";
     static constexpr const char* frontendSetChainMidiChannelsEvent = "frontendSetChainMidiChannels";
+    // Named chain presets (0033): save { chain, name, overwrite }, load
+    // { chain, file }, rename { file, name, overwrite }, delete { file }.
+    static constexpr const char* frontendSaveChainPresetEvent   = "frontendSaveChainPreset";
+    static constexpr const char* frontendLoadChainPresetEvent   = "frontendLoadChainPreset";
+    static constexpr const char* frontendRenameChainPresetEvent = "frontendRenameChainPreset";
+    static constexpr const char* frontendDeleteChainPresetEvent = "frontendDeleteChainPreset";
     // { dWidth } — device-pixel width delta from the WebUI's corner resize
     // grip (the window has no OS/host resize border). The editor applies
     // the locked aspect ratio + size limits and resizes its window.
@@ -188,6 +194,11 @@ public:
     // the WebUI corner grip, preserving the locked aspect ratio.
     void handleResizeEditor (const juce::var& data);
     void handleSetChainMidiChannels (const juce::var& data);
+    // Named chain presets (0033).
+    void handleSaveChainPreset (const juce::var& data);
+    void handleLoadChainPreset (const juce::var& data);
+    void handleRenameChainPreset (const juce::var& data);
+    void handleDeleteChainPreset (const juce::var& data);
     // (Re)wire the per-chain onSlotRemoved callbacks and drop editor
     // windows for chains that no longer exist. Called after the chain
     // list changes so a removed slot/chain always closes its windows.

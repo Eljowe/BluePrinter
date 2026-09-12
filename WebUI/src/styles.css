@@ -3705,3 +3705,124 @@ html:has(.bp-splash) {
   margin-left: auto;
   opacity: 0.7;
 }
+
+/* Named chain presets (0033) — per-chain menu in the chain header. */
+.fx-presets {
+  position: relative;
+}
+
+.fx-presets > summary {
+  list-style: none;
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 700;
+  color: var(--ink-3);
+  border: 2px solid var(--line);
+  background: var(--panel);
+  padding: 4px 8px;
+  user-select: none;
+}
+
+.fx-presets > summary::-webkit-details-marker {
+  display: none;
+}
+
+.fx-presets[open] > summary {
+  color: var(--ink);
+  border-color: var(--accent);
+}
+
+.fx-presets-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 40;
+  width: 260px;
+  padding: 10px;
+  background: var(--panel);
+  border: 2px solid var(--line);
+  box-shadow: var(--shadow-hard-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fx-presets-save,
+.fx-presets-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.fx-presets-input {
+  flex: 1 1 120px;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  padding: 4px 6px;
+  background: var(--panel-2);
+  color: var(--ink);
+  border: 1px solid var(--line);
+}
+
+.fx-presets-error {
+  flex-basis: 100%;
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 0.6rem;
+}
+
+.fx-presets-empty {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  color: var(--ink-3);
+}
+
+.fx-presets-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.fx-presets-list li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.fx-presets-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.72rem;
+  color: var(--ink);
+}
+
+.fx-presets-action {
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink-3);
+  padding: 3px 6px;
+  cursor: pointer;
+}
+
+.fx-presets-action:hover {
+  color: var(--ink);
+  border-color: var(--accent);
+}

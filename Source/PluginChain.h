@@ -241,6 +241,14 @@ public:
     // getLastRestoreError().
     void setChainState (const juce::var& state, juce::String& outError);
 
+    // Apply a named-preset payload (0033): replaces the chain's slots and
+    // its output volume/mute and MIDI toggle/channel filter, WITHOUT touching
+    // the chain's id, name, input mask or record-on-capture flag (those are
+    // project wiring, not the rig). Slots are DEFERRED exactly like
+    // setChainState — queued as PendingSlots for the processor's restore
+    // driver. outError lists any slots skipped (blocked / duplicate).
+    void applyPresetState (const juce::var& presetPayload, juce::String& outError);
+
     // A plugin slot restored from saved state but not yet instantiated.
     // The processor's restore driver (timerCallback) loads pending
     // slots one per message-loop turn. Instantiating several plugins
@@ -304,6 +312,17 @@ private:
     juce::AudioPluginInstance* createInstance (const juce::File& file,
                                                juce::String& outName,
                                                juce::String& outError);
+
+    // Queue the slots of a saved/preset state as PendingSlots, skipping
+    // blocklisted and same-chain-duplicate files. Shared by setChainState
+    // and applyPresetState so the deferred-load rules live in one place.
+    void queueSlotsFromState (const juce::var& slotArray,
+                              juce::StringArray& failedPaths);
+
+    // Apply the mix/MIDI rig fields shared by a saved state and a preset
+    // (volume, muted, wantsMidi, midiChannels). Identity/routing fields are
+    // the caller's business.
+    void applyRigSettings (const juce::DynamicObject& obj);
 
     // Called on the message thread by addPluginAsync's waiter after the
     // worker thread successfully creates an instance. Calls

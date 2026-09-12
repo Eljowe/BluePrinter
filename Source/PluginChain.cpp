@@ -581,45 +581,95 @@ void PluginChain::setChainState (const juce::var& state, juce::String& outError)
     if (obj->hasProperty ("recordOnCapture"))
         recordOnCapture.store (static_cast<bool> (obj->getProperty ("recordOnCapture")),
                                std::memory_order_release);
-    if (obj->hasProperty ("volume"))
-        volumeDb.store (static_cast<float> (obj->getProperty ("volume")),
-                        std::memory_order_release);
-    if (obj->hasProperty ("muted"))
-        muted.store (static_cast<bool> (obj->getProperty ("muted")),
-                     std::memory_order_release);
+    applyRigSettings (*obj);
+
+    // Monitor-only flags belong to a saved project state but not to a preset.
     if (obj->hasProperty ("monitorSolo"))
         monitorSolo.store (static_cast<bool> (obj->getProperty ("monitorSolo")),
                            std::memory_order_release);
     if (obj->hasProperty ("monitorMuted"))
         monitorMuted.store (static_cast<bool> (obj->getProperty ("monitorMuted")),
                             std::memory_order_release);
-    if (obj->hasProperty ("midiChannels"))
+
+    juce::StringArray failedPaths;
+    queueSlotsFromState (obj->getProperty ("slots"), failedPaths);
+
+    if (! failedPaths.isEmpty())
+    {
+        // Surface a single-line summary via outError. Callers that want
+        // per-plugin details can call Vst3Library::getBlocklist() and
+        // ask the user whether to add the failures to it.
+        outError = "Skipped " + juce::String (failedPaths.size())
+                 + " plugin(s) (use the blocklist to skip them in future): "
+                 + failedPaths.joinIntoString (", ");
+    }
+
+    // Stash for getLastRestoreError() so the UI can show it on open.
+    {
+        const juce::ScopedLock sl (restoreErrorLock);
+        lastRestoreError = outError;
+    }
+}
+
+void PluginChain::applyPresetState (const juce::var& presetPayload, juce::String& outError)
+{
+    clear();
+
+    auto* obj = presetPayload.getDynamicObject();
+    if (obj == nullptr)
+        return;
+
+    // Rig mix/MIDI settings only. Deliberately NOT id/name/inputs/
+    // recordOnCapture/monitorSolo/monitorMuted — a preset is the rig, not
+    // the project wiring.
+    applyRigSettings (*obj);
+
+    juce::StringArray failedPaths;
+    queueSlotsFromState (obj->getProperty ("slots"), failedPaths);
+
+    if (! failedPaths.isEmpty())
+        outError = "Skipped " + juce::String (failedPaths.size())
+                 + " plugin(s): " + failedPaths.joinIntoString (", ");
+
+    if (onChanged)
+        onChanged();
+}
+
+void PluginChain::applyRigSettings (const juce::DynamicObject& obj)
+{
+    if (obj.hasProperty ("volume"))
+        volumeDb.store (static_cast<float> (obj.getProperty ("volume")),
+                        std::memory_order_release);
+    if (obj.hasProperty ("muted"))
+        muted.store (static_cast<bool> (obj.getProperty ("muted")),
+                     std::memory_order_release);
+    // Missing in states saved before the toggle existed — leave the default
+    // (true) to preserve old behaviour.
+    if (obj.hasProperty ("wantsMidi"))
+        wantsMidi.store (static_cast<bool> (obj.getProperty ("wantsMidi")),
+                         std::memory_order_release);
+
+    // Copy the property to a local before calling getArray(): getProperty
+    // returns a temporary and the array pointer must outlive the condition.
+    const auto midiChannelsVar = obj.getProperty ("midiChannels");
+    if (auto* midiArray = midiChannelsVar.getArray())
     {
         uint16_t midiMask = 0;
-        if (auto* midiArray = obj->getProperty ("midiChannels").getArray())
+        for (const auto& v : *midiArray)
         {
-            for (const auto& v : *midiArray)
-            {
-                const int ch = static_cast<int> (v);
-                if (ch >= 1 && ch <= 16)
-                    midiMask = static_cast<uint16_t> (midiMask | (1u << (ch - 1)));
-            }
+            const int ch = static_cast<int> (v);
+            if (ch >= 1 && ch <= 16)
+                midiMask = static_cast<uint16_t> (midiMask | (1u << (ch - 1)));
         }
         midiChannelsMask.store (midiMask, std::memory_order_release);
     }
+}
 
-    // MIDI pass-through preference. Missing in states saved before the
-    // toggle existed — leave the default (true) to preserve old behaviour.
-    if (obj->hasProperty ("wantsMidi"))
-        wantsMidi.store (static_cast<bool> (obj->getProperty ("wantsMidi")),
-                         std::memory_order_release);
-
-    auto slotArray = obj->getProperty ("slots");
+void PluginChain::queueSlotsFromState (const juce::var& slotArray,
+                                       juce::StringArray& failedPaths)
+{
     if (! slotArray.isArray())
         return;
-
-    juce::StringArray failedPaths;
-    juce::StringArray failedReasons;
 
     for (int i = 0; i < slotArray.size(); ++i)
     {
@@ -636,7 +686,6 @@ void PluginChain::setChainState (const juce::var& state, juce::String& outError)
         {
             // The blocklist already covers this; don't re-attempt to load.
             failedPaths.add (path);
-            failedReasons.add ("blocked");
             continue;
         }
 
@@ -648,7 +697,6 @@ void PluginChain::setChainState (const juce::var& state, juce::String& outError)
         if (hasPluginFile (file))
         {
             failedPaths.add (path);
-            failedReasons.add ("duplicate of an earlier plugin in this chain");
             continue;
         }
 
@@ -669,22 +717,6 @@ void PluginChain::setChainState (const juce::var& state, juce::String& outError)
         pending.bypassed = static_cast<bool> (slotObj->getProperty ("bypassed"));
         pending.stateBase64 = slotObj->getProperty ("state").toString();
         pendingSlots.push_back (std::move (pending));
-    }
-
-    if (! failedPaths.isEmpty())
-    {
-        // Surface a single-line summary via outError. Callers that want
-        // per-plugin details can call Vst3Library::getBlocklist() and
-        // ask the user whether to add the failures to it.
-        outError = "Skipped " + juce::String (failedPaths.size())
-                 + " plugin(s) (use the blocklist to skip them in future): "
-                 + failedPaths.joinIntoString (", ");
-    }
-
-    // Stash for getLastRestoreError() so the UI can show it on open.
-    {
-        const juce::ScopedLock sl (restoreErrorLock);
-        lastRestoreError = outError;
     }
 }
 

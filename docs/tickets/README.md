@@ -104,7 +104,7 @@ and briefed.
 | [0030](0030-loop-layer-undo-redo.md) | Undo/redo for looper overdub layers | done | — |
 | [0031](0031-interactive-loop-waveform-crop-zoom.md) | Interactive loop waveform: drag crop handles and zoom | done | — |
 | [0032](0032-time-signatures.md) | Time signatures beyond 4/4 | done | — |
-| [0033](0033-named-chain-presets.md) | Named VST3 chain presets | ready-for-agent | — |
+| [0033](0033-named-chain-presets.md) | Named VST3 chain presets | done | — |
 | [0034](0034-builtin-tuner.md) | Built-in tuner | done | — |
 | [0035](0035-library-curation-setlists-favorites.md) | Library curation: setlists, favourites and bulk edits | needs-triage | — |
 | [0036](0036-reverse-halfspeed-loop.md) | Reverse and half-speed loop playback | done | — |
