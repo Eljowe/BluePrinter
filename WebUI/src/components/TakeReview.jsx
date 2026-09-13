@@ -3,19 +3,21 @@ import { IconPlay, IconSave, IconStop, IconTrash } from "./icons";
 import { Waveform } from "./Waveform";
 import { formatTime } from "../utils";
 
-// Review panel for the last recorded take. Recordings are no longer
-// saved automatically — after stopping, the take stays pending here
-// until it is replayed and either saved to the library or discarded.
-// Dub layers the next record over this take instead of replacing it.
+// Review panel for the take stack (0037). Every stopped take is retained
+// (bounded); the chip row selects one to audition, save or delete. The
+// waveform shows the selected take and Dub layers onto it.
 export function TakeReview({ transport }) {
-  const pending = Boolean(transport?.takePending);
-  if (!pending) return null;
+  const takes = Array.isArray(transport?.takes) ? transport.takes : [];
+  if (takes.length === 0) return null;
 
-  const playing = Boolean(transport?.takePlaying);
   const recording = Boolean(transport?.recording) || Boolean(transport?.preRollActive);
+  const playing = Boolean(transport?.takePlaying);
   const overdub = Boolean(transport?.takeOverdub);
   const sampleRate = Number(transport?.recordingSampleRate ?? 0);
-  const length = Number(transport?.takeLength ?? 0);
+
+  const selectedId = Number(transport?.selectedTakeId ?? -1);
+  const selected = takes.find((t) => Number(t.id) === selectedId) ?? takes[takes.length - 1];
+  const length = Number(transport?.takeLength ?? selected?.length ?? 0);
   const seconds = sampleRate > 0 ? length / sampleRate : 0;
   const progress = length > 0
     ? Math.min(100, Math.max(0, (Number(transport?.takePosition ?? 0) / length) * 100))
@@ -23,19 +25,22 @@ export function TakeReview({ transport }) {
 
   const stateLabel = recording
     ? (overdub ? "Overdub" : "Recording")
-    : (playing ? "Playing" : `${formatTime(seconds)} take`);
+    : (playing ? "Playing" : `${takes.length} ${takes.length === 1 ? "take" : "takes"}`);
+
+  const select = (id) => emit(FRONTEND_EVENTS.selectTake, { id });
+  const remove = (id) => emit(FRONTEND_EVENTS.discardTake, { id });
 
   return (
     <section className={`take-review ${playing ? "is-playing" : ""} ${recording ? "is-recording" : ""}`}>
       <div className="take-review-header">
         <div>
-          <h2>Review the take</h2>
+          <h2>Review takes</h2>
           <p>
             {recording
               ? (overdub
-                ? "Layering over the take — stop to mix the new pass in."
-                : "Recording over the take — it will be replaced.")
-              : "Play it back, then save it to the library or discard it. Turn on Dub to layer another pass."}
+                ? "Layering over the selected take — stop to mix the new pass in."
+                : "Recording a new take — stop to add it to the stack.")
+              : "Pick a take to play, then save it to the library or delete it. Turn on Dub to layer another pass onto the selected take."}
           </p>
         </div>
         <div className="take-review-state" aria-live="polite">
@@ -44,7 +49,45 @@ export function TakeReview({ transport }) {
         </div>
       </div>
 
-      <div className="take-review-timeline" aria-label={`${formatTime(seconds)} pending take`}>
+      <div className="take-review-takes" role="listbox" aria-label="Recorded takes">
+        {takes.map((t, index) => {
+          const isSelected = Number(t.id) === Number(selected?.id);
+          const duration = sampleRate > 0 ? Number(t.length) / sampleRate : 0;
+          return (
+            <div
+              key={t.id}
+              className={`take-chip ${isSelected ? "is-selected" : ""}`}
+              role="option"
+              aria-selected={isSelected}
+              tabIndex={0}
+              onClick={() => select(t.id)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  select(t.id);
+                }
+              }}
+            >
+              <span className="take-chip-label">Take {index + 1}</span>
+              <span className="take-chip-time">{formatTime(duration)}</span>
+              <button
+                type="button"
+                className="take-chip-delete"
+                disabled={recording}
+                aria-label={`Delete take ${index + 1}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  remove(t.id);
+                }}
+              >
+                <IconTrash size={12} />
+              </button>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="take-review-timeline" aria-label={`${formatTime(seconds)} selected take`}>
         <Waveform peaks={transport.takePeaks ?? []} width={360} height={72} />
         <div className="take-review-playhead" style={{ left: `${progress}%` }} />
         <div className="take-review-timeline-caption">
@@ -58,8 +101,8 @@ export function TakeReview({ transport }) {
         title={recording
           ? "Stop the capture to change Dub"
           : (overdub
-            ? "Dub on — the next record layers over this take"
-            : "Dub off — the next record replaces this take. Turn on to layer.")}
+            ? "Dub on — the next record layers over the selected take"
+            : "Dub off — the next record adds a new take. Turn on to layer.")}
       >
         <input
           type="checkbox"
@@ -84,19 +127,28 @@ export function TakeReview({ transport }) {
           type="button"
           className="btn btn-ghost btn-sm"
           disabled={playing || recording}
-          onClick={() => emit(FRONTEND_EVENTS.saveTake)}
-          title="Save the take to the library (and to the library folder if one is set)"
+          onClick={() => emit(FRONTEND_EVENTS.saveTake, { id: selected?.id })}
+          title="Save the selected take to the library (and the library folder if one is set)"
         >
-          <IconSave size={13} /> Save to library
+          <IconSave size={13} /> Save selected
         </button>
         <button
           type="button"
           className="btn btn-ghost btn-sm"
           disabled={playing || recording}
-          onClick={() => emit(FRONTEND_EVENTS.discardTake)}
-          title="Delete the take without saving"
+          onClick={() => emit(FRONTEND_EVENTS.discardTake, { id: selected?.id })}
+          title="Delete the selected take without saving"
         >
-          <IconTrash size={13} /> Discard
+          <IconTrash size={13} /> Delete selected
+        </button>
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          disabled={playing || recording}
+          onClick={() => emit(FRONTEND_EVENTS.discardAllTakes)}
+          title="Delete every recorded take"
+        >
+          <IconTrash size={13} /> Discard all
         </button>
       </div>
     </section>

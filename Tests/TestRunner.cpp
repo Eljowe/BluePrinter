@@ -2,6 +2,11 @@
 
 #include <cstdio>
 
+#ifdef _WIN32
+ #include <windows.h>
+ #include <cstdlib>
+#endif
+
 namespace bptest
 {
 namespace
@@ -55,5 +60,14 @@ int runAll()
 
 int main()
 {
+#ifdef _WIN32
+    // A crashing test must not pop a Windows Error Reporting dialog on the
+    // developer's desktop, and abort() must not call the WER report path.
+    SetErrorMode (SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
+    _set_abort_behavior (0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
+#endif
+    // Unbuffered so a crash never hides which test ran last.
+    std::setvbuf (stdout, nullptr, _IONBF, 0);
+
     return ::bptest::runAll();
 }

@@ -19,7 +19,7 @@ Audio input -> Input trim (APVTS Gain, dB) -> +-> [chain 0] ----> sum -> + -> Me
 - **UI bridge** (`Source/WebViewEditor.h/.cpp`): WebView2 editor, all frontend↔backend events. The React side never talks to C++ directly except through `bridge.js`.
 - **React UI** (`WebUI/src/`): `App.jsx` subscribes to backend events and passes state down; components emit mutations.
 - **Chains**: parallel VST3 FX chains in `std::vector<std::unique_ptr<PluginChain>>` (guarded by `chainLock`; the audio thread iterates a raw-pointer snapshot). Stable ids, per-chain input mask / MIDI / record / volume / mute. Full model: AGENTS.md "VST3 Chains".
-- **Recording**: takes + looper share `recordBuffer`, capture the record mix (dry + `recordOnCapture` chains), never capture simultaneously. Stop leaves a pending take (TakeReview → save/discard). Full model: AGENTS.md "VST3 Chains" + "Recording".
+- **Recording**: takes + looper share `recordBuffer` as live capture scratch, capture the record mix (dry + `recordOnCapture` chains), never capture simultaneously. Each stopped take is copied into its own buffer and appended to a bounded stack (8 / 256 MB) in `TakeRecorder` (TakeReview → select/audition/save/delete); Dub layers onto the selected take. Full model: AGENTS.md "VST3 Chains" + "Recording".
 - **MIDI clock + click**: header-level toggles, direct Start/Stop to the output device, click gating. Full model: AGENTS.md "MIDI clock".
 - **Deferred restore**: saved chains load one plugin per message-loop turn; persist is gated while restoring. Full model: AGENTS.md "Deferred chain restore".
 

@@ -68,8 +68,12 @@ full ordered release process lives in
   no-op. (Dropped files are read in the WebView and are capped at 32 MB; the
   file chooser has no limit.)
 - **Hands-free transport** — **Space** starts/stops a take or loop capture,
-  **Enter** saves a pending take, **Esc** stops playback. Shortcuts are ignored
-  while you're typing, and the header's **Keyboard** popover lists them.
+  **Enter** saves the selected take, **Delete**/**Backspace** deletes it (no
+  confirmation), **Esc** stops playback. Shortcuts are ignored while you're
+  typing, and the header's **Keyboard** popover lists them.
+- **Take stack** — every stopped take is kept (bounded to 8 takes / 256 MB, the
+  oldest dropped with a notice); pick one from the review chips to audition,
+  save or delete it, and Dub layers a new pass onto the selected take.
 - **Live level meter** on the transport, with peak hold.
 - **Snippet list** with per-take waveform thumbnail (downsampled peaks).
 - **Musical key detection** — FFT-based (Krumhansl-Schmuckler) analysis that
@@ -247,7 +251,7 @@ Events flow through `window.__JUCE__.backend`:
 | --------------------------------------------------------- | -------------------------------------------------- |
 | `frontendSetParameter`                                    | Update an APVTS parameter (`Gain`, `PlaybackVolume`) |
 | `frontendStartRecording` / `frontendStopRecording`        | Transport: record toggle                           |
-| `frontendSetTakePlayback` / `frontendSaveTake` / `frontendDiscardTake` | Pending-take review: play the take / save it to the library / discard it |
+| `frontendSetTakePlayback` / `frontendSaveTake { id }` / `frontendDiscardTake { id }` / `frontendSelectTake { id }` / `frontendDiscardAllTakes` | Take stack: play the selected take / save / delete / select / discard all |
 | `frontendStartPlayback` / `frontendStopPlayback`          | Transport: play a snippet id / stop                |
 | `frontendUpdateSnippetMeta` / `frontendDeleteSnippet`     | Edit name + comments / remove a snippet            |
 | `frontendDetectSnippetKey`                                | Run key detection on a snippet                     |
@@ -296,11 +300,13 @@ through `withInitialisationData("parameters" | "snippets" | "transport", ...)`.
   (the message thread acquires the same lock only to copy the final take
   into a new buffer).
 - After the user clicks stop, the message thread finalises: the take is **not
-  saved automatically** — it becomes a pending take (waveform peaks computed,
-  length stored) that the UI offers for replay, then an explicit
-  **Save to library** (copies the audio into a new snippet and writes WAV +
-  sidecar when a library folder is set) or **Discard**. Any new take or loop
-  capture invalidates the pending take.
+  saved automatically** — it is copied out of the record buffer into its own
+  buffer and appended to the take stack (bounded to 8 takes / 256 MB, the
+  oldest dropped with a notice), with waveform peaks computed and its length
+  stored. The UI offers the selected take for replay, then an explicit
+  **Save to library** (adds a snippet and writes WAV + sidecar when a library
+  folder is set; the saved take leaves the stack) or **Delete**. A new take or
+  loop capture no longer invalidates the stack.
 - Playback stores the snippet pointer as a `shared_ptr` on the audio
   thread, so deleting a snippet from the library can't dangle an
   in-flight playback.

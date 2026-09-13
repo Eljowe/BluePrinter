@@ -39,8 +39,12 @@ public:
     static constexpr const char* frontendStopRecordingEvent    = "frontendStopRecording";
     static constexpr const char* frontendSetTakePlaybackEvent  = "frontendSetTakePlayback";
     static constexpr const char* frontendSetTakeOverdubEvent   = "frontendSetTakeOverdub";
+    // { id } — save/delete a specific take (falls back to the selected take).
     static constexpr const char* frontendSaveTakeEvent         = "frontendSaveTake";
     static constexpr const char* frontendDiscardTakeEvent      = "frontendDiscardTake";
+    // { id } — select a take; discard every take.
+    static constexpr const char* frontendSelectTakeEvent       = "frontendSelectTake";
+    static constexpr const char* frontendDiscardAllTakesEvent  = "frontendDiscardAllTakes";
     static constexpr const char* frontendStartPlaybackEvent    = "frontendStartPlayback";
     static constexpr const char* frontendStopPlaybackEvent     = "frontendStopPlayback";
     static constexpr const char* frontendUpdateSnippetEvent    = "frontendUpdateSnippetMeta";

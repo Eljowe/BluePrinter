@@ -1249,8 +1249,8 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     //     to recordingMixBuffer, so the captured layer holds only the new
     //     playing. Started from position 0 when the capture begins, so the
     //     layer aligns with the take's first sample.
-    if (takeRecorder.isOverdubCapture() && recordBuffer != nullptr)
-        takeRecorder.renderOverdubMonitor (buffer, *recordBuffer, numSamples, loopCrossfadeSamples);
+    if (takeRecorder.isOverdubCapture())
+        takeRecorder.renderOverdubMonitor (buffer, numSamples, loopCrossfadeSamples);
 
     // 7. Playback overwrites the output buffer. Done after recording so
     //    monitoring of the input stops while a snippet is playing.
@@ -1261,8 +1261,8 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     //    output) so the user hears exactly the take that was captured.
     //    Mutually exclusive with snippet/looper playback — the entry
     //    points stop each other.
-    if (takeRecorder.isReviewPlaying() && recordBuffer != nullptr)
-        takeRecorder.renderReview (buffer, *recordBuffer, numSamples);
+    if (takeRecorder.isReviewPlaying())
+        takeRecorder.renderReview (buffer, numSamples);
 
     // 8. Looper count-in: play the click, advance the beat clock, and flip
     //    into capture once the configured beats have elapsed. Mirrors the
@@ -1603,8 +1603,8 @@ void BluePrinterAudioProcessor::setLooperRecording (bool enabled)
         if (recordBuffer == nullptr || maxRecordSamples <= 0)
             return;
 
-        // Any new capture (take or loop) invalidates the pending take.
-        takeRecorder.clearPending();
+        // A loop capture no longer invalidates the take stack (0037): the
+        // takes own their audio, so the shared recordBuffer is free to reuse.
 
         const bool overdubbing = looper.isOverdub()
             && looper.isLooping()
@@ -1959,16 +1959,15 @@ void BluePrinterAudioProcessor::clearLoop()
 void BluePrinterAudioProcessor::beginActualRecording()
 {
     // A start (or count-in) that intends to overdub switches to the
-    // layering path; the pending take and its audio are kept.
+    // layering path; the selected take and its audio are kept.
     if (takeRecorder.consumeOverdubPending())
     {
         beginActualTakeOverdub();
         return;
     }
 
-    // A new take wipes recordBuffer (the module also invalidates any pending
-    // take). Audio-thread safe: atomics only — takePeaks stays stale until
-    // the next finalize rebuilds it.
+    // A new take reuses recordBuffer as live scratch; the take stack is left
+    // intact (0037). Audio-thread safe: the module touches atomics only.
     {
         const juce::ScopedLock sl (recordLock);
         takeRecorder.beginFresh (*recordBuffer);
@@ -1988,11 +1987,13 @@ void BluePrinterAudioProcessor::beginActualRecording()
 
 void BluePrinterAudioProcessor::beginActualTakeOverdub()
 {
-    // Layering keeps the pending take (and its audio) intact. The new input
-    // is captured after the take (writePos = takeLength) and wrap-mixed into
-    // [0, takeLength) on stop. The take playback starts from the top so the
-    // layer aligns with the take's first sample.
-    takeRecorder.beginOverdub();
+    // Layering stages the selected take into recordBuffer and captures the
+    // new input after it (writePos = selected length); the processor
+    // wrap-mixes the layer back into the same take on stop.
+    {
+        const juce::ScopedLock sl (recordLock);
+        takeRecorder.beginOverdub (*recordBuffer);
+    }
     transportPosition.store (0, std::memory_order_release);
 
     // Re-sync external gear when the clock is already running, same as a
@@ -3175,11 +3176,11 @@ void BluePrinterAudioProcessor::finalizeRecordingOnMessageThread()
     if (recordBuffer == nullptr)
         return;
 
-    // Overdub finalize: the input captured after the take is wrapped-mixed
-    // into the take. The take length is unchanged — only its peaks refresh.
+    // Overdub finalize: the input captured after the selected take is
+    // wrap-mixed into it and the take is replaced in place (same id).
     if (takeRecorder.consumeOverdubCapture())
     {
-        const auto takeLen = takeRecorder.getTakeLength();
+        const auto takeLen = takeRecorder.getSelectedTakeLength();
         int layerEnd = 0;
         {
             const juce::ScopedLock sl (recordLock);
@@ -3194,17 +3195,28 @@ void BluePrinterAudioProcessor::finalizeRecordingOnMessageThread()
         if (takeLen > 0 && layerLength > 0)
         {
             mixOverdubLayer (0, takeLen, takeLen, layerLength, recordMeter);
-            refreshTakePeaks();
+
+            std::shared_ptr<juce::AudioBuffer<float>> mixed;
+            {
+                const juce::ScopedLock sl (recordLock);
+                mixed = CaptureCopy::copyRegion (*recordBuffer, 0, takeLen);
+            }
+            if (mixed != nullptr)
+            {
+                // Compute the peaks BEFORE moving the buffer (MSVC evaluates
+                // argument order in an unspecified order).
+                auto peaks = SnippetLibrary::computePeaks (*mixed, 256);
+                takeRecorder.replaceSelectedTake (std::move (mixed), takeLen, std::move (peaks));
+            }
         }
 
         listeners.call ([](Listener& l) { l.transportChanged(); });
         return;
     }
 
-    // The take is not saved automatically anymore — it becomes a pending
-    // take the user reviews, replays, then explicitly saves to the
-    // library or discards. The audio stays in recordBuffer (the shared
-    // capture buffer) until a new capture invalidates it.
+    // A finished take is copied out of the shared record buffer into its own
+    // audio and appended to the stack. It is not saved automatically — the
+    // user reviews/replays, then saves or deletes it.
     int captured = 0;
     {
         const juce::ScopedLock sl (recordLock);
@@ -3214,37 +3226,53 @@ void BluePrinterAudioProcessor::finalizeRecordingOnMessageThread()
             return;
     }
 
-    takeRecorder.setPendingTake (captured);
-    refreshTakePeaks();
+    std::shared_ptr<juce::AudioBuffer<float>> audio;
+    {
+        const juce::ScopedLock sl (recordLock);
+        audio = CaptureCopy::copyRegion (*recordBuffer, 0, captured);
+    }
+    if (audio == nullptr)
+    {
+        listeners.call ([](Listener& l) { l.transportChanged(); });
+        return;
+    }
+
+    auto peaks = SnippetLibrary::computePeaks (*audio, 256);
+    takeRecorder.addTake (std::move (audio), captured, std::move (peaks));
 
     listeners.call ([](Listener& l) { l.transportChanged(); });
 }
 
-void BluePrinterAudioProcessor::refreshTakePeaks()
+void BluePrinterAudioProcessor::saveTake (int id)
 {
-    const auto length = takeRecorder.getTakeLength();
-    if (recordBuffer == nullptr || length <= 0)
-    {
-        takeRecorder.setTakePeaks ({});
-        return;
-    }
-
-    // Copy the take region out under the lock (guards against a new
-    // capture writing concurrently) and downsample for the UI.
-    std::shared_ptr<juce::AudioBuffer<float>> region;
-    {
-        const juce::ScopedLock sl (recordLock);
-        region = CaptureCopy::copyRegion (*recordBuffer, 0, length);
-    }
-    if (region != nullptr)
-        takeRecorder.setTakePeaks (SnippetLibrary::computePeaks (*region, 256));
-    else
-        takeRecorder.setTakePeaks ({});
+    // Selecting the target without notifying: savePendingTake notifies.
+    if (id > 0 && id != takeRecorder.getSelectedTakeId())
+        takeRecorder.selectTake (id);
+    savePendingTake();
 }
 
-void BluePrinterAudioProcessor::clearPendingTake()
+void BluePrinterAudioProcessor::discardTake (int id)
 {
-    takeRecorder.clearPending();
+    if (takeRecorder.isActive() || takeRecorder.isOverdubCapture())
+        return;
+    takeRecorder.deleteTake (id > 0 ? id : takeRecorder.getSelectedTakeId());
+    listeners.call ([](Listener& l) { l.transportChanged(); });
+}
+
+void BluePrinterAudioProcessor::selectTake (int id)
+{
+    if (takeRecorder.isActive() || takeRecorder.isOverdubCapture())
+        return;
+    takeRecorder.selectTake (id);
+    listeners.call ([](Listener& l) { l.transportChanged(); });
+}
+
+void BluePrinterAudioProcessor::discardAllTakes()
+{
+    if (takeRecorder.isActive() || takeRecorder.isOverdubCapture())
+        return;
+    takeRecorder.clearTakes();
+    listeners.call ([](Listener& l) { l.transportChanged(); });
 }
 
 void BluePrinterAudioProcessor::setTakePlayback (bool enabled)
@@ -3281,38 +3309,31 @@ void BluePrinterAudioProcessor::setTakeOverdub (bool enabled)
 
 void BluePrinterAudioProcessor::savePendingTake()
 {
-    if (! takeRecorder.isTakePending())
+    if (! takeRecorder.hasSelectedTake())
         return;
 
-    // Don't finalise mid-capture (the Enter shortcut uses takePending,
-    // which stays true through an overdub layer).
+    // Don't save mid-capture (the Enter shortcut can fire through an overdub).
     if (takeRecorder.isRecordingRequested()
         || takeRecorder.isOverdubCapture())
         return;
 
-    const auto captured = takeRecorder.getTakeLength();
-    if (recordBuffer == nullptr || captured <= 0)
+    const auto id = takeRecorder.getSelectedTakeId();
+    auto audio = takeRecorder.getSelectedTakeAudio();
+    if (audio == nullptr || audio->getNumSamples() <= 0)
     {
-        clearPendingTake();
+        takeRecorder.deleteTake (id);
         listeners.call ([](Listener& l) { l.transportChanged(); });
         return;
     }
 
     takeRecorder.stopReview();
 
-    std::shared_ptr<Snippet> snippet;
+    // The take owns its audio (a private buffer), so no record lock is needed.
+    auto defaultName = "Snippet " + juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H:%M:%S");
+    auto snippet = library.addSnippet (audio, getSampleRate(), defaultName);
 
-    {
-        const juce::ScopedLock sl (recordLock);
-        auto snippetBuffer = CaptureCopy::copyRegion (*recordBuffer, 0, captured);
-        if (snippetBuffer != nullptr)
-        {
-            auto defaultName = "Snippet " + juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H:%M:%S");
-            snippet = library.addSnippet (snippetBuffer, getSampleRate(), defaultName);
-        }
-    }
-
-    clearPendingTake();
+    // The saved take leaves the stack — it is a library snippet now.
+    takeRecorder.deleteTake (id);
     listeners.call ([](Listener& l) { l.libraryChanged(); l.transportChanged(); });
 
     if (snippet != nullptr)
@@ -3339,16 +3360,15 @@ void BluePrinterAudioProcessor::savePendingTake()
 
 void BluePrinterAudioProcessor::discardPendingTake()
 {
-    if (! takeRecorder.isTakePending())
+    if (! takeRecorder.hasSelectedTake())
         return;
 
-    // Don't discard mid-capture (the Enter shortcut uses takePending,
-    // which stays true through an overdub layer).
+    // Don't discard mid-capture (the Enter shortcut can fire through an overdub).
     if (takeRecorder.isRecordingRequested()
         || takeRecorder.isOverdubCapture())
         return;
 
-    clearPendingTake();
+    takeRecorder.deleteTake (takeRecorder.getSelectedTakeId());
     listeners.call ([](Listener& l) { l.transportChanged(); });
 }
 
