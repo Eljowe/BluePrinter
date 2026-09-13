@@ -2311,6 +2311,68 @@ bool BluePrinterAudioProcessor::setSnippetFavourite (int id, bool favourite)
     return persisted;
 }
 
+int BluePrinterAudioProcessor::setSnippetsColor (const std::vector<int>& ids, const juce::String& color)
+{
+    int changed = 0;
+    for (int id : ids)
+        if (library.updateColor (id, color))
+            ++changed;
+
+    if (changed == 0)
+        return 0;
+
+    bool persistFailed = false;
+    for (int id : ids)
+        if (! library.persistMetadata (id))
+            persistFailed = true;
+    if (persistFailed)
+    {
+        juce::ScopedLock lock (libraryFolderLock);
+        lastSaveError = "Could not save metadata to disk. Make sure a library folder is set.";
+    }
+
+    listeners.call ([](Listener& l) { l.libraryChanged(); });
+    return changed;
+}
+
+int BluePrinterAudioProcessor::deleteSnippets (const std::vector<int>& ids)
+{
+    int removed = 0;
+    for (int id : ids)
+    {
+        auto snippet = library.findById (id);
+        if (! library.removeSnippet (id))
+            continue;
+
+        if (playingSnippetId.load() == id)
+            stopPlayback();
+        if (snippet != nullptr)
+            SnippetLibrary::deleteSavedFiles (*snippet);
+        ++removed;
+    }
+
+    if (removed == 0)
+        return 0;
+
+    pruneSetlistsAgainstLibrary();
+    listeners.call ([](Listener& l) { l.libraryChanged(); l.transportChanged(); });
+    return removed;
+}
+
+int BluePrinterAudioProcessor::addSnippetsToSetlist (const juce::String& setlistId, const std::vector<int>& ids)
+{
+    if (setlists.find (setlistId) == nullptr)
+        return 0;
+
+    for (int id : ids)
+        if (library.findById (id) != nullptr)
+            setlists.addSnippet (setlistId, id);
+
+    armSetlistPersist();
+    listeners.call ([](Listener& l) { l.libraryChanged(); });
+    return static_cast<int> (ids.size());
+}
+
 bool BluePrinterAudioProcessor::setSnippetGain (int id, float gainDb)
 {
     if (! library.updateGain (id, gainDb))

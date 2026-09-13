@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { SnippetCard } from "./SnippetCard";
 import { SNIPPET_COLORS, snippetColor } from "../utils";
 import { FRONTEND_EVENTS, emit } from "../bridge";
-import { IconChevronDown, IconSearch, IconTag, IconX } from "./icons";
+import { IconChevronDown, IconSearch, IconTag, IconTrash, IconX } from "./icons";
 
 const SORT_OPTIONS = [
   { key: "newest", label: "Newest" },
@@ -192,6 +192,9 @@ export function SnippetList({
   const [setlistFilter, setSetlistFilter] = useState("");
   const [tagsOpen, setTagsOpen] = useState(false);
   const [setlistsOpen, setSetlistsOpen] = useState(false);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const [visibleCount, setVisibleCount] = useState(VISIBLE_PAGE);
 
   // Any filter/sort change restarts the visible window at the top.
@@ -291,6 +294,75 @@ export function SnippetList({
   const activeTagCount = tagFilter.size;
   const visibleTakes = ordered.slice(0, visibleCount);
   const hiddenCount = ordered.length - visibleTakes.length;
+
+  // Bulk selection (0035). Selection is pruned when snippets disappear so a
+  // stale id can never be acted on.
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      if (prev.size === 0) return prev;
+      const existing = new Set(snippets.map((s) => s.id));
+      let changed = false;
+      const next = new Set();
+      for (const id of prev) {
+        if (existing.has(id)) next.add(id);
+        else changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [snippets]);
+
+  useEffect(() => {
+    if (!confirmBulkDelete) return undefined;
+    const t = setTimeout(() => setConfirmBulkDelete(false), 3500);
+    return () => clearTimeout(t);
+  }, [confirmBulkDelete]);
+
+  const toggleSelected = (id) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const exitSelect = () => {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+    setConfirmBulkDelete(false);
+  };
+
+  const allVisibleSelected = visibleTakes.length > 0
+    && visibleTakes.every((s) => selectedIds.has(s.id));
+
+  const toggleSelectAllVisible = () => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allVisibleSelected) visibleTakes.forEach((s) => next.delete(s.id));
+      else visibleTakes.forEach((s) => next.add(s.id));
+      return next;
+    });
+  };
+
+  const bulkSetColor = (color) => {
+    if (selectedIds.size > 0) emit(FRONTEND_EVENTS.setSnippetsColor, { ids: [...selectedIds], color });
+  };
+
+  const bulkAddToSetlist = (setlistId) => {
+    if (setlistId && selectedIds.size > 0) {
+      emit(FRONTEND_EVENTS.addSnippetsToSetlist, { setlistId, ids: [...selectedIds] });
+    }
+  };
+
+  const bulkDelete = () => {
+    if (selectedIds.size === 0) return;
+    if (!confirmBulkDelete) {
+      setConfirmBulkDelete(true);
+      return;
+    }
+    emit(FRONTEND_EVENTS.deleteSnippets, { ids: [...selectedIds] });
+    exitSelect();
+  };
 
   return (
     <section className="snippet-list">
@@ -400,6 +472,16 @@ export function SnippetList({
             />
           ) : null}
         </div>
+
+        <button
+          type="button"
+          className={`snippet-fav-filter ${selectMode ? "is-active" : ""}`}
+          onClick={() => (selectMode ? exitSelect() : setSelectMode(true))}
+          aria-pressed={selectMode}
+          title={selectMode ? "Exit selection" : "Select several takes for bulk actions"}
+        >
+          {selectMode ? "Done" : "Select"}
+        </button>
       </div>
 
       <div className="snippet-tag-chips" role="group" aria-label="Filter by tag colour">
@@ -445,6 +527,82 @@ export function SnippetList({
         ) : null}
       </div>
 
+      {selectMode ? (
+        <div className="snippet-bulk-bar" role="group" aria-label="Bulk actions">
+          <span className="snippet-bulk-count">
+            {selectedIds.size} selected
+          </span>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={toggleSelectAllVisible}
+            title="Select or deselect every take currently shown"
+          >
+            {allVisibleSelected ? "Deselect all" : "Select all"}
+          </button>
+
+          <span className="snippet-bulk-divider" aria-hidden="true" />
+
+          <span className="snippet-bulk-label">Tag</span>
+          <div className="snippet-swatches" role="group" aria-label="Set colour on the selection">
+            {SNIPPET_COLORS.map((c) => (
+              <button
+                key={c.key}
+                type="button"
+                className="snippet-swatch"
+                style={{ background: c.main }}
+                onClick={() => bulkSetColor(c.key)}
+                disabled={selectedIds.size === 0}
+                title={`Set ${tagLabel(tagNames, c.key)} on the selection`}
+                aria-label={`Set ${c.label} colour on the selection`}
+              />
+            ))}
+            <button
+              type="button"
+              className="snippet-swatch snippet-swatch-none"
+              onClick={() => bulkSetColor("")}
+              disabled={selectedIds.size === 0}
+              title="Clear colour on the selection"
+              aria-label="Clear colour on the selection"
+            >
+              <IconX size={10} />
+            </button>
+          </div>
+
+          {setlists.length > 0 ? (
+            <label className="snippet-bulk-select" title="Add the selection to a setlist">
+              <select
+                value=""
+                disabled={selectedIds.size === 0}
+                onChange={(e) => {
+                  if (e.target.value) bulkAddToSetlist(e.target.value);
+                  e.target.value = "";
+                }}
+                aria-label="Add selection to a setlist"
+              >
+                <option value="">Add to setlist…</option>
+                {setlists.map((sl) => (
+                  <option key={sl.id} value={sl.id}>{sl.name}</option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+
+          <button
+            type="button"
+            className={`btn btn-sm btn-danger ${confirmBulkDelete ? "is-armed" : ""}`}
+            onClick={bulkDelete}
+            disabled={selectedIds.size === 0}
+            title={confirmBulkDelete
+              ? "Click again to permanently delete the selected takes"
+              : "Delete the selected takes"}
+          >
+            <IconTrash size={13} />
+            {confirmBulkDelete ? "Confirm delete" : "Delete"}
+          </button>
+        </div>
+      ) : null}
+
       {ordered.length === 0 ? (
         snippets.length === 0 ? (
           <div className="snippet-empty snippet-empty--first-run">
@@ -478,6 +636,9 @@ export function SnippetList({
                 snippet={s}
                 tagNames={tagNames}
                 setlists={setlists}
+                selectable={selectMode}
+                selected={selectedIds.has(s.id)}
+                onToggleSelect={() => toggleSelected(s.id)}
                 onToggleSnippetSetlist={onToggleSnippetSetlist}
                 reorderContext={activeSetlist && activeSetlist.ids.includes(s.id)
                   ? {

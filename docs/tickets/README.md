@@ -107,7 +107,7 @@ and briefed.
 | [0032](0032-time-signatures.md) | Time signatures beyond 4/4 | done | — |
 | [0033](0033-named-chain-presets.md) | Named VST3 chain presets | done | — |
 | [0034](0034-builtin-tuner.md) | Built-in tuner | done | — |
-| [0035](0035-library-curation-setlists-favorites.md) | Library curation: setlists, favourites and bulk edits | in-progress | — |
+| [0035](0035-library-curation-setlists-favorites.md) | Library curation: setlists, favourites and bulk edits | done | — |
 | [0036](0036-reverse-halfspeed-loop.md) | Reverse and half-speed loop playback | done | — |
 | [0037](0037-multi-take-comping.md) | Multi-take recording and comping | done | — |
 | [0038](0038-stem-per-chain-export.md) | Stem export: render each chain separately | in-progress | — |

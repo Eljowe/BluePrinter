@@ -473,6 +473,39 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
                 processor.setSetlistOrder (obj->getProperty ("id").toString(), ids);
             }
         })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetSnippetsColorEvent, [&processor](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+            {
+                std::vector<int> ids;
+                if (auto* arr = obj->getProperty ("ids").getArray())
+                    for (const auto& v : *arr)
+                        ids.push_back (static_cast<int> (v));
+                processor.setSnippetsColor (ids, obj->getProperty ("color").toString());
+            }
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendDeleteSnippetsEvent, [&processor](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+            {
+                std::vector<int> ids;
+                if (auto* arr = obj->getProperty ("ids").getArray())
+                    for (const auto& v : *arr)
+                        ids.push_back (static_cast<int> (v));
+                processor.deleteSnippets (ids);
+            }
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendAddSnippetsToSetlistEvent, [&processor](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+            {
+                std::vector<int> ids;
+                if (auto* arr = obj->getProperty ("ids").getArray())
+                    for (const auto& v : *arr)
+                        ids.push_back (static_cast<int> (v));
+                processor.addSnippetsToSetlist (obj->getProperty ("setlistId").toString(), ids);
+            }
+        })
         .withEventListener(BluePrinterWebViewEditor::frontendSetMetronomeEvent, [&processor](juce::var data)
         {
             if (auto* obj = data.getDynamicObject())

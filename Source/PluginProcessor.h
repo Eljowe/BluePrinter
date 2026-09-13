@@ -162,6 +162,13 @@ public:
     // sidecar JSON and notifies the UI.
     bool setSnippetFavourite (int id, bool favourite);
 
+    // Bulk operations on a selection (0035). Each persists the affected
+    // sidecars once and fires a single libraryChanged; they return the
+    // number of snippets actually changed. Message thread only.
+    int setSnippetsColor (const std::vector<int>& ids, const juce::String& color);
+    int deleteSnippets (const std::vector<int>& ids);
+    int addSnippetsToSetlist (const juce::String& setlistId, const std::vector<int>& ids);
+
     // Non-destructive playback trim (dB, -24..+24) for one snippet.
     // Persists to the sidecar JSON and notifies the UI.
     bool setSnippetGain (int id, float gainDb);
