@@ -323,20 +323,14 @@ BluePrinterAudioProcessor::BluePrinterAudioProcessor()
     SetUnhandledExceptionFilter (bluePrinterCrashHandler);
 #endif
 
-    // Restore the library folder at startup. VST3 chain restoration is
-    // intentionally deferred until the editor requests it; constructing a
-    // third-party plugin in the processor constructor can crash the
-    // standalone before the UI is available to report the failing plugin.
-    if (auto* props = getUserState())
-    {
-        const auto folderPath = props->getValue ("libraryFolder");
-        if (folderPath.isNotEmpty())
-        {
-            const juce::File folder (folderPath);
-            if (folder.isDirectory())
-                setLibraryFolder (folder);
-        }
-    }
+    // Restore the non-chain standalone user state at startup: the library
+    // folder (which auto-loads snippets) and the snippet colour tag names,
+    // and capture the launch-time properties mtime for the crash self-heal
+    // freshness anchor. VST3 chain restoration is intentionally deferred
+    // until the editor requests it; constructing a third-party plugin in the
+    // processor constructor can crash the standalone before the UI is
+    // available to report the failing plugin.
+    restoreUserState();
 
     // Chain bundle serialise/apply + chain construction.
     chainStatePersistence = std::make_unique<ChainStatePersistence> (
@@ -1081,6 +1075,24 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     }
     recordingMixBuffer.applyGain (dryGain);
 
+    // 2a. Stem capture (0038). While a fresh take or loop capture runs,
+    //     tap the dry pass-through and each record-on-capture chain's
+    //     post-volume output into its own preallocated, sample-aligned
+    //     buffer. The write position mirrors the capture buffer's (module)
+    //     cursor, so stems stay frame-aligned with the captured mix.
+    //     Overdub layers are not stemmed. Monitor solo/mute and the master
+    //     Output never apply — stems follow the capture bus only.
+    int64_t stemPos = -1;
+    if (stemCapture.isArmed() && captureStemsEnabled.load (std::memory_order_acquire))
+    {
+        if (takeRecorder.isRecordingRequested() && ! takeRecorder.isOverdubCapture())
+            stemPos = takeRecorder.getWritePos();
+        else if (looper.isCaptureArmed() && ! looper.isOverdubCapture())
+            stemPos = looper.getLength();
+    }
+    if (stemPos >= 0)
+        stemCapture.writeStem (0, chainInputBuffer, stemPos, dryGain, numSamples);
+
     // Monitor solo: if any chain is soloed, the monitor mix becomes only
     // the soloed chains, and the direct dry pass-through (already in
     // buffer) is muted for true isolation. The capture was built from
@@ -1093,8 +1105,10 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     if (soloActive)
         buffer.clear();
 
-    for (auto* chain : blockChains)
+    for (int chainIndex = 0; chainIndex < static_cast<int> (blockChains.size()); ++chainIndex)
     {
+        auto* chain = blockChains[static_cast<size_t> (chainIndex)];
+
         // A chain with no active plugins is transparent: its scratch
         // would merely hold a copy of the dry input, so summing it
         // back into the mix would double (or triple) the dry signal.
@@ -1149,7 +1163,14 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         ChainRouting::sumInto (buffer, chainScratchBuffer, monitorGain, numSamples, numChannels);
 
         if (chain->isRecordOnCapture() && hardGain > 0.0f)
+        {
             ChainRouting::sumInto (recordingMixBuffer, chainScratchBuffer, hardGain, numSamples, numChannels);
+
+            // Stem for this chain shares the capture inclusion rule: only
+            // when it is record-on-capture and audible. Silent otherwise.
+            if (stemPos >= 0)
+                stemCapture.writeStem (chainIndex + 1, chainScratchBuffer, stemPos, hardGain, numSamples);
+        }
 
         // Per-chain output meter (post-volume; muted chains read 0).
         // Independent of solo/monitor-mute.
@@ -1571,6 +1592,13 @@ void BluePrinterAudioProcessor::startRecording()
     // and is wrap-mixed in on stop. Fresh otherwise.
     takeRecorder.markOverdubPending (takeRecorder.wantsOverdub());
 
+    // Stems are captured for fresh takes only; an overdub layer is not a
+    // fresh mix (0038).
+    if (takeRecorder.wantsOverdub())
+        stemCapture.clear();
+    else
+        armStemsForCapture ("take");
+
     if (metronomeEnabled.load (std::memory_order_acquire) && beats > 0)
     {
         // Count-in: play N beats of click, then start recording. The
@@ -1617,9 +1645,15 @@ void BluePrinterAudioProcessor::setLooperRecording (bool enabled)
             && looper.getCountInBeats() > 0;
 
         if (overdubbing)
+        {
             looper.armOverdub (countIn);
+            stemCapture.clear();
+        }
         else
+        {
             looper.armFresh();
+            armStemsForCapture ("loop");
+        }
 
         if (countIn)
         {
@@ -1649,6 +1683,7 @@ void BluePrinterAudioProcessor::setLooperRecording (bool enabled)
         // The loop is left stopped — press Play to hear the result.
         if (looper.consumeOverdubCapture())
         {
+            stemCapture.clear();
             looper.stopPlaying();
             // Snapshot the pre-layer loop for undo before mixing (0030).
             if (recordBuffer != nullptr)
@@ -1665,6 +1700,8 @@ void BluePrinterAudioProcessor::setLooperRecording (bool enabled)
         else
         {
             trimLooperToMusicalGrid();
+            if (stemCapture.getSource() == "loop")
+                finaliseStems (looper.getLength());
         }
     }
 
@@ -1825,6 +1862,114 @@ int BluePrinterAudioProcessor::saveLoopSnippet()
     return snippet->id;
 }
 
+//==============================================================================
+// Per-chain stem capture (0038).
+void BluePrinterAudioProcessor::setCaptureStemsEnabled (bool enabled)
+{
+    captureStemsEnabled.store (enabled, std::memory_order_release);
+    if (! enabled)
+        stemCapture.clear();
+    listeners.call ([](Listener& l) { l.transportChanged(); });
+}
+
+void BluePrinterAudioProcessor::armStemsForCapture (const juce::String& source)
+{
+    if (! captureStemsEnabled.load (std::memory_order_acquire) || recordBuffer == nullptr)
+    {
+        stemCapture.clear();
+        return;
+    }
+
+    std::vector<juce::String> names;
+    {
+        const juce::ScopedLock sl (chainLock);
+        names.reserve (chains.size());
+        for (auto& chain : chains)
+            names.push_back (chain->getName());
+    }
+
+    stemCapture.arm (source, names, recordBuffer->getNumChannels(), maxRecordSamples);
+}
+
+void BluePrinterAudioProcessor::finaliseStems (int64_t length)
+{
+    if (stemCapture.isArmed())
+        stemCapture.finalise (length);
+}
+
+bool BluePrinterAudioProcessor::exportStems (const juce::String& source,
+                                             const juce::File& target,
+                                             juce::String& outError)
+{
+    if (stemCapture.isArmed())
+    {
+        outError = "Stop the capture before exporting stems.";
+        return false;
+    }
+
+    if (! stemCapture.hasStems() || stemCapture.getSource() != source)
+    {
+        outError = "No stems were captured for this take.";
+        return false;
+    }
+
+    const auto extension = target.getFileExtension().isNotEmpty()
+                               ? target.getFileExtension()
+                               : juce::String (".wav");
+    const auto folder = target.getParentDirectory();
+    const auto baseName = target.getFileNameWithoutExtension();
+    const auto length = stemCapture.getLength();
+    const double sampleRate = getSampleRate() > 0.0 ? getSampleRate() : 44100.0;
+
+    juce::StringArray usedNames;
+    juce::StringArray failures;
+    int written = 0;
+
+    for (int i = 0; i < stemCapture.getNumStems(); ++i)
+    {
+        const auto& stem = stemCapture.getStem (i);
+
+        auto safeName = stem.name.replaceCharacters ("<>:\"/\\|?*", "_").trim();
+        if (safeName.isEmpty())
+            safeName = "Stem";
+
+        juce::String uniqueName = safeName;
+        int suffix = 2;
+        while (usedNames.contains (uniqueName))
+            uniqueName = safeName + "-" + juce::String (suffix++);
+        usedNames.add (uniqueName);
+
+        auto region = CaptureCopy::copyRegion (stem.buffer, 0, length);
+        if (region == nullptr || region->getNumSamples() <= 0)
+        {
+            failures.add (uniqueName + ": no audio");
+            continue;
+        }
+
+        Snippet snippetForExport;
+        snippetForExport.name         = uniqueName;
+        snippetForExport.audio        = region;
+        snippetForExport.numSamples   = length;
+        snippetForExport.numChannels  = region->getNumChannels();
+        snippetForExport.sampleRate   = sampleRate;
+        snippetForExport.gainDb       = 0.0f;
+
+        const auto file = folder.getChildFile (baseName + "-" + uniqueName + extension);
+
+        juce::String fileError;
+        if (SnippetLibrary::exportSnippetToFile (snippetForExport, file, false, fileError))
+            ++written;
+        else
+            failures.add (uniqueName + ": " + fileError);
+    }
+
+    if (failures.isEmpty())
+        return written > 0;
+
+    outError = failures.joinIntoString ("; ");
+    return written > 0;
+}
+
 void BluePrinterAudioProcessor::setLooperPlaying (bool enabled)
 {
     // Loop playback supersedes take-review playback.
@@ -1952,6 +2097,8 @@ void BluePrinterAudioProcessor::redoLoopLayer()
 void BluePrinterAudioProcessor::clearLoop()
 {
     looper.clear();
+    if (stemCapture.getSource() == "loop")
+        stemCapture.clear();
     updateClockRunState();
     listeners.call ([](Listener& l) { l.transportChanged(); });
 }
@@ -2014,6 +2161,8 @@ void BluePrinterAudioProcessor::stopRecording()
         takeRecorder.cancelCountIn();
         transportPosition.store (0, std::memory_order_release);
         updateClockRunState();
+        if (stemCapture.getSource() == "take")
+            stemCapture.clear();
 
         if (wasRecording)
             listeners.call ([](Listener& l) { l.transportChanged(); });
@@ -2026,6 +2175,8 @@ void BluePrinterAudioProcessor::stopRecording()
         if (takeRecorder.getState() != TakeRecorder::State::Idle)
         {
             takeRecorder.cancelCountIn();
+            if (stemCapture.getSource() == "take")
+                stemCapture.clear();
             listeners.call ([](Listener& l) { l.transportChanged(); });
         }
         return;
@@ -2097,6 +2248,9 @@ bool BluePrinterAudioProcessor::deleteSnippet (int id)
         if (snippet != nullptr)
             SnippetLibrary::deleteSavedFiles (*snippet);
 
+        // A deleted snippet leaves every setlist (0035).
+        pruneSetlistsAgainstLibrary();
+
         listeners.call ([](Listener& l) { l.libraryChanged(); l.transportChanged(); });
     }
     return removed;
@@ -2138,6 +2292,23 @@ bool BluePrinterAudioProcessor::setSnippetColor (int id, const juce::String& col
         return persisted;
     }
     return false;
+}
+
+bool BluePrinterAudioProcessor::setSnippetFavourite (int id, bool favourite)
+{
+    if (! library.updateFavourite (id, favourite))
+        return false;
+
+    // Persist immediately: a star toggle is a discrete action, unlike the
+    // gain drag, so no debounce is needed.
+    const bool persisted = library.persistMetadata (id);
+    if (! persisted)
+    {
+        juce::ScopedLock lock (libraryFolderLock);
+        lastSaveError = "Could not save metadata to disk. Make sure a library folder is set.";
+    }
+    listeners.call ([](Listener& l) { l.libraryChanged(); });
+    return persisted;
 }
 
 bool BluePrinterAudioProcessor::setSnippetGain (int id, float gainDb)
@@ -2321,6 +2492,9 @@ void BluePrinterAudioProcessor::setLibraryFolder (const juce::File& folder)
         library.loadFromFolder (folder, loadError);
     }
 
+    // Snippets whose files vanished leave every setlist (0035).
+    pruneSetlistsAgainstLibrary();
+
     listeners.call ([](Listener& l) { l.libraryChanged(); });
 }
 
@@ -2337,6 +2511,9 @@ void BluePrinterAudioProcessor::refreshLibraryFromFolder()
         juce::String loadError;
         library.loadFromFolder (folder, loadError);
     }
+
+    // Snippets whose files vanished leave every setlist (0035).
+    pruneSetlistsAgainstLibrary();
 
     listeners.call ([](Listener& l) { l.libraryChanged(); });
 }
@@ -2687,6 +2864,96 @@ void BluePrinterAudioProcessor::flushTagNamePersist()
     }
 }
 
+std::vector<SetlistEntry> BluePrinterAudioProcessor::getSetlists() const
+{
+    return setlists.all();
+}
+
+void BluePrinterAudioProcessor::armSetlistPersist()
+{
+    setlistPersistPending = true;
+    setlistPersistDeadline = juce::Time::currentTimeMillis() + 500;
+}
+
+void BluePrinterAudioProcessor::flushSetlistPersist()
+{
+    if (! setlistPersistPending)
+        return;
+
+    setlistPersistPending = false;
+    if (auto* props = getUserState())
+    {
+        props->setValue ("setlists", setlists.toJson());
+        props->saveIfNeeded();
+    }
+}
+
+juce::String BluePrinterAudioProcessor::createSetlist (const juce::String& name)
+{
+    const auto id = setlists.create (name);
+    if (id.isNotEmpty())
+    {
+        armSetlistPersist();
+        listeners.call ([](Listener& l) { l.libraryChanged(); });
+    }
+    return id;
+}
+
+bool BluePrinterAudioProcessor::renameSetlist (const juce::String& id, const juce::String& name)
+{
+    if (! setlists.rename (id, name))
+        return false;
+    armSetlistPersist();
+    listeners.call ([](Listener& l) { l.libraryChanged(); });
+    return true;
+}
+
+bool BluePrinterAudioProcessor::deleteSetlist (const juce::String& id)
+{
+    if (! setlists.remove (id))
+        return false;
+    armSetlistPersist();
+    listeners.call ([](Listener& l) { l.libraryChanged(); });
+    return true;
+}
+
+bool BluePrinterAudioProcessor::addSnippetToSetlist (const juce::String& id, int snippetId)
+{
+    if (! setlists.addSnippet (id, snippetId))
+        return false;
+    armSetlistPersist();
+    listeners.call ([](Listener& l) { l.libraryChanged(); });
+    return true;
+}
+
+bool BluePrinterAudioProcessor::removeSnippetFromSetlist (const juce::String& id, int snippetId)
+{
+    if (! setlists.removeSnippet (id, snippetId))
+        return false;
+    armSetlistPersist();
+    listeners.call ([](Listener& l) { l.libraryChanged(); });
+    return true;
+}
+
+bool BluePrinterAudioProcessor::setSetlistOrder (const juce::String& id, const std::vector<int>& snippetIds)
+{
+    if (! setlists.setOrder (id, snippetIds))
+        return false;
+    armSetlistPersist();
+    listeners.call ([](Listener& l) { l.libraryChanged(); });
+    return true;
+}
+
+void BluePrinterAudioProcessor::pruneSetlistsAgainstLibrary()
+{
+    std::vector<int> validIds;
+    for (const auto& snippet : library.snapshot())
+        validIds.push_back (snippet->id);
+
+    if (setlists.prune (validIds))
+        armSetlistPersist();
+}
+
 int BluePrinterAudioProcessor::getSavedEditorWidth()
 {
     if (auto* props = getUserState())
@@ -2955,6 +3222,10 @@ void BluePrinterAudioProcessor::timerCallback()
     if (tagPersistPending && juce::Time::currentTimeMillis() >= tagPersistDeadline)
         flushTagNamePersist();
 
+    // Same for the named setlists (0035).
+    if (setlistPersistPending && juce::Time::currentTimeMillis() >= setlistPersistDeadline)
+        flushSetlistPersist();
+
     // Flush the debounced snippet-gain save (Gain knob drags).
     if (snippetGainPersistPending
         && juce::Time::currentTimeMillis() >= snippetGainPersistDeadline)
@@ -3180,6 +3451,7 @@ void BluePrinterAudioProcessor::finalizeRecordingOnMessageThread()
     // wrap-mixed into it and the take is replaced in place (same id).
     if (takeRecorder.consumeOverdubCapture())
     {
+        stemCapture.clear();
         const auto takeLen = takeRecorder.getSelectedTakeLength();
         int layerEnd = 0;
         {
@@ -3240,6 +3512,10 @@ void BluePrinterAudioProcessor::finalizeRecordingOnMessageThread()
     auto peaks = SnippetLibrary::computePeaks (*audio, 256);
     takeRecorder.addTake (std::move (audio), captured, std::move (peaks));
 
+    // Stems were captured in lockstep with the take, so they share its length.
+    if (stemCapture.getSource() == "take")
+        finaliseStems (captured);
+
     listeners.call ([](Listener& l) { l.transportChanged(); });
 }
 
@@ -3256,6 +3532,8 @@ void BluePrinterAudioProcessor::discardTake (int id)
     if (takeRecorder.isActive() || takeRecorder.isOverdubCapture())
         return;
     takeRecorder.deleteTake (id > 0 ? id : takeRecorder.getSelectedTakeId());
+    if (stemCapture.getSource() == "take")
+        stemCapture.clear();
     listeners.call ([](Listener& l) { l.transportChanged(); });
 }
 
@@ -3263,6 +3541,8 @@ void BluePrinterAudioProcessor::selectTake (int id)
 {
     if (takeRecorder.isActive() || takeRecorder.isOverdubCapture())
         return;
+    if (id != takeRecorder.getSelectedTakeId() && stemCapture.getSource() == "take")
+        stemCapture.clear();
     takeRecorder.selectTake (id);
     listeners.call ([](Listener& l) { l.transportChanged(); });
 }
@@ -3272,6 +3552,8 @@ void BluePrinterAudioProcessor::discardAllTakes()
     if (takeRecorder.isActive() || takeRecorder.isOverdubCapture())
         return;
     takeRecorder.clearTakes();
+    if (stemCapture.getSource() == "take")
+        stemCapture.clear();
     listeners.call ([](Listener& l) { l.transportChanged(); });
 }
 
@@ -3322,6 +3604,8 @@ void BluePrinterAudioProcessor::savePendingTake()
     if (audio == nullptr || audio->getNumSamples() <= 0)
     {
         takeRecorder.deleteTake (id);
+        if (stemCapture.getSource() == "take")
+            stemCapture.clear();
         listeners.call ([](Listener& l) { l.transportChanged(); });
         return;
     }
@@ -3334,6 +3618,8 @@ void BluePrinterAudioProcessor::savePendingTake()
 
     // The saved take leaves the stack — it is a library snippet now.
     takeRecorder.deleteTake (id);
+    if (stemCapture.getSource() == "take")
+        stemCapture.clear();
     listeners.call ([](Listener& l) { l.libraryChanged(); l.transportChanged(); });
 
     if (snippet != nullptr)
@@ -3369,6 +3655,8 @@ void BluePrinterAudioProcessor::discardPendingTake()
         return;
 
     takeRecorder.deleteTake (takeRecorder.getSelectedTakeId());
+    if (stemCapture.getSource() == "take")
+        stemCapture.clear();
     listeners.call ([](Listener& l) { l.transportChanged(); });
 }
 
@@ -3632,7 +3920,7 @@ void BluePrinterAudioProcessor::restoreUserState()
         }
     }
 
-    // 3. User tag names for the snippet colours. Stored as a JSON
+    // 2. User tag names for the snippet colours. Stored as a JSON
     //    object keyed by colour key; empty names are dropped.
     const auto tagsJson = props->getValue ("tagNames");
     if (tagsJson.isNotEmpty())
@@ -3646,21 +3934,24 @@ void BluePrinterAudioProcessor::restoreUserState()
         }
     }
 
-    // 4. VST3 chains. Guarded so the addPlugin calls inside don't
-    // trigger a redundant write back to the file. The bundle holds
-    // the chain slots plus the shared library (blocklist + cached
-    // scan). loadSavedState picks whichever saved key actually
-    // holds chain content.
-    const auto chainVar = ChainStatePersistence::loadSavedState (*props);
-    if (chainVar.isObject())
+    // 3. Named setlists (0035). JSON array of { id, name, ids }. Loaded
+    //    after the folder so we can drop entries whose snippet no longer
+    //    exists (file removed or moved since the last run).
+    const auto setlistsJson = props->getValue ("setlists");
+    if (setlistsJson.isNotEmpty())
+        setlists.fromJson (setlistsJson);
     {
-        persistingPluginChain.store (true, std::memory_order_release);
-        juce::String error;
-        applyChainState (chainVar, error);
-        persistingPluginChain.store (false, std::memory_order_release);
-        if (error.isNotEmpty())
-            lastChainRestoreError = error;
+        std::vector<int> validIds;
+        for (const auto& snippet : library.snapshot())
+            validIds.push_back (snippet->id);
+        if (setlists.prune (validIds))
+            armSetlistPersist();
     }
+
+    // VST3 chain restoration is deliberately NOT done here: it must run
+    // after the device is prepared and the UI is up to report a failing
+    // plugin. restoreSavedPluginChains() (and the host's setStateInformation)
+    // own that deferred restore.
 }
 
 void BluePrinterAudioProcessor::restoreSavedPluginChains()

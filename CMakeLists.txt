@@ -47,6 +47,8 @@ target_sources(BluePrinter PRIVATE
     Source/TakeRecorder.cpp
     Source/Looper.cpp
     Source/RestoreSelfHeal.cpp
+    Source/StemCapture.cpp
+    Source/SetlistStore.cpp
     Source/ChainStatePersistence.cpp)
 
 target_include_directories(BluePrinter PRIVATE
@@ -206,6 +208,8 @@ if(BUILD_TESTING)
         Tests/test_TakeRecorder.cpp
         Tests/test_Looper.cpp
         Tests/test_RestoreSelfHeal.cpp
+        Tests/test_StemCapture.cpp
+        Tests/test_SetlistStore.cpp
         # Production sources under test. Kept deliberately minimal so the
         # test target never pulls in WebView2, the plugin host, or the
         # audio device layer.
@@ -218,7 +222,9 @@ if(BUILD_TESTING)
         Source/MetronomePlayer.cpp
         Source/TakeRecorder.cpp
         Source/Looper.cpp
-        Source/RestoreSelfHeal.cpp)
+        Source/RestoreSelfHeal.cpp
+        Source/StemCapture.cpp
+        Source/SetlistStore.cpp)
 
     juce_generate_juce_header(BluePrinterTests)
 

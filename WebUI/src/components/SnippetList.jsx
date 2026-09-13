@@ -72,18 +72,132 @@ function TagRenamePopover({ tagNames, onRenameTag, onClose }) {
   );
 }
 
-export function SnippetList({ snippets, tagNames, onRenameTag, playingSnippetId, playPositionSeconds, folder }) {
+// Popover to create, rename and delete setlists. Reordering happens in
+// the setlist-filtered view (the up/down controls on each card).
+function SetlistManagePopover({ setlists, snippets, onCreate, onRename, onDelete, onClose }) {
+  const [newName, setNewName] = useState("");
+  const [draft, setDraft] = useState(() => Object.fromEntries(setlists.map((s) => [s.id, s.name])));
+  const [confirmId, setConfirmId] = useState(null);
+
+  useEffect(() => {
+    if (!confirmId) return undefined;
+    const t = setTimeout(() => setConfirmId(null), 3500);
+    return () => clearTimeout(t);
+  }, [confirmId]);
+
+  const submitNew = () => {
+    const trimmed = newName.trim();
+    if (!trimmed) return;
+    onCreate?.(trimmed);
+    setNewName("");
+  };
+
+  const commitRename = (id) => {
+    const value = String(draft[id] ?? "").trim();
+    const current = setlists.find((s) => s.id === id)?.name ?? "";
+    if (value && value !== current) onRename?.(id, value);
+    else if (!value) setDraft((prev) => ({ ...prev, [id]: current }));
+  };
+
+  return (
+    <div className="snippet-tags-popover" role="dialog" aria-label="Manage setlists">
+      <div className="snippet-tags-popover-header">
+        <span className="snippet-tags-popover-title">Setlists</span>
+        <button type="button" className="icon-btn" onClick={onClose} title="Close" aria-label="Close">
+          <IconX size={13} />
+        </button>
+      </div>
+      <p className="snippet-tags-popover-hint">
+        Group takes for a performance. Open a snippet and use its Setlists row to add it.
+      </p>
+
+      <div className="snippet-tag-rename-row">
+        <input
+          type="text"
+          maxLength={60}
+          value={newName}
+          placeholder="New setlist name"
+          onChange={(e) => setNewName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") submitNew();
+            if (e.key === "Escape") onClose();
+          }}
+          aria-label="New setlist name"
+        />
+        <button type="button" className="btn btn-sm" onClick={submitNew} disabled={!newName.trim()}>
+          Add
+        </button>
+      </div>
+
+      {setlists.length === 0 ? (
+        <p className="snippet-tags-popover-hint">No setlists yet.</p>
+      ) : setlists.map((sl) => {
+        const count = sl.ids.filter((id) => snippets.some((s) => s.id === id)).length;
+        return (
+          <div key={sl.id} className="snippet-tag-rename-row">
+            <input
+              type="text"
+              maxLength={60}
+              value={draft[sl.id] ?? sl.name}
+              onChange={(e) => setDraft((prev) => ({ ...prev, [sl.id]: e.target.value }))}
+              onBlur={() => commitRename(sl.id)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") e.currentTarget.blur();
+                if (e.key === "Escape") onClose();
+              }}
+              aria-label={`Rename setlist ${sl.name}`}
+            />
+            <span className="snippet-setlist-count" title={`${count} take${count === 1 ? "" : "s"}`}>{count}</span>
+            <button
+              type="button"
+              className={`btn btn-sm btn-danger ${confirmId === sl.id ? "is-armed" : ""}`}
+              onClick={() => {
+                if (confirmId === sl.id) {
+                  onDelete?.(sl.id);
+                  setConfirmId(null);
+                } else {
+                  setConfirmId(sl.id);
+                }
+              }}
+              title={confirmId === sl.id ? "Click again to delete this setlist" : "Delete setlist"}
+            >
+              {confirmId === sl.id ? "Confirm?" : "Delete"}
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+export function SnippetList({
+  snippets,
+  tagNames,
+  setlists = [],
+  onRenameTag,
+  onCreateSetlist,
+  onRenameSetlist,
+  onDeleteSetlist,
+  onToggleSnippetSetlist,
+  onSetSetlistOrder,
+  playingSnippetId,
+  playPositionSeconds,
+  folder,
+}) {
   const [query, setQuery] = useState("");
   const [sortBy, setSortBy] = useState("newest");
   const [tagFilter, setTagFilter] = useState(() => new Set());
   const [keyFilter, setKeyFilter] = useState("");
+  const [favouritesOnly, setFavouritesOnly] = useState(false);
+  const [setlistFilter, setSetlistFilter] = useState("");
   const [tagsOpen, setTagsOpen] = useState(false);
+  const [setlistsOpen, setSetlistsOpen] = useState(false);
   const [visibleCount, setVisibleCount] = useState(VISIBLE_PAGE);
 
   // Any filter/sort change restarts the visible window at the top.
   useEffect(() => {
     setVisibleCount(VISIBLE_PAGE);
-  }, [query, sortBy, tagFilter, keyFilter]);
+  }, [query, sortBy, tagFilter, keyFilter, favouritesOnly, setlistFilter]);
 
   // Distinct detected keys present in the library (sorted), for the
   // key filter dropdown.
@@ -95,10 +209,17 @@ export function SnippetList({ snippets, tagNames, onRenameTag, playingSnippetId,
     return [...keys].sort();
   }, [snippets]);
 
+  const activeSetlist = useMemo(
+    () => setlists.find((sl) => sl.id === setlistFilter) ?? null,
+    [setlists, setlistFilter],
+  );
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     const tagKeys = [...tagFilter];
     return snippets.filter((s) => {
+      if (favouritesOnly && !s.favourite) return false;
+      if (activeSetlist && !activeSetlist.ids.includes(s.id)) return false;
       if (tagKeys.length > 0) {
         const color = String(s.color ?? "");
         const matchesTag = color !== "" && tagKeys.includes(color);
@@ -121,9 +242,20 @@ export function SnippetList({ snippets, tagNames, onRenameTag, playingSnippetId,
       }
       return true;
     });
-  }, [snippets, query, tagFilter, keyFilter]);
+  }, [snippets, query, tagFilter, keyFilter, favouritesOnly, activeSetlist]);
 
   const ordered = useMemo(() => {
+    // Inside a setlist, the setlist's own order is authoritative and stable.
+    if (activeSetlist) {
+      const byId = new Map(filtered.map((s) => [s.id, s]));
+      const inOrder = [];
+      for (const id of activeSetlist.ids) {
+        const s = byId.get(id);
+        if (s) inOrder.push(s);
+      }
+      return inOrder;
+    }
+
     const sorters = {
       newest: (a, b) => b.id - a.id,
       oldest: (a, b) => a.id - b.id,
@@ -133,7 +265,7 @@ export function SnippetList({ snippets, tagNames, onRenameTag, playingSnippetId,
       shortest: (a, b) => (Number(a.durationSeconds) || 0) - (Number(b.durationSeconds) || 0),
     };
     return [...filtered].sort(sorters[sortBy] ?? sorters.newest);
-  }, [filtered, sortBy]);
+  }, [filtered, sortBy, activeSetlist]);
 
   const toggleTag = (key) => {
     setTagFilter((prev) => {
@@ -144,7 +276,18 @@ export function SnippetList({ snippets, tagNames, onRenameTag, playingSnippetId,
     });
   };
 
-  const isFiltering = tagFilter.size > 0 || keyFilter !== "" || query.trim() !== "";
+  const moveInSetlist = (setlist, snippetId, delta) => {
+    if (!onSetSetlistOrder) return;
+    const ids = [...setlist.ids];
+    const i = ids.indexOf(snippetId);
+    const j = i + delta;
+    if (i < 0 || j < 0 || j >= ids.length) return;
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+    onSetSetlistOrder(setlist.id, ids);
+  };
+
+  const isFiltering = tagFilter.size > 0 || keyFilter !== "" || query.trim() !== ""
+    || favouritesOnly || setlistFilter !== "";
   const activeTagCount = tagFilter.size;
   const visibleTakes = ordered.slice(0, visibleCount);
   const hiddenCount = ordered.length - visibleTakes.length;
@@ -180,6 +323,21 @@ export function SnippetList({ snippets, tagNames, onRenameTag, playingSnippetId,
           </select>
         </label>
 
+        {setlists.length > 0 ? (
+          <label className="snippet-toolbar-select" title="Show one setlist in its saved order">
+            <select
+              value={setlistFilter}
+              onChange={(e) => setSetlistFilter(e.target.value)}
+              aria-label="Filter by setlist"
+            >
+              <option value="">All takes</option>
+              {setlists.map((sl) => (
+                <option key={sl.id} value={sl.id}>{sl.name}</option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+
         <label className="snippet-toolbar-select" title="Filter by detected key">
           <select value={keyFilter} onChange={(e) => setKeyFilter(e.target.value)} aria-label="Filter by key">
             <option value="">Any key</option>
@@ -189,6 +347,16 @@ export function SnippetList({ snippets, tagNames, onRenameTag, playingSnippetId,
             ))}
           </select>
         </label>
+
+        <button
+          type="button"
+          className={`snippet-fav-filter ${favouritesOnly ? "is-active" : ""}`}
+          onClick={() => setFavouritesOnly((v) => !v)}
+          aria-pressed={favouritesOnly}
+          title={favouritesOnly ? "Showing favourites only" : "Show only favourites"}
+        >
+          {favouritesOnly ? "★" : "☆"} Favourites
+        </button>
 
         <div className="snippet-tags-control">
           <button
@@ -205,6 +373,31 @@ export function SnippetList({ snippets, tagNames, onRenameTag, playingSnippetId,
           </button>
           {tagsOpen ? (
             <TagRenamePopover tagNames={tagNames} onRenameTag={onRenameTag} onClose={() => setTagsOpen(false)} />
+          ) : null}
+        </div>
+
+        <div className="snippet-tags-control">
+          <button
+            type="button"
+            className={`snippet-tags-btn ${setlistsOpen ? "is-open" : ""}`}
+            onClick={() => setSetlistsOpen((v) => !v)}
+            aria-expanded={setlistsOpen}
+            aria-haspopup="dialog"
+            title="Create, rename or delete setlists"
+          >
+            <IconTag size={13} />
+            Setlists
+            {setlists.length > 0 ? <span className="snippet-tags-count">{setlists.length}</span> : null}
+          </button>
+          {setlistsOpen ? (
+            <SetlistManagePopover
+              setlists={setlists}
+              snippets={snippets}
+              onCreate={onCreateSetlist}
+              onRename={onRenameSetlist}
+              onDelete={onDeleteSetlist}
+              onClose={() => setSetlistsOpen(false)}
+            />
           ) : null}
         </div>
       </div>
@@ -241,8 +434,10 @@ export function SnippetList({ snippets, tagNames, onRenameTag, playingSnippetId,
               setQuery("");
               setKeyFilter("");
               setTagFilter(new Set());
+              setFavouritesOnly(false);
+              setSetlistFilter("");
             }}
-            title="Clear search, tag and key filters"
+            title="Clear search, tag, key, setlist and favourite filters"
           >
             <IconX size={11} />
             Clear
@@ -282,6 +477,15 @@ export function SnippetList({ snippets, tagNames, onRenameTag, playingSnippetId,
                 key={s.id}
                 snippet={s}
                 tagNames={tagNames}
+                setlists={setlists}
+                onToggleSnippetSetlist={onToggleSnippetSetlist}
+                reorderContext={activeSetlist && activeSetlist.ids.includes(s.id)
+                  ? {
+                      index: activeSetlist.ids.indexOf(s.id),
+                      count: activeSetlist.ids.length,
+                      onMove: (delta) => moveInSetlist(activeSetlist, s.id, delta),
+                    }
+                  : null}
                 isPlaying={s.id === playingSnippetId}
                 playPositionSeconds={playPositionSeconds}
               />

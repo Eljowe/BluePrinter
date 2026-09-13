@@ -19,6 +19,8 @@
 #include "LooperGridMath.h"
 #include "TakeRecorder.h"
 #include "Looper.h"
+#include "StemCapture.h"
+#include "SetlistStore.h"
 #include "RestoreSelfHeal.h"
 #include "ChainStatePersistence.h"
 #include <deque>
@@ -155,6 +157,10 @@ public:
     // palette keys, or empty to clear). Persists to the sidecar JSON
     // and notifies the UI.
     bool setSnippetColor (int id, const juce::String& color);
+
+    // Set the user favourite (star) flag on a snippet. Persists to the
+    // sidecar JSON and notifies the UI.
+    bool setSnippetFavourite (int id, bool favourite);
 
     // Non-destructive playback trim (dB, -24..+24) for one snippet.
     // Persists to the sidecar JSON and notifies the UI.
@@ -403,6 +409,21 @@ public:
     // loop.
     int saveLoopSnippet();
 
+    // Per-chain stem capture (0038). Session-only: when enabled, a fresh
+    // take or loop capture also records the dry pass-through and each
+    // record-on-capture chain's post-volume output into aligned,
+    // preallocated buffers. exportStems writes one file per stem next to
+    // `target` (`<base>-<stem><ext>`), reusing the snippet export formats.
+    // Stems follow the capture bus only — monitor solo/mute and the master
+    // Output never change them, and only the most recent capture's stems
+    // are kept. Message thread only.
+    void    setCaptureStemsEnabled (bool enabled);
+    bool    isCaptureStemsEnabled() const { return captureStemsEnabled.load (std::memory_order_acquire); }
+    bool    hasCaptureStems() const { return stemCapture.hasStems(); }
+    const juce::String& getStemSource() const { return stemCapture.getSource(); }
+    bool    exportStems (const juce::String& source, const juce::File& target,
+                         juce::String& outError);
+
     // MIDI clock output for syncing external hardware (analog drum
     // machines, sequencers). One header-level toggle: when on, the clock
     // free-runs (Start + 24 ppqn) and takes / loop captures ride it,
@@ -426,6 +447,17 @@ public:
     // on the frontend. Message thread only.
     std::map<juce::String, juce::String> getTagNames() const;
     void setTagName (const juce::String& colorKey, const juce::String& name);
+
+    // Named setlists (0035): ordered lists of snippet ids, persisted as a
+    // JSON array under the `setlists` properties key. Message thread only.
+    // Every mutation persists (debounced) and notifies libraryChanged.
+    std::vector<SetlistEntry> getSetlists() const;
+    juce::String createSetlist (const juce::String& name);
+    bool renameSetlist (const juce::String& id, const juce::String& name);
+    bool deleteSetlist (const juce::String& id);
+    bool addSnippetToSetlist (const juce::String& id, int snippetId);
+    bool removeSnippetFromSetlist (const juce::String& id, int snippetId);
+    bool setSetlistOrder (const juce::String& id, const std::vector<int>& snippetIds);
 
     // Editor window size, persisted in the properties file so a resized
     // window is restored on the next launch (the JUCE standalone wrapper
@@ -588,6 +620,13 @@ private:
     bool tagPersistPending = false;
     int64_t tagPersistDeadline = 0;
     void flushTagNamePersist();
+    // Named setlists (0035), same debounced-persist pattern as tagNames.
+    SetlistStore setlists;
+    bool setlistPersistPending = false;
+    int64_t setlistPersistDeadline = 0;
+    void armSetlistPersist();
+    void flushSetlistPersist();
+    void pruneSetlistsAgainstLibrary();
     // Debounced per-snippet gain persist: the Gain knob emits on every
     // pointer move, so both the sidecar write and the (expensive) library
     // snapshot push are deferred to timerCallback. The in-memory value is
@@ -696,6 +735,14 @@ private:
     // Looper.h; the shared capture buffer and record lock stay here.
     Looper looper;
 
+    // Per-chain stem capture (0038). The message thread arms/finalises
+    // (allocating); the audio thread only copies into the preallocated
+    // buffers. See StemCapture.h.
+    StemCapture stemCapture;
+    std::atomic<bool> captureStemsEnabled { false };
+    void armStemsForCapture (const juce::String& source);
+    void finaliseStems (int64_t length);
+
     void updateLoopClipLatch();
     bool canEditLoopHistory() const;
     std::atomic<float>   loopLevel        { 0.0f };
@@ -793,8 +840,11 @@ private:
     // keep working in-memory without crashing.
     juce::PropertiesFile* getUserState();
 
-    // One-shot restore from userState: sets the library folder (which
-    // also auto-loads snippets) and replays the saved VST3 chain.
+    // One-shot restore of the non-chain userState at construction: sets the
+    // library folder (which also auto-loads snippets), restores the snippet
+    // colour tag names, and captures the launch-time properties mtime for
+    // the crash self-heal anchor. VST3 chain restoration is deliberately
+    // deferred to restoreSavedPluginChains()/setStateInformation.
     // Safe to call on every construction; no-op if userState is empty.
     void restoreUserState();
 

@@ -83,6 +83,7 @@ BP_TEST (SnippetSidecar_roundTripsMetadataThroughDisk)
     snippet->detectedNotes.add ("A");
     snippet->color = "teal";
     snippet->gainDb = -3.5f;
+    snippet->favourite = true;
 
     juce::String path, error;
     BP_CHECK (source.saveSnippetToFolder (*snippet, dir, path, error));
@@ -102,11 +103,28 @@ BP_TEST (SnippetSidecar_roundTripsMetadataThroughDisk)
     BP_CHECK (roundTripped->detectedNotes.contains ("F#"));
     BP_CHECK_EQ (roundTripped->color, juce::String ("teal"));
     BP_CHECK_NEAR (roundTripped->gainDb, -3.5, 1e-4);
+    BP_CHECK (roundTripped->favourite);
     BP_CHECK_NEAR (roundTripped->sampleRate, 48000.0, 1e-6);
     BP_CHECK_EQ (roundTripped->numChannels, 1);
     BP_CHECK_EQ (static_cast<int> (roundTripped->numSamples), 2000);
 
     dir.deleteRecursively();
+}
+
+BP_TEST (SnippetLibrary_updateFavouriteTogglesAndPersists)
+{
+    SnippetLibrary library;
+    auto snippet = library.addSnippet (makeBuffer (1, 100, 0.1f), 44100.0, "fav");
+    BP_CHECK (snippet != nullptr);
+    BP_CHECK (! snippet->favourite);
+
+    BP_CHECK (library.updateFavourite (snippet->id, true));
+    BP_CHECK (library.findById (snippet->id)->favourite);
+
+    BP_CHECK (library.updateFavourite (snippet->id, false));
+    BP_CHECK (! library.findById (snippet->id)->favourite);
+
+    BP_CHECK (! library.updateFavourite (9999, true));
 }
 
 BP_TEST (SnippetExport_writesLosslessAudioAndOptionallyAppliesGain)

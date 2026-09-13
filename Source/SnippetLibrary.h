@@ -36,6 +36,9 @@ struct Snippet
     // the monitored/played-back audio only — it is never baked into the
     // saved WAV. Persisted in the sidecar JSON.
     float gainDb = 0.0f;
+    // User favourite (star). Persisted in the sidecar JSON; drives the
+    // toolbar's Favourites filter.
+    bool favourite = false;
 };
 
 class SnippetLibrary
@@ -57,6 +60,9 @@ public:
 
     // Set the non-destructive playback trim (dB, clamped to -24..+24).
     bool updateGain (int id, float gainDb);
+
+    // Set the user favourite (star) flag.
+    bool updateFavourite (int id, bool favourite);
 
     bool markSaved (int id, const juce::String& path);
 

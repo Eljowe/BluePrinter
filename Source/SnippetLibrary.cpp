@@ -128,6 +128,20 @@ bool SnippetLibrary::updateGain (int id, float gainDb)
     return false;
 }
 
+bool SnippetLibrary::updateFavourite (int id, bool favourite)
+{
+    const std::lock_guard<std::mutex> lock (mutex);
+    for (auto& s : snippets)
+    {
+        if (s->id == id)
+        {
+            s->favourite = favourite;
+            return true;
+        }
+    }
+    return false;
+}
+
 bool SnippetLibrary::markSaved (int id, const juce::String& path)
 {
     const std::lock_guard<std::mutex> lock (mutex);
@@ -306,6 +320,7 @@ bool SnippetLibrary::loadFromFolder (const juce::File& folder, juce::String& out
         juce::StringArray detectedNotes;
         juce::String color;
         float gainDb = 0.0f;
+        bool favourite = false;
 
         auto jsonFile = audioFile.getSiblingFile (audioFile.getFileNameWithoutExtension() + ".json");
         if (jsonFile.existsAsFile())
@@ -325,6 +340,8 @@ bool SnippetLibrary::loadFromFolder (const juce::File& folder, juce::String& out
                 color = obj->getProperty ("color").toString();
                 // Old sidecars won't have gainDb; missing field is 0 dB.
                 gainDb = static_cast<float> (obj->getProperty ("gainDb"));
+                // Old sidecars won't have favourite; missing field is false.
+                favourite = static_cast<bool> (obj->getProperty ("favourite"));
 
                 // Old sidecars won't have this; missing field is fine.
                 if (auto* notesArray = obj->getProperty ("notes").getArray())
@@ -360,6 +377,7 @@ bool SnippetLibrary::loadFromFolder (const juce::File& folder, juce::String& out
         snippet->detectedNotes = detectedNotes;
         snippet->color        = color;
         snippet->gainDb       = juce::jlimit (-24.0f, 24.0f, gainDb);
+        snippet->favourite    = favourite;
 
         {
             const std::lock_guard<std::mutex> lock (mutex);
@@ -460,6 +478,8 @@ bool SnippetLibrary::writeMetadataFile (const Snippet& snippet, const juce::File
 
     // Always written (including 0 dB) so the sidecar round-trips the trim.
     meta->setProperty ("gainDb", snippet.gainDb);
+    // Always written so the sidecar round-trips the favourite flag.
+    meta->setProperty ("favourite", snippet.favourite);
 
     jsonFile.deleteFile();
     juce::FileOutputStream stream (jsonFile);

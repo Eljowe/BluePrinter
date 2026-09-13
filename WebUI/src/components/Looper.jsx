@@ -537,6 +537,17 @@ export function Looper({ transport, onOverdubChange, onLoopLevelChange, onOverdu
           <button type="button" className="btn btn-ghost btn-sm" disabled={!hasLoop} onClick={() => emit(FRONTEND_EVENTS.saveLoop)}>
             <IconSave size={13} /> Save to library
           </button>
+          {transport?.stemsAvailable && transport?.stemSource === "loop" ? (
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              disabled={isRecording}
+              onClick={() => emit(FRONTEND_EVENTS.exportStems, { source: "loop" })}
+              title="Export one file per chain (plus the dry input) — the stems sum back to the captured loop"
+            >
+              Export stems
+            </button>
+          ) : null}
           <button
             type="button"
             className="btn btn-ghost btn-sm"
