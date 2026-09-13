@@ -43,7 +43,11 @@ target_sources(BluePrinter PRIVATE
     Source/ChainPreset.cpp
     Source/ClickSynth.cpp
     Source/MetronomePlayer.cpp
-    Source/MidiClockOutput.cpp)
+    Source/MidiClockOutput.cpp
+    Source/TakeRecorder.cpp
+    Source/Looper.cpp
+    Source/RestoreSelfHeal.cpp
+    Source/ChainStatePersistence.cpp)
 
 target_include_directories(BluePrinter PRIVATE
     ${CMAKE_CURRENT_BINARY_DIR})
@@ -199,6 +203,9 @@ if(BUILD_TESTING)
         Tests/test_PreRollMath.cpp
         Tests/test_Tuner.cpp
         Tests/test_ChainPreset.cpp
+        Tests/test_TakeRecorder.cpp
+        Tests/test_Looper.cpp
+        Tests/test_RestoreSelfHeal.cpp
         # Production sources under test. Kept deliberately minimal so the
         # test target never pulls in WebView2, the plugin host, or the
         # audio device layer.
@@ -208,7 +215,10 @@ if(BUILD_TESTING)
         Source/ChainStateMigration.cpp
         Source/ChainPreset.cpp
         Source/ClickSynth.cpp
-        Source/MetronomePlayer.cpp)
+        Source/MetronomePlayer.cpp
+        Source/TakeRecorder.cpp
+        Source/Looper.cpp
+        Source/RestoreSelfHeal.cpp)
 
     juce_generate_juce_header(BluePrinterTests)
 
@@ -218,6 +228,7 @@ if(BUILD_TESTING)
     target_link_libraries(BluePrinterTests PRIVATE
         juce::juce_dsp
         juce::juce_audio_formats
+        juce::juce_data_structures
         juce::juce_core)
 
     add_test(NAME BluePrinterTests COMMAND BluePrinterTests)
