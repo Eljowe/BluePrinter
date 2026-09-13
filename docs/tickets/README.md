@@ -124,6 +124,26 @@ and briefed.
 | [0044](0044-macos-packaging.md) | macOS packaging (unsigned) | done | — |
 | [0045](0045-linux-packaging.md) | Linux packaging (AppImage + .deb) | done | — |
 
+### Phase 9 — Candidate roadmap (next, untriaged)
+
+Brainstormed after 0028 closed. All start `needs-triage`; grill + brief each
+before claiming.
+
+| Ticket | Title | Status | Blocked by |
+| ------ | ----- | ------ | ---------- |
+| [0046](0046-plugin-delay-compensation.md) | Plugin delay compensation for parallel chains | needs-triage | — |
+| [0047](0047-chain-cpu-latency-readout.md) | Per-chain CPU and reported latency readout | needs-triage | — |
+| [0048](0048-monitor-clip-guard.md) | Monitor/output clip guard | needs-triage | — |
+| [0049](0049-tap-tempo.md) | Tap tempo | needs-triage | — |
+| [0050](0050-click-subdivisions.md) | Click subdivisions and accents | needs-triage | — |
+| [0051](0051-backing-track-import.md) | Backing-track import with tempo/key detection | needs-triage | — |
+| [0052](0052-tempo-locked-loop-playback.md) | Tempo-locked (time-stretched) loop playback | needs-triage | — |
+| [0053](0053-practice-scale-helper.md) | Practice helper: scale/chord overlay from the detected key | needs-triage | — |
+
+Themes: **audio integrity** (0046–0048) and **practice & songwriting**
+(0049–0053). Suggested order: 0046 → 0049/0050 → 0051 → 0052, with 0047/0048
+and 0053 as smaller follow-ups.
+
 ## Roadmap notes
 
 - Ordered by risk-reduction first, then user-visible wins, with the refactor
@@ -135,6 +155,8 @@ and briefed.
   diagnostics), 0044 (macOS `.dmg`) and 0045 (Linux `.deb` + AppImage) — all
   done. The per-platform install/launch smoke tests are human steps tracked in
   0042/0044/0045.
-- **Phase 7** holds untriaged candidate features spun up from the roadmap
-  brainstorm; triage/grill them before claiming. 0039 sits behind 0015 so update
-  delivery only ever ships signed binaries.
+- **Phase 7** is exhausted (0039 still sits behind 0015 so update delivery only
+  ever ships signed binaries). **Phase 9** is the next untriaged candidate set:
+  audio integrity (0046 PDC, 0047 CPU/latency, 0048 clip guard) and practice &
+  songwriting (0049 tap tempo, 0050 click subdivisions, 0051 backing track,
+  0052 time-stretch, 0053 scale helper).
