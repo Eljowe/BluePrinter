@@ -1,7 +1,7 @@
 ---
 id: "0042"
 title: "Portable build foundation + macOS/Linux CI"
-status: ready-for-agent
+status: in-progress
 blocked_by: []
 ---
 
@@ -61,3 +61,21 @@ the rest of ticket [0028](0028-cross-platform-macos-linux.md) depends on.
 ## Out of scope
 
 Packaging/installers (0044, 0045) and portable crash diagnostics (0043).
+
+## Comments
+
+2026-09-13 — Implemented the platform plumbing:
+
+- `CMakeLists.txt`: `BLUEPRINTER_FORMATS` adds AU on macOS; `NEEDS_WEBVIEW2` and
+  `JUCE_USE_WIN_WEBVIEW2=1` are Windows-only.
+- `WebViewEditor.cpp`: the WebView2 backend/cache/`withAdditionalBrowserArguments`
+  options are `#if JUCE_WINDOWS`; macOS/Linux use JUCE's default backend.
+- `PluginProcessor::createEditor`: the `areOptionsSupported` probe only forces
+  the WebView2 backend on Windows, so WKWebView/WebKitGTK aren't rejected.
+- `.github/workflows/build.yml`: added `macos-latest` and `ubuntu-latest` jobs
+  (WebKitGTK 4.1 dev package, stock JUCE, build + ctest). Windows job unchanged.
+- Docs: AGENTS.md build/CI + README.md project overview updated for ADR-0006.
+
+Verified locally: Windows Debug standalone + tests build and `ctest` is green
+(2/2). macOS/Linux verify via CI (push triggers the new jobs); the manual UI
+smoke test per platform is still required.

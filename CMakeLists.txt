@@ -13,14 +13,27 @@ set(JUCE_DIR "C:/JUCE/JUCE" CACHE PATH "Path to the JUCE source tree")
 
 add_subdirectory(${JUCE_DIR} JUCE EXCLUDE_FROM_ALL)
 
+# Cross-platform formats (ADR-0006): AU is macOS-only; VST3 + Standalone
+# everywhere. The WebView2 SDK is Windows-only — other platforms use WKWebView
+# (macOS) / WebKitGTK (Linux), which JUCE pulls from the platform SDK.
+set(BLUEPRINTER_FORMATS VST3 Standalone)
+if(APPLE)
+    list(APPEND BLUEPRINTER_FORMATS AU)
+endif()
+
+set(BLUEPRINTER_NEEDS_WEBVIEW2 FALSE)
+if(WIN32)
+    set(BLUEPRINTER_NEEDS_WEBVIEW2 TRUE)
+endif()
+
 juce_add_plugin(BluePrinter
     COMPANY_NAME "Retrokielto"
     PRODUCT_NAME "BluePrinter"
     BUNDLE_ID "com.retrokielto.BluePrinter"
     PLUGIN_MANUFACTURER_CODE Rtrk
     PLUGIN_CODE BlPt
-    FORMATS VST3 Standalone
-    NEEDS_WEBVIEW2 TRUE
+    FORMATS ${BLUEPRINTER_FORMATS}
+    NEEDS_WEBVIEW2 ${BLUEPRINTER_NEEDS_WEBVIEW2}
     COPY_PLUGIN_AFTER_BUILD FALSE
     NEEDS_MIDI_INPUT TRUE
     NEEDS_MIDI_OUTPUT TRUE
@@ -56,11 +69,15 @@ target_include_directories(BluePrinter PRIVATE
 
 target_compile_definitions(BluePrinter PRIVATE
     JUCE_WEB_BROWSER=1
-    JUCE_USE_WIN_WEBVIEW2=1
     JUCE_USE_CURL=0
     JUCE_PLUGINHOST_VST3=1
     JUCE_IGNORE_VST3_MISMATCHED_PARAMETER_ID_WARNING=1
     JUCE_ENABLE_DBG_OUTPUT=1)
+
+# The WebView2 backend definition only makes sense on Windows.
+if(WIN32)
+    target_compile_definitions(BluePrinter PRIVATE JUCE_USE_WIN_WEBVIEW2=1)
+endif()
 
 target_link_libraries(BluePrinter PRIVATE
     juce::juce_audio_basics

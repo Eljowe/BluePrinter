@@ -3725,13 +3725,18 @@ void BluePrinterAudioProcessor::discardPendingTake()
 //==============================================================================
 juce::AudioProcessorEditor* BluePrinterAudioProcessor::createEditor()
 {
-    auto webViewOptions = juce::WebBrowserComponent::Options{}
-                              .withBackend(juce::WebBrowserComponent::Options::Backend::webview2);
+    auto webViewOptions = juce::WebBrowserComponent::Options{};
 
-    if (!juce::WebBrowserComponent::areOptionsSupported(webViewOptions))
-        return new BluePrinterAudioProcessorEditor(*this);
+   #if JUCE_WINDOWS
+    webViewOptions = webViewOptions.withBackend (juce::WebBrowserComponent::Options::Backend::webview2);
+   #endif
+    // macOS (WKWebView) and Linux (WebKitGTK) use JUCE's default backend; if
+    // that is unavailable, fall back to the native editor.
 
-    return new BluePrinterWebViewEditor(*this);
+    if (! juce::WebBrowserComponent::areOptionsSupported (webViewOptions))
+        return new BluePrinterAudioProcessorEditor (*this);
+
+    return new BluePrinterWebViewEditor (*this);
 }
 
 bool BluePrinterAudioProcessor::hasEditor() const

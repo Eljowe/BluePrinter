@@ -133,3 +133,118 @@ jobs:
           name: BluePrinter-VST3
           path: build/BluePrinter_artefacts/Release/VST3/BluePrinter.vst3
           if-no-files-found: error
+
+  # ============================================================================
+  # Cross-platform builds (ADR-0006 / ticket 0042). These mirror the Windows
+  # job: build the WebUI, check out the pinned JUCE, build Release, run ctest.
+  # The local WebView2 patch is Windows-only and is not applied here; the
+  # editor selects WKWebView / WebKitGTK via JUCE's default backend.
+  # ============================================================================
+  build-macos:
+    name: Build (macOS, Release)
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout BluePrinter
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: WebUI/package-lock.json
+
+      - name: Build WebUI
+        working-directory: WebUI
+        run: |
+          npm ci
+          npm run build
+
+      - name: Cache JUCE
+        id: juce-cache
+        uses: actions/cache@v4
+        with:
+          path: juce
+          key: juce-${{ env.JUCE_VERSION }}-${{ runner.os }}-p1
+
+      - name: Checkout JUCE ${{ env.JUCE_VERSION }}
+        if: steps.juce-cache.outputs.cache-hit != 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: juce-framework/JUCE
+          ref: ${{ env.JUCE_VERSION }}
+          path: juce
+          fetch-depth: 1
+
+      - name: Configure CMake
+        run: >
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DJUCE_DIR="${{ github.workspace }}/juce"
+
+      - name: Build (Release)
+        run: cmake --build build --config Release
+
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure
+
+  build-linux:
+    name: Build (Linux, Release)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout BluePrinter
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: WebUI/package-lock.json
+
+      - name: Build WebUI
+        working-directory: WebUI
+        run: |
+          npm ci
+          npm run build
+
+      # JUCE's Linux build needs the X11/ALSA/FreeType/GL headers and the
+      # WebKitGTK 4.1 development package that backs Backend::webkitgtk.
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libasound2-dev libjack-jackd2-dev libfreetype6-dev \
+            libx11-dev libxcomposite-dev libxcursor-dev libxext-dev \
+            libxinerama-dev libxrandr-dev libxrender-dev \
+            libwebkit2gtk-4.1-dev libglu1-mesa-dev mesa-common-dev
+
+      - name: Cache JUCE
+        id: juce-cache
+        uses: actions/cache@v4
+        with:
+          path: juce
+          key: juce-${{ env.JUCE_VERSION }}-${{ runner.os }}-p1
+
+      - name: Checkout JUCE ${{ env.JUCE_VERSION }}
+        if: steps.juce-cache.outputs.cache-hit != 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: juce-framework/JUCE
+          ref: ${{ env.JUCE_VERSION }}
+          path: juce
+          fetch-depth: 1
+
+      - name: Configure CMake
+        run: >
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DJUCE_DIR="${{ github.workspace }}/juce"
+
+      - name: Build (Release)
+        run: cmake --build build --config Release
+
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure

@@ -167,24 +167,7 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
                                                       BluePrinterWebViewEditor* owner,
                                                       const juce::var& initialData)
 {
-    juce::File userDataFolder;
-   #if JUCE_WINDOWS
-    userDataFolder = juce::File::getSpecialLocation(juce::File::windowsLocalAppData)
-                         .getChildFile("Retrokielto")
-                         .getChildFile("BluePrinter")
-                         .getChildFile("WebView2Cache");
-    userDataFolder.createDirectory();
-   #else
-    userDataFolder = juce::File::getSpecialLocation(juce::File::tempDirectory)
-                         .getChildFile("BluePrinterWebView2Data");
-   #endif
-
-    return juce::WebBrowserComponent::Options{}
-        .withBackend(juce::WebBrowserComponent::Options::Backend::webview2)
-        .withWinWebView2Options(juce::WebBrowserComponent::Options::WinWebView2{}
-                                    .withUserDataFolder(userDataFolder)
-                                    .withStatusBarDisabled()
-                                    .withAdditionalBrowserArguments(juce::String::fromUTF8("--allow-no-sandbox-job --disable-gpu")))
+    auto options = juce::WebBrowserComponent::Options{}
         .withResourceProvider([distRoot](const juce::String& path) -> std::optional<juce::WebBrowserComponent::Resource>
         {
             if (!distRoot.isDirectory())
@@ -835,6 +818,26 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
         .withInitialisationData("tagNames", owner->makeTagNamesSnapshot())
         .withInitialisationData("setlists", owner->makeSetlistsSnapshot())
         .withInitialisationData("transport", owner->makeTransportSnapshot());
+
+   #if JUCE_WINDOWS
+    // WebView2 is the Windows backend. Its user-data cache lives in the
+    // local app data dir, and the local JUCE patch adds
+    // withAdditionalBrowserArguments (--allow-no-sandbox-job --disable-gpu).
+    // macOS (WKWebView) and Linux (WebKitGTK) use JUCE's default backend and
+    // need no extra options.
+    auto userDataFolder = juce::File::getSpecialLocation (juce::File::windowsLocalAppData)
+                              .getChildFile ("Retrokielto")
+                              .getChildFile ("BluePrinter")
+                              .getChildFile ("WebView2Cache");
+    userDataFolder.createDirectory();
+    options = options.withBackend (juce::WebBrowserComponent::Options::Backend::webview2)
+                     .withWinWebView2Options (juce::WebBrowserComponent::Options::WinWebView2{}
+                                                  .withUserDataFolder (userDataFolder)
+                                                  .withStatusBarDisabled()
+                                                  .withAdditionalBrowserArguments (juce::String::fromUTF8 ("--allow-no-sandbox-job --disable-gpu")));
+   #endif
+
+    return options;
 }
 
 BluePrinterWebViewEditor::BluePrinterWebViewEditor(BluePrinterAudioProcessor& p)
