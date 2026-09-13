@@ -1,7 +1,7 @@
 ---
 id: "0043"
 title: "Portable crash diagnostics (macOS/Linux)"
-status: ready-for-agent
+status: in-progress
 blocked_by: ["0042"]
 ---
 
@@ -55,3 +55,30 @@ diagnostics report degrade to "no crash info".
 ## Out of scope
 
 Coredumps/Mach exception ports; uploading crash reports.
+
+## Comments
+
+2026-09-13 — Implemented:
+
+- `PluginProcessor.cpp`: a `#if ! JUCE_WINDOWS` block installs POSIX
+  `sigaction` handlers (SIGSEGV/ABRT/ILL/FPE/BUS) from the processor
+  constructor. The handler writes `crash-info.txt` (same folder via
+  `userApplicationDataDirectory/Retrokielto`, same `Operation:` line from
+  `getCrashOp()`), adds `Signal:`/`Time (unix seconds):` and a
+  `backtrace()` address list, rotates `.1/.2/.3` with `rename()`, then
+  re-raises with the default disposition. Async-signal-safe only: fixed
+  buffers, hand-rolled number formatting, `open`/`write`/`close`/`rename`;
+  the folder is resolved once on the message thread. No `<execinfo.h>` →
+  header/op still written (backtrace omitted).
+- `buildDiagnosticsReport`: the WER LocalDumps snippet is `#if JUCE_WINDOWS`;
+  macOS/Linux print the `ulimit -c`/symbolication note instead.
+- `Tests/test_RestoreSelfHeal.cpp`: `RestoreSelfHeal_parsesThePosixCrashFormat`
+  confirms the parser ignores the extra Signal/Time/Backtrace lines and still
+  names the plugin.
+- `AGENTS.md` crash-diagnostics paragraph updated.
+
+Verified locally on Windows: Debug standalone + tests build, `ctest` 2/2
+green. The POSIX block is not compiled on Windows, so it was additionally
+syntax-checked with WSL g++ (extracted block + minimal JUCE stubs, `-Wall
+-Wextra`) and run to confirm it writes the file and rotates .1/.2/.3 before
+re-raising. macOS/Linux compile+tests are verified by CI.
