@@ -118,11 +118,11 @@ and briefed.
 
 | Ticket | Title | Status | Blocked by |
 | ------ | ----- | ------ | ---------- |
-| [0028](0028-cross-platform-macos-linux.md) | Cross-platform support: macOS and Linux builds (spec) | in-progress | — |
+| [0028](0028-cross-platform-macos-linux.md) | Cross-platform support: macOS and Linux builds (spec) | done | — |
 | [0042](0042-portable-build-foundation-ci.md) | Portable build foundation + macOS/Linux CI | done | — |
 | [0043](0043-portable-crash-diagnostics.md) | Portable crash diagnostics (macOS/Linux) | done | — |
-| [0044](0044-macos-packaging.md) | macOS packaging (unsigned) | in-progress | — |
-| [0045](0045-linux-packaging.md) | Linux packaging (AppImage + .deb) | in-progress | — |
+| [0044](0044-macos-packaging.md) | macOS packaging (unsigned) | done | — |
+| [0045](0045-linux-packaging.md) | Linux packaging (AppImage + .deb) | done | — |
 
 ## Roadmap notes
 
@@ -131,7 +131,10 @@ and briefed.
 - Tickets marked `needs-info` / `needs-triage` have open decisions in the body
   and are not ready for an AFK agent yet.
 - **Cross-platform (0028)** was green-lit on 2026-09-13 and supersedes ADR-0001
-  with ADR-0006; start with 0042 (portable build + CI), then 0043–0045.
+  with ADR-0006. Implemented by 0042 (portable build + CI), 0043 (POSIX crash
+  diagnostics), 0044 (macOS `.dmg`) and 0045 (Linux `.deb` + AppImage) — all
+  done. The per-platform install/launch smoke tests are human steps tracked in
+  0042/0044/0045.
 - **Phase 7** holds untriaged candidate features spun up from the roadmap
   brainstorm; triage/grill them before claiming. 0039 sits behind 0015 so update
   delivery only ever ships signed binaries.

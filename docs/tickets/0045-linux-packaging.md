@@ -1,7 +1,7 @@
 ---
 id: "0045"
 title: "Linux packaging (AppImage + .deb)"
-status: in-progress
+status: done
 blocked_by: ["0042"]
 ---
 
@@ -66,5 +66,6 @@ Flatpak/Snap; distro-specific repos; signing.
   uploading the packages as the `BluePrinter-Linux` artifact.
 - Docs: README Linux install section, release-checklist step 3b, AGENTS.md.
 
-Verification: the `.deb`/AppImage are produced by CI. The `dpkg -i` +
+Verification: the `.deb`/AppImage are produced and uploaded by CI (run
+34779913034, `BluePrinter-Linux` artifact, ~15.1 MB). The `dpkg -i` +
 WebKitGTK launch smoke test (acceptance criteria) is a human step on Ubuntu.
