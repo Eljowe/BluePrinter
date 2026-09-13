@@ -143,6 +143,7 @@ juce::var snippetToVar (const Snippet& s)
     obj->setProperty ("keyConfidence", s.keyConfidence);
     obj->setProperty ("color", s.color);
     obj->setProperty ("gainDb", s.gainDb);
+    obj->setProperty ("favourite", s.favourite);
 
     juce::Array<juce::var> notesVar;
     notesVar.ensureStorageAllocated (s.detectedNotes.size());
@@ -304,6 +305,19 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
                 }
             }
         })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetSnippetFavouriteEvent, [&processor, owner](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+            {
+                const int id = static_cast<int> (obj->getProperty ("id"));
+                const bool favourite = static_cast<bool> (obj->getProperty ("favourite"));
+                if (! processor.setSnippetFavourite (id, favourite))
+                {
+                    if (owner != nullptr)
+                        owner->sendNotification ("Failed to set favourite. Library folder may not be set.", "error");
+                }
+            }
+        })
         .withEventListener(BluePrinterWebViewEditor::frontendSetSnippetGainEvent, [&processor](juce::var data)
         {
             if (auto* obj = data.getDynamicObject())
@@ -351,6 +365,16 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
         {
             if (owner != nullptr)
                 owner->handleExportSnippet (data);
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetCaptureStemsEvent, [&processor](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+                processor.setCaptureStemsEnabled (static_cast<bool> (obj->getProperty ("enabled")));
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendExportStemsEvent, [owner](juce::var data)
+        {
+            if (owner != nullptr)
+                owner->handleExportStems (data);
         })
         .withEventListener(BluePrinterWebViewEditor::frontendImportAudioEvent, [owner](juce::var)
         {
@@ -409,6 +433,45 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
             if (auto* obj = data.getDynamicObject())
                 processor.setTagName (obj->getProperty ("color").toString(),
                                       obj->getProperty ("name").toString());
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendCreateSetlistEvent, [&processor](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+                processor.createSetlist (obj->getProperty ("name").toString());
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendRenameSetlistEvent, [&processor](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+                processor.renameSetlist (obj->getProperty ("id").toString(),
+                                         obj->getProperty ("name").toString());
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendDeleteSetlistEvent, [&processor](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+                processor.deleteSetlist (obj->getProperty ("id").toString());
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendAddSnippetToSetlistEvent, [&processor](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+                processor.addSnippetToSetlist (obj->getProperty ("setlistId").toString(),
+                                               static_cast<int> (obj->getProperty ("id")));
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendRemoveSnippetFromSetlistEvent, [&processor](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+                processor.removeSnippetFromSetlist (obj->getProperty ("setlistId").toString(),
+                                                    static_cast<int> (obj->getProperty ("id")));
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetSetlistOrderEvent, [&processor](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+            {
+                std::vector<int> ids;
+                if (auto* arr = obj->getProperty ("ids").getArray())
+                    for (const auto& v : *arr)
+                        ids.push_back (static_cast<int> (v));
+                processor.setSetlistOrder (obj->getProperty ("id").toString(), ids);
+            }
         })
         .withEventListener(BluePrinterWebViewEditor::frontendSetMetronomeEvent, [&processor](juce::var data)
         {
@@ -737,6 +800,7 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
         .withInitialisationData("parameters", initialData)
         .withInitialisationData("snippets", owner->makeSnippetsSnapshot())
         .withInitialisationData("tagNames", owner->makeTagNamesSnapshot())
+        .withInitialisationData("setlists", owner->makeSetlistsSnapshot())
         .withInitialisationData("transport", owner->makeTransportSnapshot());
 }
 
@@ -985,6 +1049,7 @@ void BluePrinterWebViewEditor::emitLibraryToFrontend()
     obj->setProperty ("lastSaveError", audioProcessor.getLastSaveError());
     obj->setProperty ("snippets", makeSnippetsSnapshot());
     obj->setProperty ("tagNames", makeTagNamesSnapshot());
+    obj->setProperty ("setlists", makeSetlistsSnapshot());
     webView.emitEventIfBrowserIsVisible(juce::Identifier(backendSnippetsEvent), juce::var (obj));
 }
 
@@ -1012,6 +1077,25 @@ juce::var BluePrinterWebViewEditor::makeTagNamesSnapshot() const
     for (const auto& entry : audioProcessor.getTagNames())
         obj->setProperty (entry.first, entry.second);
     return juce::var (obj);
+}
+
+juce::var BluePrinterWebViewEditor::makeSetlistsSnapshot() const
+{
+    juce::Array<juce::var> arr;
+    for (const auto& setlist : audioProcessor.getSetlists())
+    {
+        auto* obj = new juce::DynamicObject();
+        obj->setProperty ("id", setlist.id);
+        obj->setProperty ("name", setlist.name);
+
+        juce::Array<juce::var> ids;
+        ids.ensureStorageAllocated (static_cast<int> (setlist.snippetIds.size()));
+        for (int snippetId : setlist.snippetIds)
+            ids.add (snippetId);
+        obj->setProperty ("ids", juce::var (ids));
+        arr.add (juce::var (obj));
+    }
+    return juce::var (arr);
 }
 
 juce::var BluePrinterWebViewEditor::makeTransportSnapshot() const
@@ -1095,6 +1179,9 @@ juce::var BluePrinterWebViewEditor::makeTransportSnapshot() const
     obj->setProperty ("looperOverdub", audioProcessor.isLooperOverdub());
     obj->setProperty ("loopPlaybackReverse", audioProcessor.isLoopPlaybackReverse());
     obj->setProperty ("loopPlaybackHalfSpeed", audioProcessor.isLoopPlaybackHalfSpeed());
+    obj->setProperty ("captureStemsEnabled", audioProcessor.isCaptureStemsEnabled());
+    obj->setProperty ("stemsAvailable", audioProcessor.hasCaptureStems());
+    obj->setProperty ("stemSource", audioProcessor.getStemSource());
     obj->setProperty ("tunerOpen", audioProcessor.isTunerOpen());
     obj->setProperty ("tunerMonitorMute", audioProcessor.isTunerMonitorMuted());
     obj->setProperty ("tunerFrequency", audioProcessor.getTunerFrequency());
@@ -1425,6 +1512,80 @@ void BluePrinterWebViewEditor::exportSnippetWithDialog(int snippetId, const juce
             sendNotification ("Exported to " + target.getFullPathName(), "ok");
         else
             sendNotification ("Export failed: " + error, "error");
+    });
+}
+
+void BluePrinterWebViewEditor::handleExportStems(const juce::var& data)
+{
+    juce::String source = "take";
+    if (auto* obj = data.getDynamicObject())
+        source = obj->getProperty ("source").toString();
+
+    if (! audioProcessor.hasCaptureStems() || audioProcessor.getStemSource() != source)
+    {
+        sendNotification ("No stems captured for this take. Turn on Capture stems "
+                          "before recording to capture stems.", "error");
+        return;
+    }
+
+    juce::File start (audioProcessor.getLibraryFolder());
+    if (! start.isDirectory())
+        start = juce::File::getSpecialLocation (juce::File::userMusicDirectory);
+
+    const auto defaultName = source == "loop" ? juce::String ("Loop stems")
+                                             : juce::String ("Take stems");
+    exportStemsWithDialog (source, start.getChildFile (defaultName + ".wav"));
+}
+
+void BluePrinterWebViewEditor::exportStemsWithDialog(const juce::String& source,
+                                                     const juce::File& startingFile)
+{
+    juce::String wildcard;
+    for (const auto& extension : audioProcessor.getSupportedExportExtensions())
+    {
+        if (wildcard.isNotEmpty())
+            wildcard << ";";
+        wildcard << "*" << extension;
+    }
+    if (wildcard.isEmpty())
+        wildcard = "*.wav";
+
+    activeFileChooser = std::make_unique<juce::FileChooser> (
+        "Export stems as", startingFile, wildcard, true);
+
+    auto flags = juce::FileBrowserComponent::saveMode
+               | juce::FileBrowserComponent::canSelectFiles
+               | juce::FileBrowserComponent::warnAboutOverwriting;
+
+    activeFileChooser->launchAsync (flags, [this, source](const juce::FileChooser& chooser)
+    {
+        auto result = chooser.getResult();
+        activeFileChooser.reset();
+
+        if (result == juce::File())
+        {
+            sendNotification ("Export cancelled.", "info");
+            return;
+        }
+
+        auto target = result;
+        if (target.isDirectory())
+            target = target.getChildFile ("stems.wav");
+        if (target.getFileExtension().isEmpty())
+            target = target.withFileExtension (".wav");
+
+        juce::String error;
+        if (audioProcessor.exportStems (source, target, error))
+        {
+            auto message = "Exported stems to " + target.getParentDirectory().getFullPathName();
+            if (error.isNotEmpty())
+                message << " (some failed: " << error << ")";
+            sendNotification (message, error.isEmpty() ? "ok" : "error");
+        }
+        else
+        {
+            sendNotification ("Stem export failed: " + error, "error");
+        }
     });
 }
 

@@ -169,6 +169,8 @@ _Avoid_: Message, IPC event
 | Metering math | `Source/MeterMath.h` |
 | Per-meter level/peak/clip state | `Source/Meter.h` |
 | Take stack + review/overdub state machine | `Source/TakeRecorder.h/.cpp` |
+| Per-chain capture stems (0038) | `Source/StemCapture.h/.cpp` |
+| Named setlists (0035) | `Source/SetlistStore.h/.cpp` |
 | React app + components | `WebUI/src/` |
 | Bridge API | `WebUI/src/bridge.js` |
 

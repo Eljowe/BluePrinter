@@ -29,6 +29,8 @@ export const FRONTEND_EVENTS = {
   // Organisational colour tag for a snippet: { id, color } where
   // color is one of the 8 palette keys or "" to clear.
   setSnippetColor: "frontendSetSnippetColor",
+  // { id, favourite } — toggle the user favourite (star) flag.
+  setSnippetFavourite: "frontendSetSnippetFavourite",
   // Non-destructive playback trim for a snippet: { id, gainDb } (-24..+24 dB).
   setSnippetGain: "frontendSetSnippetGain",
   // { id } — set the trim so the snippet peak lands at -1 dBFS.
@@ -39,6 +41,11 @@ export const FRONTEND_EVENTS = {
   // { id } — export a snippet to a chosen file (WAV/AIFF/FLAC), baking the
   // non-destructive gainDb trim into the exported file.
   exportSnippet: "frontendExportSnippet",
+  // Per-chain stem capture (0038): { enabled } toggles session-only stem
+  // capture; { source } ("take" | "loop") exports the latest capture's
+  // stems as one file per chain (+ dry).
+  setCaptureStems: "frontendSetCaptureStems",
+  exportStems: "frontendExportStems",
   saveLoop: "frontendSaveLoop",
   revealSnippet: "frontendRevealSnippet",
   chooseLibraryFolder: "frontendChooseLibraryFolder",
@@ -63,6 +70,14 @@ export const FRONTEND_EVENTS = {
   // name resets to the built-in label). Persisted in the properties
   // file, shipped back with every library snapshot as `tagNames`.
   renameTag: "frontendRenameTag",
+  // Named setlists (0035): ordered groups of snippets stored in the
+  // properties file and shipped with every snippets payload as `setlists`.
+  createSetlist: "frontendCreateSetlist",             // { name }
+  renameSetlist: "frontendRenameSetlist",             // { id, name }
+  deleteSetlist: "frontendDeleteSetlist",             // { id }
+  addSnippetToSetlist: "frontendAddSnippetToSetlist", // { setlistId, id }
+  removeSnippetFromSetlist: "frontendRemoveSnippetFromSetlist", // { setlistId, id }
+  setSetlistOrder: "frontendSetSetlistOrder",         // { id, ids }
   setMetronome: "frontendSetMetronome",
   setBpm: "frontendSetBpm",
   // Notated meter: { numerator, denominator } (e.g. { 6, 8 }). BPM stays a

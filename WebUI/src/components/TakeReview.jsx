@@ -132,6 +132,17 @@ export function TakeReview({ transport }) {
         >
           <IconSave size={13} /> Save selected
         </button>
+        {transport?.stemsAvailable && transport?.stemSource === "take" ? (
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            disabled={playing || recording}
+            onClick={() => emit(FRONTEND_EVENTS.exportStems, { source: "take" })}
+            title="Export one file per chain (plus the dry input) — the stems sum back to the captured take"
+          >
+            Export stems
+          </button>
+        ) : null}
         <button
           type="button"
           className="btn btn-ghost btn-sm"

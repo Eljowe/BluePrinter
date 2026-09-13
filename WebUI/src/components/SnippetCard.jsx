@@ -16,7 +16,15 @@ import {
   IconX,
 } from "./icons";
 
-export function SnippetCard({ snippet, tagNames, isPlaying, playPositionSeconds }) {
+export function SnippetCard({
+  snippet,
+  tagNames,
+  setlists = [],
+  onToggleSnippetSetlist,
+  reorderContext,
+  isPlaying,
+  playPositionSeconds,
+}) {
   const [name, setName] = useState(snippet.name ?? "");
   const [comments, setComments] = useState(snippet.comments ?? "");
   const [color, setColor] = useState(snippet.color ?? "");
@@ -63,6 +71,10 @@ export function SnippetCard({ snippet, tagNames, isPlaying, playPositionSeconds 
   const handleColor = (next) => {
     setColor(next);
     emit(FRONTEND_EVENTS.setSnippetColor, { id: snippet.id, color: next });
+  };
+
+  const handleFavourite = () => {
+    emit(FRONTEND_EVENTS.setSnippetFavourite, { id: snippet.id, favourite: !snippet.favourite });
   };
 
   const handleGain = (next) => {
@@ -167,6 +179,16 @@ export function SnippetCard({ snippet, tagNames, isPlaying, playPositionSeconds 
         >
           {isPlaying ? <IconStop size={13} /> : <IconPlay size={14} />}
         </button>
+        <button
+          type="button"
+          className={`snippet-fav ${snippet.favourite ? "is-on" : ""}`}
+          onClick={handleFavourite}
+          title={snippet.favourite ? "Remove from favourites" : "Add to favourites"}
+          aria-label={snippet.favourite ? "Remove from favourites" : "Add to favourites"}
+          aria-pressed={Boolean(snippet.favourite)}
+        >
+          {snippet.favourite ? "★" : "☆"}
+        </button>
         <div
           className="snippet-summary"
           role="button"
@@ -270,6 +292,55 @@ export function SnippetCard({ snippet, tagNames, isPlaying, playPositionSeconds 
               </button>
             </div>
           </div>
+
+          {setlists.length > 0 || reorderContext ? (
+            <div className="snippet-field snippet-setlist-field">
+              <span>Setlists</span>
+              <div className="snippet-setlist-chips" role="group" aria-label="Setlists">
+                {setlists.map((sl) => {
+                  const member = Array.isArray(sl.ids) && sl.ids.includes(snippet.id);
+                  return (
+                    <button
+                      key={sl.id}
+                      type="button"
+                      className={`snippet-setlist-chip ${member ? "is-active" : ""}`}
+                      aria-pressed={member}
+                      onClick={() => onToggleSnippetSetlist?.(sl.id, snippet.id, !member)}
+                      title={member ? `Remove from ${sl.name}` : `Add to ${sl.name}`}
+                    >
+                      {member ? "✓ " : "+ "}
+                      {sl.name}
+                    </button>
+                  );
+                })}
+                {reorderContext ? (
+                  <span className="snippet-setlist-reorder" role="group" aria-label="Reorder in this setlist">
+                    <button
+                      type="button"
+                      className="snippet-setlist-move"
+                      disabled={reorderContext.index <= 0}
+                      onClick={() => reorderContext.onMove(-1)}
+                      aria-label="Move earlier in setlist"
+                      title="Move earlier in this setlist"
+                    >
+                      ↑
+                    </button>
+                    <span className="snippet-setlist-position">{reorderContext.index + 1}/{reorderContext.count}</span>
+                    <button
+                      type="button"
+                      className="snippet-setlist-move"
+                      disabled={reorderContext.index >= reorderContext.count - 1}
+                      onClick={() => reorderContext.onMove(1)}
+                      aria-label="Move later in setlist"
+                      title="Move later in this setlist"
+                    >
+                      ↓
+                    </button>
+                  </span>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
 
           <label className="snippet-field">
             <span>Name</span>

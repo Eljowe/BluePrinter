@@ -49,6 +49,8 @@ public:
     static constexpr const char* frontendStopPlaybackEvent     = "frontendStopPlayback";
     static constexpr const char* frontendUpdateSnippetEvent    = "frontendUpdateSnippetMeta";
     static constexpr const char* frontendSetSnippetColorEvent  = "frontendSetSnippetColor";
+    // { id, favourite } — toggle the user favourite (star) flag.
+    static constexpr const char* frontendSetSnippetFavouriteEvent = "frontendSetSnippetFavourite";
     // { id, gainDb } — non-destructive playback trim (-24..+24 dB).
     static constexpr const char* frontendSetSnippetGainEvent   = "frontendSetSnippetGain";
     // { id } — set the trim so the snippet peak lands at -1 dBFS.
@@ -57,6 +59,10 @@ public:
     static constexpr const char* frontendDetectSnippetKeyEvent = "frontendDetectSnippetKey";
     static constexpr const char* frontendSaveSnippetEvent      = "frontendSaveSnippet";
     static constexpr const char* frontendExportSnippetEvent    = "frontendExportSnippet";
+    // Stems (0038): { enabled } toggles session stem capture; { source }
+    // ("take" | "loop") exports the latest capture's stems.
+    static constexpr const char* frontendSetCaptureStemsEvent  = "frontendSetCaptureStems";
+    static constexpr const char* frontendExportStemsEvent      = "frontendExportStems";
     // Import external audio (FileChooser) or dropped bytes (base64).
     static constexpr const char* frontendImportAudioEvent      = "frontendImportAudio";
     static constexpr const char* frontendImportAudioDataEvent  = "frontendImportAudioData";
@@ -80,6 +86,15 @@ public:
     // that mirrors what the chain UI already does.
     static constexpr const char* frontendGetSnippetsEvent      = "frontendGetSnippets";
     static constexpr const char* frontendRenameTagEvent        = "frontendRenameTag";
+    // Named setlists (0035): { name } create, { id, name } rename,
+    // { id } delete, { setlistId, id } add/remove a snippet,
+    // { id, ids } replace the order.
+    static constexpr const char* frontendCreateSetlistEvent    = "frontendCreateSetlist";
+    static constexpr const char* frontendRenameSetlistEvent    = "frontendRenameSetlist";
+    static constexpr const char* frontendDeleteSetlistEvent    = "frontendDeleteSetlist";
+    static constexpr const char* frontendAddSnippetToSetlistEvent    = "frontendAddSnippetToSetlist";
+    static constexpr const char* frontendRemoveSnippetFromSetlistEvent = "frontendRemoveSnippetFromSetlist";
+    static constexpr const char* frontendSetSetlistOrderEvent  = "frontendSetSetlistOrder";
     static constexpr const char* frontendSetMetronomeEvent     = "frontendSetMetronome";
     static constexpr const char* frontendSetBpmEvent           = "frontendSetBpm";
     // Notated meter: { numerator, denominator } (e.g. { 6, 8 }).
@@ -168,6 +183,7 @@ public:
     // registered inside makeWebViewOptions can call them.
     void handleSaveSnippet(const juce::var& data);
     void handleExportSnippet(const juce::var& data);
+    void handleExportStems(const juce::var& data);
     void handleImportAudio();
     void handleImportAudioData(const juce::var& data);
     void handleSaveLoop();
@@ -233,6 +249,7 @@ public:
     // Snapshot helpers — public so the listener lambdas can use them.
     juce::var makeSnippetsSnapshot() const;
     juce::var makeTagNamesSnapshot() const;
+    juce::var makeSetlistsSnapshot() const;
     juce::var makeTransportSnapshot() const;
 
     // Fire a transient notification to the frontend. Public so the
@@ -263,6 +280,7 @@ private:
 
     void saveSnippetWithDialog(int snippetId, const juce::File& startingFolder);
     void exportSnippetWithDialog(int snippetId, const juce::File& startingFolder);
+    void exportStemsWithDialog(const juce::String& source, const juce::File& startingFile);
     void pickLibraryFolder(const juce::File& startingFolder);
     void pickLibraryFolderThenSave(int pendingSnippetId);
 

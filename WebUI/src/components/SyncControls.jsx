@@ -138,6 +138,8 @@ export function SyncControls({
   midiOutputDevice,
   midiOutputDeviceList,
   onMidiDeviceChange,
+  captureStemsEnabled,
+  onCaptureStemsChange,
 }) {
   const [clickOpen, setClickOpen] = useState(false);
   const devices = Array.isArray(midiOutputDeviceList) ? midiOutputDeviceList : [];
@@ -260,6 +262,23 @@ export function SyncControls({
             )}
           </select>
         </label>
+      </div>
+
+      <span className="sync-divider" aria-hidden="true" />
+
+      <div className="sync-group" role="group" aria-label="Stems">
+        <button
+          type="button"
+          className={`sync-toggle ${captureStemsEnabled ? "is-on" : ""}`}
+          onClick={() => onCaptureStemsChange(!captureStemsEnabled)}
+          title={captureStemsEnabled
+            ? "Stems on — the next fresh take or loop capture also records one stem per record-on-capture chain plus the dry input, ready to export."
+            : "Capture stems so a fresh take or loop can be exported as one file per chain (plus dry) that sum back to the mix."}
+          aria-pressed={captureStemsEnabled}
+        >
+          <span className="sync-dot" aria-hidden="true" />
+          Stems
+        </button>
       </div>
     </div>
   );
