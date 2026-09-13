@@ -95,6 +95,11 @@ public:
     static constexpr const char* frontendAddSnippetToSetlistEvent    = "frontendAddSnippetToSetlist";
     static constexpr const char* frontendRemoveSnippetFromSetlistEvent = "frontendRemoveSnippetFromSetlist";
     static constexpr const char* frontendSetSetlistOrderEvent  = "frontendSetSetlistOrder";
+    // Bulk selection actions (0035): { ids, color } set one colour on many,
+    // { ids } delete, { setlistId, ids } add to a setlist. One snapshot each.
+    static constexpr const char* frontendSetSnippetsColorEvent = "frontendSetSnippetsColor";
+    static constexpr const char* frontendDeleteSnippetsEvent   = "frontendDeleteSnippets";
+    static constexpr const char* frontendAddSnippetsToSetlistEvent = "frontendAddSnippetsToSetlist";
     static constexpr const char* frontendSetMetronomeEvent     = "frontendSetMetronome";
     static constexpr const char* frontendSetBpmEvent           = "frontendSetBpm";
     // Notated meter: { numerator, denominator } (e.g. { 6, 8 }).

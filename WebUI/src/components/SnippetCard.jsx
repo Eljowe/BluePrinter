@@ -20,6 +20,9 @@ export function SnippetCard({
   snippet,
   tagNames,
   setlists = [],
+  selectable = false,
+  selected = false,
+  onToggleSelect,
   onToggleSnippetSetlist,
   reorderContext,
   isPlaying,
@@ -167,9 +170,19 @@ export function SnippetCard({
 
   return (
     <article
-      className={`snippet ${isPlaying ? "is-playing" : ""} ${expanded ? "is-expanded" : "is-mini"}`}
+      className={`snippet ${isPlaying ? "is-playing" : ""} ${expanded ? "is-expanded" : "is-mini"} ${selected ? "is-selected" : ""}`}
     >
       <header className="snippet-header">
+        {selectable ? (
+          <input
+            type="checkbox"
+            className="snippet-select-check"
+            checked={selected}
+            onChange={() => onToggleSelect?.()}
+            onClick={(e) => e.stopPropagation()}
+            aria-label={`Select ${displayName}`}
+          />
+        ) : null}
         <button
           type="button"
           className={`play-button ${isPlaying ? "is-playing" : ""}`}

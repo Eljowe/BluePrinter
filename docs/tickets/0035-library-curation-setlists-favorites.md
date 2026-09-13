@@ -1,7 +1,7 @@
 ---
 id: "0035"
 title: "Library curation: setlists, favourites and bulk edits"
-status: in-progress
+status: done
 blocked_by: []
 ---
 
@@ -98,3 +98,14 @@ in that view) + a Setlists manage popover in `SnippetList`, and a Setlists chip
 row (with up/down reorder in a filtered view) in `SnippetCard`. Verified: WebUI
 build green, Debug standalone compiles, `ctest` green. Remaining phase: **bulk
 select + actions**.
+
+2026-09-13 — **Phase 3 (bulk select + actions) implemented; ticket done.** A
+toolbar **Select** toggle adds a checkbox to each card and a bulk bar (select
+all shown, set colour on the selection, add the selection to a setlist, delete
+with a two-step confirm). New one-snapshot bulk backend methods/events:
+`frontendSetSnippetsColor { ids, color }`, `frontendAddSnippetsToSetlist
+{ setlistId, ids }`, `frontendDeleteSnippets { ids }` (persist once, single
+`libraryChanged`); the delete path prunes setlists once. The selection is pruned
+when snippets disappear. All three acceptance items (bulk tag / add-to-setlist /
+delete with confirmation) are met; the grid stays frontend-only. Verified: WebUI
+build green, Debug standalone compiles, `ctest` green.

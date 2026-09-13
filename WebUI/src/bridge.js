@@ -78,6 +78,10 @@ export const FRONTEND_EVENTS = {
   addSnippetToSetlist: "frontendAddSnippetToSetlist", // { setlistId, id }
   removeSnippetFromSetlist: "frontendRemoveSnippetFromSetlist", // { setlistId, id }
   setSetlistOrder: "frontendSetSetlistOrder",         // { id, ids }
+  // Bulk selection actions (0035): one snapshot each.
+  setSnippetsColor: "frontendSetSnippetsColor",       // { ids, color }
+  deleteSnippets: "frontendDeleteSnippets",           // { ids }
+  addSnippetsToSetlist: "frontendAddSnippetsToSetlist", // { setlistId, ids }
   setMetronome: "frontendSetMetronome",
   setBpm: "frontendSetBpm",
   // Notated meter: { numerator, denominator } (e.g. { 6, 8 }). BPM stays a
