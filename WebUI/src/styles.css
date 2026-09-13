@@ -1665,6 +1665,54 @@ button {
   z-index: 3;
 }
 
+.take-review-takes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.take-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 6px 10px;
+  border: 2px solid var(--line);
+  background: var(--panel-2);
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.take-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.take-chip.is-selected {
+  border-color: var(--accent);
+  background: var(--panel);
+  color: var(--ink);
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+.take-chip-time { color: var(--ink-3); font-weight: 400; }
+.take-chip.is-selected .take-chip-time { color: var(--ink-2); }
+
+.take-chip-delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+
+.take-chip-delete:hover:not(:disabled) { color: var(--rec-dark); }
+.take-chip-delete:disabled { opacity: 0.35; cursor: not-allowed; }
+
 .take-review-actions {
   display: flex;
   flex-wrap: wrap;

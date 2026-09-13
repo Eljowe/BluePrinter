@@ -65,8 +65,8 @@ BluePrinter uses JUCE for audio processing, VST3 hosting, and WebView2 UI integr
    isn't double-processed and the live monitor isn't ducked at the seam. Scaled
    by the looper's monitor-only Loop level (loopGain) — never by the capture.
 7. Snippet playback: substitute the recorded buffer in place of live input
-   (does NOT re-run the chains); pending-take review playback renders
-   similarly (renderTakePlayback, one-shot, scaled by the master Output)
+   (does NOT re-run the chains); selected-take review playback renders
+   similarly (TakeRecorder::renderReview, one-shot, scaled by the master Output)
 8. Looper count-in pre-roll: render the click, advance the beat clock, flip
    into capture when the configured beats elapse
 9. Take-recorder pre-roll: same flow, flips into actual recording

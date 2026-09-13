@@ -11,14 +11,18 @@ export const FRONTEND_EVENTS = {
   setParameter: "frontendSetParameter",
   startRecording: "frontendStartRecording",
   stopRecording: "frontendStopRecording",
-  // Pending-take review: { enabled } toggles take playback; saveTake /
-  // discardTake finalise the recorded take after review.
+  // Take review: { enabled } toggles playback of the selected take; each
+  // take can be selected, saved or deleted individually (0037).
   setTakePlayback: "frontendSetTakePlayback",
   // Take-recorder overdub: { enabled } layers the next record over the
-  // pending take instead of replacing it (session-only).
+  // selected take instead of adding a new one (session-only).
   setTakeOverdub: "frontendSetTakeOverdub",
+  // { id } — save/delete a take; { id } selects one; discardAllTakes
+  // empties the stack.
   saveTake: "frontendSaveTake",
   discardTake: "frontendDiscardTake",
+  selectTake: "frontendSelectTake",
+  discardAllTakes: "frontendDiscardAllTakes",
   startPlayback: "frontendStartPlayback",
   stopPlayback: "frontendStopPlayback",
   updateSnippet: "frontendUpdateSnippetMeta",

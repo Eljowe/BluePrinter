@@ -245,13 +245,28 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
                 && (bool) data.getDynamicObject()->getProperty("enabled");
             processor.setTakeOverdub (enabled);
         })
-        .withEventListener(BluePrinterWebViewEditor::frontendSaveTakeEvent, [&processor](juce::var)
+        .withEventListener(BluePrinterWebViewEditor::frontendSaveTakeEvent, [&processor](juce::var data)
         {
-            processor.savePendingTake();
+            if (auto* obj = data.getDynamicObject())
+                processor.saveTake (static_cast<int> (obj->getProperty ("id")));
+            else
+                processor.savePendingTake();
         })
-        .withEventListener(BluePrinterWebViewEditor::frontendDiscardTakeEvent, [&processor](juce::var)
+        .withEventListener(BluePrinterWebViewEditor::frontendDiscardTakeEvent, [&processor](juce::var data)
         {
-            processor.discardPendingTake();
+            if (auto* obj = data.getDynamicObject())
+                processor.discardTake (static_cast<int> (obj->getProperty ("id")));
+            else
+                processor.discardPendingTake();
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendSelectTakeEvent, [&processor](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+                processor.selectTake (static_cast<int> (obj->getProperty ("id")));
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendDiscardAllTakesEvent, [&processor](juce::var)
+        {
+            processor.discardAllTakes();
         })
         .withEventListener(BluePrinterWebViewEditor::frontendStartPlaybackEvent, [&processor](juce::var data)
         {
@@ -909,6 +924,10 @@ void BluePrinterWebViewEditor::timerCallback()
     // Throttled push: always push transport so the meter / timecode moves.
     emitTransportToFrontend();
 
+    // The take stack evicted its oldest take (the 8-take / 256 MB bound).
+    if (audioProcessor.consumeTakesDropped() > 0)
+        sendNotification ("Take limit reached — the oldest take was dropped.", "info");
+
     // Coalesced chain snapshot. Full snapshots are expensive (they
     // serialize every plugin's state), so bursts of chain mutations
     // (e.g. dragging a volume knob or clicking MIDI channel chips) are
@@ -1057,6 +1076,18 @@ juce::var BluePrinterWebViewEditor::makeTransportSnapshot() const
         obj->setProperty ("takePeaks", juce::var (peakArray));
     }
     obj->setProperty ("takeOverdub", audioProcessor.isTakeOverdub());
+    obj->setProperty ("selectedTakeId", audioProcessor.getSelectedTakeId());
+    {
+        juce::Array<juce::var> takes;
+        for (const auto& t : audioProcessor.getTakeList())
+        {
+            auto* takeObj = new juce::DynamicObject();
+            takeObj->setProperty ("id", t.id);
+            takeObj->setProperty ("length", static_cast<double> (t.length));
+            takes.add (juce::var (takeObj));
+        }
+        obj->setProperty ("takes", juce::var (takes));
+    }
     obj->setProperty ("looperRecording", audioProcessor.isLooperRecording());
     obj->setProperty ("looperPreRoll", audioProcessor.isLooperPreRolling());
     obj->setProperty ("looperPlaying", audioProcessor.isLooperPlaying());

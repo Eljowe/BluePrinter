@@ -118,25 +118,33 @@ public:
     void stopPlayback();
     bool isPlaybackActive() const { return playbackActive.load (std::memory_order_acquire); }
 
-    // Pending-take review. After a take stops it is NOT saved
-    // automatically — the audio stays in recordBuffer as a pending take
-    // so it can be replayed, then explicitly saved to the library or
-    // discarded. Any new capture (take or loop) invalidates it.
-    bool    isTakePending() const { return takeRecorder.isTakePending(); }
-    int64_t getTakeLength() const { return takeRecorder.getTakeLength(); }
+    // Take review. Every stopped take is retained in a bounded stack (0037)
+    // and is NOT saved automatically: each can be auditioned, then explicitly
+    // saved to the library or deleted. The stack is session-only.
+    bool    isTakePending() const { return takeRecorder.getTakeCount() > 0; }
+    int64_t getTakeLength() const { return takeRecorder.getSelectedTakeLength(); }
     bool    isTakePlaying() const { return takeRecorder.isReviewPlaying(); }
     int64_t getTakePlaybackPos() const { return takeRecorder.getReviewPos(); }
-    // Downsampled waveform of the pending take, rebuilt on the message
+    // Downsampled waveform of the selected take, rebuilt on the message
     // thread when the take finalizes.
-    const std::vector<float>& getTakePeaks() const { return takeRecorder.getTakePeaks(); }
+    const std::vector<float>& getTakePeaks() const { return takeRecorder.getSelectedTakePeaks(); }
+    int     getSelectedTakeId() const { return takeRecorder.getSelectedTakeId(); }
+    std::vector<TakeRecorder::TakeView> getTakeList() const { return takeRecorder.getTakeList(); }
     void setTakePlayback (bool enabled);
     void savePendingTake();
     void discardPendingTake();
+    // Id-targeted actions for the per-take UI (id <= 0 = the selected take).
+    void saveTake (int id);
+    void discardTake (int id);
+    void selectTake (int id);
+    void discardAllTakes();
+    // Takes evicted by the stack bounds since the last call (for the UI).
+    int consumeTakesDropped() { return takeRecorder.consumeDroppedCount(); }
 
     // Take-recorder overdub (session-only, like the looper's switch): with
-    // a pending take, the next record layers the new input over the take
-    // instead of replacing it. The take keeps playing while you play along,
-    // and the new layer is wrapped-mixed into the take on stop.
+    // a take selected, the next record layers the new input over it instead
+    // of adding a new take. The take keeps playing while you play along,
+    // and the new layer is wrapped-mixed into it on stop.
     bool isTakeOverdub() const { return takeRecorder.isOverdubEnabled(); }
     void setTakeOverdub (bool enabled);
 
@@ -634,16 +642,11 @@ private:
     // Reused member so no allocation happens in processBlock.
     std::vector<PluginChain*> blockChains;
 
-    // Take recorder + pending-take review state machine (0027 step 6b). The
-    // shared capture buffer (recordBuffer) and its lock stay here; the module
-    // owns every take-related flag and the review peaks. See TakeRecorder.h.
+    // Take recorder: bounded take stack + review/overdub state machine (0027,
+    // 0037). The shared capture buffer (recordBuffer) and its lock stay here;
+    // the module owns each take's audio and the review state. See
+    // TakeRecorder.h.
     TakeRecorder takeRecorder;
-
-    void refreshTakePeaks();
-    // Clears the pending-take state. Message thread only (touches the
-    // takePeaks vector). Audio-thread invalidation (beginActualRecording)
-    // clears just the atomics.
-    void clearPendingTake();
 
     std::atomic<bool> playbackActive { false };
     std::atomic<int> playingSnippetId { -1 };

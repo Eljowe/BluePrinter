@@ -13,15 +13,17 @@ implementation detail lives in [`AGENTS.md`](AGENTS.md).
 A one-shot recording of the recording mix into the shared record buffer.
 _Avoid_: Recording, clip
 
-**Pending take**:
-A captured take that has stopped but not yet been saved or discarded. Any new
-capture invalidates it.
-_Avoid_: Unsaved take, take buffer
+**Take stack**:
+Every stopped take is retained (bounded to 8 takes / 256 MB) in `TakeRecorder`,
+each owning its own audio. One take is selected for review; takes are session-only
+until saved as snippets. A new capture appends; it does not invalidate the stack.
+_Avoid_: Pending take (removed — the stack replaces the single slot), take buffer
 
 **Take overdub**:
-Layering a new pass over the pending take instead of replacing it (the Take
-review's Dub toggle, session-only). The new input is captured after the take and
-wrap-mixed into it on stop, so playback and the saved WAV contain every layer.
+Layering a new pass over the **selected** take instead of adding a new one (the
+Take review's Dub toggle, session-only). The selected take is staged into the
+record buffer, the new input is captured after it and wrap-mixed into it on stop,
+so playback and the saved WAV contain every layer.
 _Avoid_: Punch-in, comping, takes-stacking
 
 **Loop**:
@@ -166,7 +168,7 @@ _Avoid_: Message, IPC event
 | MIDI output device + direct sends | `Source/MidiClockOutput.h/.cpp` |
 | Metering math | `Source/MeterMath.h` |
 | Per-meter level/peak/clip state | `Source/Meter.h` |
-| Take-recorder state machine + pending-take review | `Source/TakeRecorder.h/.cpp` |
+| Take stack + review/overdub state machine | `Source/TakeRecorder.h/.cpp` |
 | React app + components | `WebUI/src/` |
 | Bridge API | `WebUI/src/bridge.js` |
 

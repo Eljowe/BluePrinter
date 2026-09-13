@@ -83,7 +83,7 @@ function readInitialTransport() {
     midiClockEnabled: false, midiClockOnRecord: false, midiOutputDevice: "", midiOutputDeviceList: [],
     tunerOpen: false, tunerMonitorMute: false, tunerFrequency: 0, tunerConfidence: 0, tunerReferencePitch: 440, tunerNote: "", tunerCents: 0,
      preRollActive: false, transportPosition: 0,
-     takePending: false, takeLength: 0, takePlaying: false, takePosition: 0, takePeaks: [],
+     takePending: false, takeLength: 0, takePlaying: false, takePosition: 0, takePeaks: [], takes: [], selectedTakeId: -1,
      looperRecording: false, looperPreRoll: false, looperPlaying: false, looperLooping: true, looperOverdub: false, looperCountInBeats: 4, looperCropStartBeats: 0, looperCropEndBeats: 0, audioLoopStart: 0, audioLoopPosition: 0, audioLoopLength: 0, audioLoopPeaks: [], chainLevels: [], maxRecordSamples: 0, loopUndoAvailable: false, loopRedoAvailable: false,
   };
   return {
@@ -138,6 +138,8 @@ function readInitialTransport() {
      takePlaying: Boolean(raw.takePlaying),
      takePosition: Number(raw.takePosition ?? 0),
      takePeaks: Array.isArray(raw.takePeaks) ? raw.takePeaks : [],
+     takes: Array.isArray(raw.takes) ? raw.takes : [],
+     selectedTakeId: Number(raw.selectedTakeId ?? -1),
      looperRecording: Boolean(raw.looperRecording), looperPreRoll: Boolean(raw.looperPreRoll), looperPlaying: Boolean(raw.looperPlaying), looperLooping: raw.looperLooping !== false, looperOverdub: Boolean(raw.looperOverdub), looperCountInBeats: Number(raw.looperCountInBeats ?? 4), looperLengthBars: Number(raw.looperLengthBars ?? 0), looperCropStartBeats: Number(raw.looperCropStartBeats ?? 0), looperCropEndBeats: Number(raw.looperCropEndBeats ?? 0), audioLoopStart: Number(raw.audioLoopStart ?? 0), audioLoopPosition: Number(raw.audioLoopPosition ?? 0), audioLoopLength: Number(raw.audioLoopLength ?? 0), audioLoopPeaks: Array.isArray(raw.audioLoopPeaks) ? raw.audioLoopPeaks : [], chainLevels: Array.isArray(raw.chainLevels) ? raw.chainLevels : [], maxRecordSamples: Number(raw.maxRecordSamples ?? 0), loopUndoAvailable: Boolean(raw.loopUndoAvailable), loopRedoAvailable: Boolean(raw.loopRedoAvailable),
   };
 }
@@ -231,7 +233,19 @@ export default function App() {
         if (isControl(document.activeElement)) return;
         if (recordingMode === "take" && transport.takePending) {
           e.preventDefault();
-          emit(FRONTEND_EVENTS.saveTake);
+          emit(FRONTEND_EVENTS.saveTake, { id: transport.selectedTakeId });
+        }
+        return;
+      }
+
+      // Delete the selected take without confirmation (deliberate, 0037).
+      if (e.key === "Delete" || e.key === "Backspace") {
+        if (isControl(document.activeElement)) return;
+        const capturing = transport.recording || transport.preRollActive;
+        if (recordingMode === "take" && transport.takePending
+            && transport.selectedTakeId >= 0 && !capturing) {
+          e.preventDefault();
+          emit(FRONTEND_EVENTS.discardTake, { id: transport.selectedTakeId });
         }
         return;
       }
@@ -252,6 +266,7 @@ export default function App() {
     transport.looperPreRoll,
     transport.takePending,
     transport.takePlaying,
+    transport.selectedTakeId,
     transport.playingSnippetId,
   ]);
 
@@ -381,6 +396,8 @@ export default function App() {
          takePlaying: payload.takePlaying !== undefined ? Boolean(payload.takePlaying) : prev.takePlaying,
          takePosition: Number(payload.takePosition ?? prev.takePosition ?? 0),
          takePeaks: Array.isArray(payload.takePeaks) ? payload.takePeaks : (prev.takePeaks ?? []),
+         takes: Array.isArray(payload.takes) ? payload.takes : (prev.takes ?? []),
+         selectedTakeId: payload.selectedTakeId !== undefined ? Number(payload.selectedTakeId) : prev.selectedTakeId,
          looperRecording: payload.looperRecording !== undefined ? Boolean(payload.looperRecording) : prev.looperRecording,
          looperPreRoll: payload.looperPreRoll !== undefined ? Boolean(payload.looperPreRoll) : prev.looperPreRoll,
          looperPlaying: payload.looperPlaying !== undefined ? Boolean(payload.looperPlaying) : prev.looperPlaying,
@@ -728,7 +745,8 @@ export default function App() {
             <summary title="Keyboard shortcuts">Keyboard</summary>
             <dl className="shortcut-list">
               <div><dt>Space</dt><dd>Start / stop capture (Take or Loop tab)</dd></div>
-              <div><dt>Enter</dt><dd>Save the pending take</dd></div>
+              <div><dt>Enter</dt><dd>Save the selected take</dd></div>
+              <div><dt>Delete</dt><dd>Delete the selected take (no confirmation)</dd></div>
               <div><dt>Esc</dt><dd>Stop playback</dd></div>
             </dl>
           </details>

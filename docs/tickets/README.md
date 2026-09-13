@@ -108,7 +108,7 @@ and briefed.
 | [0034](0034-builtin-tuner.md) | Built-in tuner | done | — |
 | [0035](0035-library-curation-setlists-favorites.md) | Library curation: setlists, favourites and bulk edits | needs-triage | — |
 | [0036](0036-reverse-halfspeed-loop.md) | Reverse and half-speed loop playback | done | — |
-| [0037](0037-multi-take-comping.md) | Multi-take recording and comping | needs-triage | — |
+| [0037](0037-multi-take-comping.md) | Multi-take recording and comping | done | — |
 | [0038](0038-stem-per-chain-export.md) | Stem export: render each chain separately | needs-triage | — |
 | [0039](0039-auto-update-check.md) | Update check and in-app upgrade notice | needs-triage | 0015 |
 | [0040](0040-plugin-manager-scan-ui.md) | Plugin manager: scan status, browse and quarantine control | done | — |
