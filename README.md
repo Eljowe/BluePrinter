@@ -1,7 +1,8 @@
-# BluePrinter (JUCE + CMake + WebView2)
+# BluePrinter (JUCE + CMake + WebView UI)
 
-A minimal JUCE audio plugin template with a WebView2 (Edge) editor and a React +
-Vite frontend. Designed to be forked and customised.
+A JUCE audio plugin with a WebView editor (WebView2 on Windows, WKWebView on
+macOS, WebKitGTK on Linux) and a React + Vite frontend. Designed to be forked
+and customised.
 
 This fork of the template turns the plugin into a **guitar take recorder**:
 hit record, play, stop, name the take, write down what to work on, then save
@@ -9,12 +10,15 @@ to disk (WAV + sidecar JSON).
 
 ## Install (no source code needed)
 
-Windows 10/11 only. Grab the latest installer from the
-[Releases page](../../releases):
+Cross-platform since [ADR-0006](docs/adr/0006-cross-platform-macos-linux.md):
+Windows, macOS and Linux. Grab the latest artifacts from the
+[Releases page](../../releases) (`SHA256SUMS.txt` is included) and verify them
+before running.
+
+### Windows 10/11
 
 ```
 BluePrinterSetup-1.1.0.exe
-SHA256SUMS.txt
 ```
 
 Run the installer — it needs admin rights once (SmartScreen may warn
@@ -34,16 +38,43 @@ they are missing (WebView2 ships with Windows 11, so it is usually skipped).
 Uninstalling via Settings → Apps → Installed apps → BluePrinter removes the
 program files and shortcuts but **keeps your settings and snippet library**.
 
-Verify the download before running (optional):
-
 ```powershell
 Get-FileHash .\BluePrinterSetup-1.1.0.exe -Algorithm SHA256
 # compare against SHA256SUMS.txt
 ```
 
-If you build from source instead, the release bundle can be regenerated with
-the **Build Release Bundle** VS Code task (`installer/build-release.ps1`). The
-full ordered release process lives in
+### macOS 11+ (universal, unsigned)
+
+```
+BluePrinter-1.1.0.dmg
+```
+
+The v1 macOS build is **not notarized** (ADR-0006), so Gatekeeper warns the
+first time you open it. Drag **BluePrinter.app** to Applications and
+right-click → **Open** (or `xattr -dr com.apple.quarantine
+/Applications/BluePrinter.app`). Copy the plugin bundles to
+`~/Library/Audio/Plug-Ins/Components/` (AU) and
+`~/Library/Audio/Plug-Ins/VST3/` (VST3); the DMG's `INSTALL.txt` repeats
+this. AUs may need a one-time validation on your DAW's first plugin scan.
+
+### Linux (Ubuntu 22.04+)
+
+```
+BluePrinter-1.1.0.deb
+```
+
+`sudo apt install ./BluePrinter-1.1.0.deb` installs the standalone, the VST3
+bundle and a desktop entry, and pulls in **WebKitGTK 4.1**
+(`libwebkit2gtk-4.1-0`) as a runtime dependency. The third-party VST3
+amp-sim ecosystem on Linux is limited, so the standalone and whatever VST3s
+you have are the practical value there.
+
+### From source
+
+The release bundles can be regenerated per platform:
+`installer/build-release.ps1` (Windows), `installer/build-macos-release.sh`
+(macOS) and `installer/build-linux-release.sh` (Linux). The full ordered
+release process lives in
 [`docs/release-checklist.md`](docs/release-checklist.md).
 
 ## What it does

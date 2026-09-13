@@ -51,6 +51,23 @@ signing — not yet implemented, see step 6).
 - [ ] The script prints the bundle contents — confirm all four files are
       present and non-zero.
 
+## 3b. macOS and Linux bundles (ADR-0006)
+
+Run these on the matching OS (or let the `macos-latest` / `ubuntu-latest` CI
+jobs build them and download the `BluePrinter-macOS` / `BluePrinter-Linux`
+artifacts). Both scripts parse the same `CMakeLists.txt` version.
+
+- [ ] macOS: `bash installer/build-macos-release.sh` →
+      `build/release/BluePrinter-<version>-macos/BluePrinter-<version>.dmg`
+      (standalone `.app` + AU + VST3 + `INSTALL.txt`) + `SHA256SUMS.txt`.
+- [ ] Linux: `bash installer/build-linux-release.sh` →
+      `build/release/BluePrinter-<version>-linux/BluePrinter-<version>.deb` and
+      `BluePrinter-<version>-x86_64.AppImage` + `SHA256SUMS.txt`. The `.deb`
+      declares `libwebkit2gtk-4.1-0`; the AppImage needs WebKitGTK 4.1 present.
+- [ ] macOS 11+ builds are **universal** and **unsigned** (notarization is
+      deferred — ticket [0015](tickets/0015-code-signing.md)); confirm the
+      artifact is the universal one. Linux builds are unsigned.
+
 ## 4. Verify the bundle
 
 - [ ] `SHA256SUMS.txt` lists every other file in the folder.
