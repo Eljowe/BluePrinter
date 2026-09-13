@@ -17,6 +17,10 @@
 #include "MidiClockOutput.h"
 #include "Meter.h"
 #include "LooperGridMath.h"
+#include "TakeRecorder.h"
+#include "Looper.h"
+#include "RestoreSelfHeal.h"
+#include "ChainStatePersistence.h"
 #include <deque>
 
 //==============================================================================
@@ -106,15 +110,9 @@ public:
     //==============================================================================
     // Recording / playback / library
 
-    enum class RecordingState : int
-    {
-        Idle = 0,
-        Recording = 1
-    };
-
     void startRecording();
     void stopRecording();
-    bool isRecordingRequested() const { return recordingRequested.load (std::memory_order_acquire); }
+    bool isRecordingRequested() const { return takeRecorder.isRecordingRequested(); }
 
     void startPlayback (int snippetId);
     void stopPlayback();
@@ -124,13 +122,13 @@ public:
     // automatically — the audio stays in recordBuffer as a pending take
     // so it can be replayed, then explicitly saved to the library or
     // discarded. Any new capture (take or loop) invalidates it.
-    bool    isTakePending() const { return takePending.load (std::memory_order_acquire); }
-    int64_t getTakeLength() const { return takeLength.load (std::memory_order_acquire); }
-    bool    isTakePlaying() const { return takePlaybackActive.load (std::memory_order_acquire); }
-    int64_t getTakePlaybackPos() const { return takePlaybackPos.load (std::memory_order_acquire); }
+    bool    isTakePending() const { return takeRecorder.isTakePending(); }
+    int64_t getTakeLength() const { return takeRecorder.getTakeLength(); }
+    bool    isTakePlaying() const { return takeRecorder.isReviewPlaying(); }
+    int64_t getTakePlaybackPos() const { return takeRecorder.getReviewPos(); }
     // Downsampled waveform of the pending take, rebuilt on the message
     // thread when the take finalizes.
-    const std::vector<float>& getTakePeaks() const { return takePeaks; }
+    const std::vector<float>& getTakePeaks() const { return takeRecorder.getTakePeaks(); }
     void setTakePlayback (bool enabled);
     void savePendingTake();
     void discardPendingTake();
@@ -139,7 +137,7 @@ public:
     // a pending take, the next record layers the new input over the take
     // instead of replacing it. The take keeps playing while you play along,
     // and the new layer is wrapped-mixed into the take on stop.
-    bool isTakeOverdub() const { return takeOverdub.load (std::memory_order_acquire); }
+    bool isTakeOverdub() const { return takeRecorder.isOverdubEnabled(); }
     void setTakeOverdub (bool enabled);
 
     bool deleteSnippet (int id);
@@ -282,7 +280,7 @@ public:
     float getTunerConfidence() const { return tunerConfidence.load (std::memory_order_acquire); }
     float getTunerReferencePitch() const { return tunerReferencePitch.load (std::memory_order_acquire); }
     int64_t getTransportPosition() const { return transportPosition.load (std::memory_order_acquire); }
-    bool    isPreRollActive()     const { return preRollActive.load (std::memory_order_acquire); }
+    bool    isPreRollActive()     const { return takeRecorder.isPreRollActive(); }
 
     void setMetronomeEnabled (bool enabled);
     void setBpm (float newBpm);
@@ -333,18 +331,18 @@ public:
     // sounds are baked into the loop) into the shared recordBuffer,
     // then plays it back as an audio-only loop. Optional click +
     // count-in run off the same metronome clock.
-    bool    isLooperRecording() const { return audioLoopRecording.load(); }
-    bool    isLooperPreRolling() const { return looperPreRollActive.load(); }
-    bool    isLooperPlaying() const { return audioLoopPlaying.load(); }
-    bool    isLooperLooping() const { return looperLooping.load(); }
+    bool    isLooperRecording() const { return looper.isRecording(); }
+    bool    isLooperPreRolling() const { return looper.isPreRollActive(); }
+    bool    isLooperPlaying() const { return looper.isPlaying(); }
+    bool    isLooperLooping() const { return looper.isLooping(); }
     // Overdub mode: with a loop captured and looping on, record layers
     // the new input over the existing loop instead of replacing it.
-    bool    isLooperOverdub() const { return looperOverdub.load(); }
-    int     getLooperCountInBeats() const { return looperCountInBeats.load(); }
+    bool    isLooperOverdub() const { return looper.isOverdub(); }
+    int     getLooperCountInBeats() const { return looper.getCountInBeats(); }
     // Fixed capture length in bars (0022): 0 = Free (stop when the user
     // stops), 1/2/4/8 = auto-stop the capture after exactly that many
     // bars so the loop always lands on the grid.
-    int     getLooperLengthBars() const { return looperLengthBars.load (std::memory_order_acquire); }
+    int     getLooperLengthBars() const { return looper.getLengthBars(); }
     // Header-level click-during-capture gate, shared by the take recorder
     // and the looper: when false the click only plays during count-ins,
     // never through the take or the loop capture itself. The count-in
@@ -353,23 +351,23 @@ public:
     // Beats trimmed off the start/end of the captured loop (message-thread
     // crop settings, applied to audioLoopStart/audioLoopLength). Beat
     // granularity — finer than the bar-aligned capture trim.
-    int     getLooperCropStartBeats() const { return looperCropStartBeats; }
-    int     getLooperCropEndBeats() const { return looperCropEndBeats; }
-    bool    hasAudioLoop() const { return audioLoopLength.load() > 0; }
-    double  getAudioLoopPosition() const { return audioLoopPosition.load(); }
+    int     getLooperCropStartBeats() const { return looper.getCropStartBeats(); }
+    int     getLooperCropEndBeats() const { return looper.getCropEndBeats(); }
+    bool    hasAudioLoop() const { return looper.hasLoop(); }
+    double  getAudioLoopPosition() const { return looper.getPosition(); }
     // Session-only playback mode (ticket 0036): reverse direction and
     // tape-style half-speed. Both default off (forward 1x) each launch and
     // are ignored while an overdub captures.
-    bool    isLoopPlaybackReverse() const { return loopPlaybackReverse.load(); }
-    bool    isLoopPlaybackHalfSpeed() const { return loopPlaybackHalfSpeed.load(); }
-    int64_t getAudioLoopLength() const { return audioLoopLength.load(); }
-    int64_t getAudioLoopStart() const { return audioLoopStart.load(); }
+    bool    isLoopPlaybackReverse() const { return looper.isPlaybackReverse(); }
+    bool    isLoopPlaybackHalfSpeed() const { return looper.isPlaybackHalfSpeed(); }
+    int64_t getAudioLoopLength() const { return looper.getLength(); }
+    int64_t getAudioLoopStart() const { return looper.getStart(); }
     // Total record-buffer capacity in samples (bounds a fresh capture;
     // the frontend uses it to draw capture progress).
     int     getMaxRecordSamples() const { return maxRecordSamples; }
     // Waveform peaks for the cropped loop region, recomputed on the
     // message thread whenever the loop changes (stop/trim/crop).
-    const std::vector<float>& getLooperPeaks() const { return looperPeaks; }
+    const std::vector<float>& getLooperPeaks() const { return looper.getPeaks(); }
     void    setLooperRecording (bool enabled);
     void    setLooperPlaying (bool enabled);
     void    setLooperLooping (bool enabled);
@@ -386,8 +384,8 @@ public:
     // Loop layer undo/redo (0030). Undo restores the loop audio to before the
     // last overdub layer; redo re-applies it. Disabled while playing or
     // capturing. Session-only.
-    bool    isLoopUndoAvailable() const { return ! loopUndoStack.empty(); }
-    bool    isLoopRedoAvailable() const { return ! loopRedoStack.empty(); }
+    bool    isLoopUndoAvailable() const { return looper.isUndoAvailable(); }
+    bool    isLoopRedoAvailable() const { return looper.isRedoAvailable(); }
     void    undoLoopLayer();
     void    redoLoopLayer();
     // Converts the captured (cropped) loop into a library snippet and
@@ -527,7 +525,7 @@ public:
     void resetClip (const juce::String& target);
 
     // Snippet currently being captured (only valid while recordingRequested is true).
-    int getRecordingLengthSamples() const { return static_cast<int> (recordWritePos.load (std::memory_order_acquire)); }
+    int getRecordingLengthSamples() const { return static_cast<int> (takeRecorder.getWritePos()); }
 
     // Snippet currently being played back (-1 if none).
     int getPlayingSnippetId() const { return playingSnippetId.load (std::memory_order_acquire); }
@@ -553,9 +551,7 @@ private:
     void beginActualRecording();
     void beginActualTakeOverdub();
 
-    void writeRecording (const juce::AudioBuffer<float>& source, int numSamples);
     void renderPlayback (juce::AudioBuffer<float>& destination, int numSamples);
-    void renderTakePlayback (juce::AudioBuffer<float>& destination, int numSamples);
     void computeLevels  (const juce::AudioBuffer<float>& source, int numSamples);
     // Recomputes whether any source wants the MIDI clock running and
     // sends Start/Stop on the edges. Message thread only (may open/close
@@ -604,6 +600,12 @@ private:
     // state so ids never collide after a restore.
     int nextChainId = 0;
 
+    // Bundle serialise/apply + chain construction (0027 step 5b). Created in
+    // the constructor with references to the members above; see
+    // ChainStatePersistence.h. The restore guard, crash marker and deferred
+    // driver stay in the processor.
+    std::unique_ptr<ChainStatePersistence> chainStatePersistence;
+
     // Pre-allocated record buffer. Allocated on the message thread inside
     // prepareToPlay, written to from the audio thread — no allocations there.
     std::unique_ptr<juce::AudioBuffer<float>> recordBuffer;
@@ -632,31 +634,10 @@ private:
     // Reused member so no allocation happens in processBlock.
     std::vector<PluginChain*> blockChains;
 
-    std::atomic<RecordingState> recordingState { RecordingState::Idle };
-    std::atomic<bool> recordingRequested { false };
-    std::atomic<bool> recordingFinalizePending { false };
-    std::atomic<int64_t> recordWritePos { 0 };
-
-    // Pending-take review state. After a take stops, its audio stays in
-    // recordBuffer until the user saves it to the library or discards
-    // it. takePending/takeLength are set on the message thread when the
-    // take finalizes; takePlaybackActive/Pos drive the review playback
-    // on the audio thread. takePeaks is message-thread only.
-    std::atomic<bool>    takePending        { false };
-    std::atomic<int64_t> takeLength         { 0 };
-    std::atomic<bool>    takePlaybackActive { false };
-    std::atomic<int64_t> takePlaybackPos    { 0 };
-    std::vector<float>   takePeaks;
-
-    // Take overdub (session-only). takeOverdub is the user's Dub toggle;
-    // takeOverdubPending marks a start (possibly still in count-in) that
-    // will layer; takeOverdubCapture is true once the layer is actually
-    // being written and drives the monitor playback. takeOverdubPlayPos is
-    // the looped read position of the pending take during the layer.
-    std::atomic<bool>    takeOverdub        { false };
-    std::atomic<bool>    takeOverdubPending { false };
-    std::atomic<bool>    takeOverdubCapture { false };
-    std::atomic<int64_t> takeOverdubPlayPos { 0 };
+    // Take recorder + pending-take review state machine (0027 step 6b). The
+    // shared capture buffer (recordBuffer) and its lock stay here; the module
+    // owns every take-related flag and the review peaks. See TakeRecorder.h.
+    TakeRecorder takeRecorder;
 
     void refreshTakePeaks();
     // Clears the pending-take state. Message thread only (touches the
@@ -708,74 +689,18 @@ private:
     void startTunerWorker();
     void stopTunerWorker();
 
-    // Loop layer undo/redo (0030). Message-thread only: snapshots of the full
-    // loop region, bounded by step count and total bytes.
-    std::deque<std::shared_ptr<juce::AudioBuffer<float>>> loopUndoStack;
-    std::deque<std::shared_ptr<juce::AudioBuffer<float>>> loopRedoStack;
-    size_t loopUndoBytes = 0;
-    void pushLoopUndoSnapshot();
-    void applyLoopSnapshot (const std::shared_ptr<juce::AudioBuffer<float>>& snapshot);
-    void clearLoopHistory();
+    // Audio looper state + loop-layer undo/redo (0027 step 6c). See
+    // Looper.h; the shared capture buffer and record lock stay here.
+    Looper looper;
+
     void updateLoopClipLatch();
     bool canEditLoopHistory() const;
-    std::shared_ptr<juce::AudioBuffer<float>> snapshotCurrentLoopRegion();
-    void trimLoopHistoryStacks();
     std::atomic<float>   loopLevel        { 0.0f };
     std::atomic<float>   dryLevel         { 0.0f };
     std::atomic<float>   overdubLevel     { 0.0f };
-    std::atomic<bool>    preRollActive    { false };
     std::atomic<int64_t> transportPosition { 0 };
     std::atomic<int64_t> metronomePosition { 0 };
-
-    // Audio looper state. Capture writes the post-chain audio into
-    // recordBuffer up to audioLoopLength; crop skips audioLoopStart
-    // samples at playback/save time. All audio-thread reads go through
-    // the atomics; the crop bar counts are message-thread only.
-    std::atomic<int>     looperCountInBeats     { 4 };
-    // Fixed capture length in bars (0 = Free). Read by the audio thread to
-    // auto-stop a fresh capture after N bars (4 beats per bar); persisted
-    // with the host state.
-    std::atomic<int>     looperLengthBars       { 0 };
-    // Set by the audio thread when a fixed-length capture has written its
-    // last block; the message thread finalises it via setLooperRecording(false)
-    // so the buffer trim/mix never runs on the audio thread.
-    std::atomic<bool>    looperAutoStopPending  { false };
-    std::atomic<bool>    looperPreRollActive    { false };
-    std::atomic<bool>    looperCaptureArmed     { false };
-    std::atomic<bool>    looperLooping          { true };
-    // Overdub mode (session-only, like looperLooping): when on and a
-    // loop exists, a new capture layers the input over the loop instead
-    // of replacing it. looperOverdubCapture is set by the message thread
-    // for the duration of an overdub capture; the audio thread then
-    // writes the new layer into the region after the loop (overdubWritePos)
-    // while audioLoopLength stays fixed, so the wrap boundary never
-    // moves mid-capture. The layer is mixed into the loop on stop.
-    std::atomic<bool>    looperOverdub          { false };
-    std::atomic<bool>    looperOverdubCapture   { false };
-    std::atomic<int64_t> overdubWritePos        { 0 };
-    std::atomic<int64_t> audioLoopStart   { 0 };
-    std::atomic<int64_t> audioLoopLength  { 0 };
-    std::atomic<double>  audioLoopPosition { 0.0 };
-    // Session-only playback mode (0036). Set on the message thread, read on
-    // the audio thread. Forced forward/1x while an overdub is capturing.
-    std::atomic<bool>    loopPlaybackReverse   { false };
-    std::atomic<bool>    loopPlaybackHalfSpeed { false };
-    // Full captured (grid-trimmed) loop extent — the reference the crop
-    // beats are measured against. Crops derive audioLoopStart/Length from
-    // this every time, so cropping is reversible: moving the start crop
-    // back to 0 restores the region exactly instead of shrinking the
-    // window further (the old code folded the previous crop into the
-    // loop length and every adjustment silently chopped the tail).
-    std::atomic<int64_t> audioLoopFullLength { 0 };
-    std::atomic<bool> audioLoopRecording { false };
-    std::atomic<bool> audioLoopPlaying   { false };
-    int looperCropStartBeats = 0;
-    int looperCropEndBeats   = 0;
     int loopCrossfadeSamples = 0;
-    // Message-thread only: downsampled waveform of the FULL loop (crop
-    // regions included, so the UI's crop shading can overlay the greyed
-    // beat ranges on top), rebuilt by refreshLooperPeaks().
-    std::vector<float> looperPeaks;
 
     void refreshLooperPeaks();
     void trimLooperToMusicalGrid();
@@ -913,31 +838,11 @@ private:
     // crash in one of those loads (e.g. Archetype "X" dying in
     // setStateInformation) recur on every launch. Message-thread only.
     bool restoreRequestedThisSession = false;
-    // Staleness decision for the chainRestoreCrashed marker (see
-    // applyChainState): the marker is written at every restore start
-    // and cleared only when the restore drains, so a plain quit
-    // mid-restore leaves it set too. It is honored only when NO clean
-    // exit (BluePrinter.settings mtime — written exclusively by clean
-    // exits) postdates it. Decided once per process because the
-    // standalone can run applyChainState twice in one launch
-    // (settings-file restore + the editor's restoreSavedPluginChains).
-    // Message-thread only.
-    bool chainRestoreDecisionMade = false;
-    bool chainRestoreBlobsAllowed = true;
-    // Plugin detail parsed from crash-info.txt's "Operation:" line on a
-    // crash launch (file name for instantiate/prepare crashes,
-    // plugin name for setStateInformation crashes). Read on every
-    // launch, freshness-gated against the last clean exit; empty when
-    // the diagnostics are missing, stale, or don't name a plugin.
-    juce::String crashedPluginDetail;
-    // Plugin detail from the lastPluginLoadOp property (written by
-    // notifyPluginLoadStarting before every plugin load). Unlike
-    // crash-info.txt this also survives fail-fast crashes
-    // (STATUS_STACK_BUFFER_OVERRUN, e.g. Neural DSP "X" dying in its own
-    // code) that bypass the unhandled-exception filter and never get
-    // recorded. Timestamp-gated like crashedPluginDetail; empty when
-    // nothing was loading recently.
-    juce::String loadOpCrashDetail;
+    // Crash self-heal bookkeeping (0027 step 5a): the once-per-launch blob
+    // decision, the crash-suspect parsing, the persisted plugin quarantine
+    // and the load-op breadcrumb. See RestoreSelfHeal.h.
+    RestoreSelfHeal restoreSelfHeal;
+
     // Properties-file modification time captured before this session
     // writes anything (restoreUserState entry). A crash-info.txt newer
     // than this was written by the launch that just crashed; anything
@@ -969,59 +874,19 @@ private:
     };
     std::unique_ptr<PendingStateApply> pendingStateApply;
 
-    // Build the combined plugin-chain bundle (all chains + library
-    // metadata) for persistence. See PluginProcessor.cpp for the
-    // exact format.
-    juce::var makeChainState() const;
-
-    // Inverse of makeChainState. Accepts the new chains-array format,
-    // the midiChain/audioChain-keyed split format, and the pre-split
-    // single-chain format (the latter two are migrated to chains with
-    // the old behaviour preserved). Suppresses chain persistence for
-    // its whole duration so a restore can never echo a partial state
-    // back into the properties file.
+    // Applies a saved chain bundle: the library config, chain construction and
+    // id de-duplication live in ChainStatePersistence; this method wraps them
+    // with the restore guard, the self-heal plan and the crash-marker
+    // lifecycle. Suppresses chain persistence for its whole duration so a
+    // restore can never echo a partial state back into the properties file.
     void applyChainState (const juce::var& state, juce::String& outError);
-
-    // Read the saved chain bundle from user state, preferring whichever
-    // of the "pluginChains"/"pluginChain" keys actually holds chain
-    // content (so a stale or corrupted newer key — e.g. an empty chains
-    // array written by an old restore echo — can't shadow the older
-    // valid one). Returns a void var when nothing usable is saved.
-    juce::var loadSavedChainState();
-
-    // Create a chain with the given config and push it into the list.
-    // Does NOT persist or notify — the caller decides (used during
-    // restore with persistingPluginChain set).
-    PluginChain* createChain (const juce::String& name,
-                              int inputMask,
-                              bool wantsMidi,
-                              bool recordOnCapture);
-
-    // Drop every chain (restore path). Fires onSlotRemoved so the
-    // editor can close any open plugin windows.
-    void clearChains();
-
-    // Reassign fresh ids to any chain whose id is missing or duplicated,
-    // and bump nextChainId past the highest id in use. Called after
-    // applyChainState.
-    void ensureUniqueChainIds();
 
     // Stashed when setStateInformation fails to restore one or more
     // chain plugins (e.g. expired-license VST3s). Read by the UI on
     // open so the user knows what was skipped.
     juce::String lastChainRestoreError;
 
-    // Quarantined plugin file names (see isPluginQuarantined).
-    // Persisted in user state as the "pluginQuarantine" property (JSON
-    // array). Loaded lazily; message-thread only.
-    juce::StringArray pluginQuarantine;
-    bool pluginQuarantineLoaded = false;
-    // Plugin names skipped by the current restore because they are
-    // quarantined; folded into lastChainRestoreError for the UI.
-    juce::StringArray quarantinedSkippedThisRestore;
-
-    void loadPluginQuarantine();
-    void savePluginQuarantine();
+    // Fold a skipped (quarantined) plugin into the restore error the UI shows.
     void recordQuarantinedSkip (const juce::String& fileName, const juce::String& pluginName);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BluePrinterAudioProcessor)

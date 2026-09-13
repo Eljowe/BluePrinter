@@ -156,6 +156,9 @@ _Avoid_: Message, IPC event
 | Metronome click scheduling + ring-out | `Source/MetronomePlayer.h/.cpp` |
 | MIDI clock pulse scheduling | `Source/MidiClockMath.h` |
 | Loop playback + overdub wrap-mix | `Source/LoopPlayback.h` |
+| Looper state: capture, grid trim, crop, undo/redo | `Source/Looper.h/.cpp` |
+| Crash self-heal: blob gating, suspects, quarantine | `Source/RestoreSelfHeal.h/.cpp` |
+| Chain bundle serialise/apply + chain construction | `Source/ChainStatePersistence.h/.cpp` |
 | Chain input select + monitor/record sum | `Source/ChainRouting.h` |
 | Capture-buffer write clamp | `Source/CaptureWrite.h` |
 | Capture-region copy (finalize) | `Source/CaptureCopy.h` |
@@ -163,6 +166,7 @@ _Avoid_: Message, IPC event
 | MIDI output device + direct sends | `Source/MidiClockOutput.h/.cpp` |
 | Metering math | `Source/MeterMath.h` |
 | Per-meter level/peak/clip state | `Source/Meter.h` |
+| Take-recorder state machine + pending-take review | `Source/TakeRecorder.h/.cpp` |
 | React app + components | `WebUI/src/` |
 | Bridge API | `WebUI/src/bridge.js` |
 
