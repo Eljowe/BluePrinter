@@ -119,7 +119,7 @@ and briefed.
 | Ticket | Title | Status | Blocked by |
 | ------ | ----- | ------ | ---------- |
 | [0028](0028-cross-platform-macos-linux.md) | Cross-platform support: macOS and Linux builds (spec) | in-progress | — |
-| [0042](0042-portable-build-foundation-ci.md) | Portable build foundation + macOS/Linux CI | ready-for-agent | — |
+| [0042](0042-portable-build-foundation-ci.md) | Portable build foundation + macOS/Linux CI | in-progress | — |
 | [0043](0043-portable-crash-diagnostics.md) | Portable crash diagnostics (macOS/Linux) | ready-for-agent | 0042 |
 | [0044](0044-macos-packaging.md) | macOS packaging (unsigned) | ready-for-agent | 0042 |
 | [0045](0045-linux-packaging.md) | Linux packaging (AppImage + .deb) | ready-for-agent | 0042 |

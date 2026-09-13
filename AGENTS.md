@@ -1,12 +1,12 @@
 # BluePrinter Development Instructions
 
 ## Project Overview
-BluePrinter is a JUCE audio plugin (VST3 + Standalone) for recording guitar takes with VST3 FX chain hosting, a React/WebView2 UI, and snippet library management. Snippets are saved as WAV files with JSON sidecars. Windows-only (WebView2 requirement).
+BluePrinter is a JUCE audio plugin (VST3 + Standalone; AU on macOS) for recording guitar takes with VST3 FX chain hosting, a React WebView UI (WebView2 on Windows, WKWebView on macOS, WebKitGTK on Linux), and snippet library management. Snippets are saved as WAV files with JSON sidecars. **Cross-platform** (ADR-0006): Windows, macOS (universal, 11+) and Linux (Ubuntu 22.04+, WebKitGTK 4.1). The Windows-only WebView2 patch/installer/crash tooling are per-platform now.
 
 ## Build System
 - CMake 3.22+ with JUCE CMake API
-- JUCE source tree expected at `C:/JUCE/JUCE` (override with `-DJUCE_DIR=...`), **JUCE 8.0.14 plus the patch in `cmake/patches/juce-webview2-additional-args.patch`** (`WinWebView2::withAdditionalBrowserArguments`, used by `WebViewEditor.cpp` to pass `--allow-no-sandbox-job --disable-gpu`). Apply with `git -C <juce> apply cmake/patches/juce-webview2-additional-args.patch`; CI does this after checkout.
-- Output formats: VST3, Standalone
+- JUCE source tree expected at `C:/JUCE/JUCE` (override with `-DJUCE_DIR=...`), **JUCE 8.0.14 on Windows plus the patch in `cmake/patches/juce-webview2-additional-args.patch`** (`WinWebView2::withAdditionalBrowserArguments`, used by `WebViewEditor.cpp` to pass `--allow-no-sandbox-job --disable-gpu`). Apply with `git -C <juce> apply cmake/patches/juce-webview2-additional-args.patch`; CI does this after checkout **on Windows only** — macOS/Linux use stock JUCE (the patch touches WinWebView2 and the call site is `#if JUCE_WINDOWS`).
+- Output formats (ADR-0006): VST3 + Standalone everywhere; AU added on macOS. The WebView2 SDK (`NEEDS_WEBVIEW2`, `JUCE_USE_WIN_WEBVIEW2=1`) is Windows-only; macOS uses WKWebView, Linux WebKitGTK 4.1 (documented runtime dep).
 - See `CMakeLists.txt` for full build config and install rules
 - WebUI must be built separately: `cd WebUI && npm install && npm run build`
 
@@ -40,7 +40,7 @@ Releasing is a fixed, ordered process: follow [`docs/release-checklist.md`](docs
 ## Commands
 - Build WebUI: `cd WebUI && npm install && npm run build` (outputs `WebUI/dist/`)
 - Build C++ (Debug): CMake configure with JUCE_DIR, then `cmake --build build --config Debug` — see `.vscode/tasks.json` for the exact invocation.
-- **CI**: `.github/workflows/build.yml` runs on every push to `master` and every PR (Windows runner). It builds the WebUI, then checks out + patches a pinned JUCE (`JUCE_VERSION` = **8.0.14**; `cmake/patches/juce-webview2-additional-args.patch`), caches it, configures CMake with **Ninja + MSVC** (not the "Visual Studio NN YYYY" generator, so runner-image VS-version bumps don't break it), installs the WebView2 SDK from NuGet into `JUCE_WEBVIEW2_PACKAGE_LOCATION`, builds the Release standalone + VST3, runs the CTest suite (`ctest --test-dir build --output-on-failure`), and uploads both artifacts. The pure-logic test target (`Tests/`) is built as part of `cmake --build build`. No secrets required (unsigned). Mirrors the local build, so a green run is the machine-checked equivalent of "it builds on my machine".
+- **CI**: `.github/workflows/build.yml` runs on every push to `master` and every PR as three jobs (ADR-0006): **windows-latest** (builds the WebUI, checks out + patches the pinned JUCE — `JUCE_VERSION` = **8.0.14**, `cmake/patches/juce-webview2-additional-args.patch` — caches it, configures with **Ninja + MSVC** (not "Visual Studio NN YYYY", so runner-image VS bumps don't break it), installs the WebView2 SDK from NuGet into `JUCE_WEBVIEW2_PACKAGE_LOCATION`, builds Release standalone + VST3, uploads artifacts), **macos-latest** (stock JUCE, no patch/WebView2 SDK; builds AU + VST3 + Standalone) and **ubuntu-latest** (installs the JUCE Linux deps incl. `libwebkit2gtk-4.1-dev`, builds VST3 + Standalone). All three run the CTest suite (`ctest --test-dir build --output-on-failure`), which is built as part of `cmake --build build`. No secrets required (unsigned). Mirrors the local build, so a green run is the machine-checked equivalent of "it builds on my machine".
 - **Lint / format / test**: no `.clang-format`, ESLint, or Prettier config, so match the style of surrounding code by hand. There **is** a pure-logic CTest suite: `cmake -S . -B build -DBUILD_TESTING=ON && cmake --build build --target BluePrinterTests && ctest --test-dir build --output-on-failure` (sources in `Tests/`, no external framework; CI runs it on every push/PR). Keep this section in sync if a formatter or lint command is added.
 
 ## Event Naming
