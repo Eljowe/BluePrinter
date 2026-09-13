@@ -38,6 +38,21 @@ BP_TEST (RestoreSelfHeal_parsesTheCrashOpDetail)
     BP_CHECK_EQ (RestoreSelfHeal::parseCrashOpDetail ("no op line"), juce::String());
 }
 
+BP_TEST (RestoreSelfHeal_parsesThePosixCrashFormat)
+{
+    // The macOS/Linux POSIX handler writes the same "Operation:" line plus
+    // extra Signal/Time/Backtrace lines (ticket 0043); the parser must ignore
+    // the extras and still name the plugin.
+    const juce::String text =
+        "BluePrinter crash diagnostics\n"
+        "Operation: restoring plugin state (setStateInformation) Bad.vst3\n"
+        "Signal: 11\n"
+        "Time (unix seconds): 1780000000\n"
+        "Backtrace (addresses):\n"
+        "  [0] 0x7f3c2b1a0e3a\n";
+    BP_CHECK_EQ (RestoreSelfHeal::parseCrashOpDetail (text), juce::String ("Bad.vst3"));
+}
+
 BP_TEST (RestoreSelfHeal_parsesTheFreshLoadOpOnly)
 {
     const auto now = juce::Time::currentTimeMillis();

@@ -26,11 +26,12 @@
 #include <thread>
 
 //==============================================================================
-// Crash diagnostics (Windows only). Records the chain-restore step that is
-// currently running in a fixed buffer (safe to read from a crash handler —
-// no heap, no locks). The unhandled-exception filter below writes it out
-// together with a module-offset backtrace so a crash inside a hosted VST3
-// DLL can be attributed to the exact step that triggered it.
+// Crash diagnostics (per-platform, ADR-0006). Records the chain-restore step
+// that is currently running in a fixed buffer (safe to read from a crash
+// handler — no heap, no locks). The platform handler below writes it out
+// together with a backtrace so a crash inside a hosted VST3 can be attributed
+// to the exact step that triggered it: the Windows SEH filter records
+// module+offset, the POSIX handler on macOS/Linux records addresses.
 namespace
 {
     char crashOpBuffer[1024] = "no chain operation in progress";
@@ -307,6 +308,206 @@ static LONG WINAPI bluePrinterCrashHandler (PEXCEPTION_POINTERS info)
 #endif
 
 //==============================================================================
+// Crash diagnostics — macOS/Linux (ADR-0006 / ticket 0043). Windows uses the
+// SEH filter above; on POSIX we install SIGSEGV/SIGABRT/SIGILL/SIGFPE/SIGBUS
+// handlers that write the same crash-info.txt the RestoreSelfHeal parser
+// reads, into the same folder. The handler stays async-signal-safe: only
+// open/write/rename/close, backtrace and hand-rolled formatting — no heap, no
+// locks, no JUCE. The output folder is resolved once on the message thread at
+// startup because the file APIs are not signal-safe.
+#if ! JUCE_WINDOWS
+ #include <csignal>
+ #include <signal.h>
+ #include <ctime>
+ #include <cstdint>
+ #include <fcntl.h>
+ #include <unistd.h>
+
+ #if defined (__has_include)
+  #if __has_include (<execinfo.h>)
+   #include <execinfo.h>
+   #define BLUEPRINTER_HAS_POSIX_BACKTRACE 1
+  #endif
+ #endif
+ #ifndef BLUEPRINTER_HAS_POSIX_BACKTRACE
+  #define BLUEPRINTER_HAS_POSIX_BACKTRACE 0
+ #endif
+
+namespace
+{
+    char crashDiagnosticsFolder[1024] = { 0 };
+    volatile std::sig_atomic_t crashHandlerActive = 0;
+
+    void appendLiteral (char* buf, int& len, const char* text)
+    {
+        for (const char* p = text; *p != 0 && len < 8180; ++p)
+            buf[len++] = *p;
+    }
+
+    void appendDecimal (char* buf, int& len, long long value)
+    {
+        char tmp[24];
+        int n = 0;
+        const bool negative = value < 0;
+        const unsigned long long magnitude = negative
+            ? static_cast<unsigned long long> (-value)
+            : static_cast<unsigned long long> (value);
+        auto v = magnitude;
+        do { tmp[n++] = static_cast<char> ('0' + (v % 10)); v /= 10; } while (v != 0);
+
+        if (negative && len < 8180)
+            buf[len++] = '-';
+        while (n > 0 && len < 8180)
+            buf[len++] = tmp[--n];
+    }
+
+    void appendHex (char* buf, int& len, unsigned long long value)
+    {
+        char tmp[16];
+        int n = 0;
+        do { const int digit = static_cast<int> (value & 0xf);
+             tmp[n++] = static_cast<char> (digit < 10 ? '0' + digit : 'a' + (digit - 10));
+             value >>= 4; } while (value != 0 && n < 16);
+
+        if (len < 8180) buf[len++] = '0';
+        if (len < 8180) buf[len++] = 'x';
+        while (n > 0 && len < 8180)
+            buf[len++] = tmp[--n];
+    }
+
+    bool buildCrashPath (char* dst, const char* suffix)
+    {
+        int len = 0;
+        for (const char* p = crashDiagnosticsFolder; *p != 0 && len < 1000; ++p)
+            dst[len++] = *p;
+        for (const char* p = suffix; *p != 0 && len < 1099; ++p)
+            dst[len++] = *p;
+        dst[len] = 0;
+        return len > 0;
+    }
+
+    void writeAll (int fd, const char* text, int len)
+    {
+        int written = 0;
+        while (written < len)
+        {
+            const auto n = ::write (fd, text + written, static_cast<size_t> (len - written));
+            if (n <= 0)
+                break;
+            written += static_cast<int> (n);
+        }
+    }
+
+    void bluePrinterPosixCrashHandler (int sig)
+    {
+        // Never recurse: a second fault while reporting (or a fault inside the
+        // handler) restores the default disposition and lets the OS record its
+        // own dump / crash report.
+        if (crashHandlerActive != 0)
+        {
+            ::signal (sig, SIG_DFL);
+            ::raise (sig);
+            return;
+        }
+        crashHandlerActive = 1;
+
+        char text[8192];
+        int len = 0;
+
+        appendLiteral (text, len, "BluePrinter crash diagnostics\nOperation: ");
+        appendLiteral (text, len, BluePrinterAudioProcessor::getCrashOp());
+        appendLiteral (text, len, "\nSignal: ");
+        appendDecimal (text, len, sig);
+        appendLiteral (text, len, "\nTime (unix seconds): ");
+        appendDecimal (text, len, static_cast<long long> (::time (nullptr)));
+
+       #if BLUEPRINTER_HAS_POSIX_BACKTRACE
+        void* frames[32] = { nullptr };
+        const int frameCount = ::backtrace (frames, 32);
+        appendLiteral (text, len, "\nBacktrace (addresses):\n");
+        for (int i = 0; i < frameCount; ++i)
+        {
+            appendLiteral (text, len, "  [");
+            appendDecimal (text, len, i);
+            appendLiteral (text, len, "] ");
+            appendHex (text, len, static_cast<unsigned long long> (reinterpret_cast<std::uintptr_t> (frames[i])));
+            appendLiteral (text, len, "\n");
+        }
+       #endif
+
+        // Rotate crash-info.txt -> .1 -> .2 -> .3 before overwriting so the
+        // previous crash survives. POSIX rename() replaces atomically.
+        char from[1100];
+        char to[1100];
+        char numbered[32];
+        for (int i = 2; i >= 1; --i)
+        {
+            int n = 0;
+            appendLiteral (numbered, n, "/crash-info.");
+            appendDecimal (numbered, n, i);
+            appendLiteral (numbered, n, ".txt");
+            numbered[n] = 0;
+            if (! buildCrashPath (from, numbered))
+                continue;
+
+            n = 0;
+            appendLiteral (numbered, n, "/crash-info.");
+            appendDecimal (numbered, n, i + 1);
+            appendLiteral (numbered, n, ".txt");
+            numbered[n] = 0;
+            if (! buildCrashPath (to, numbered))
+                continue;
+
+            ::rename (from, to);
+        }
+        if (buildCrashPath (from, "/crash-info.txt") && buildCrashPath (to, "/crash-info.1.txt"))
+            ::rename (from, to);
+
+        char path[1100];
+        if (buildCrashPath (path, "/crash-info.txt"))
+        {
+            const int fd = ::open (path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+            if (fd >= 0)
+            {
+                writeAll (fd, text, len);
+                ::close (fd);
+            }
+        }
+
+        // Re-raise with the default disposition so the OS still records its
+        // regular crash dump / report on top of ours.
+        crashHandlerActive = 0;
+        ::signal (sig, SIG_DFL);
+        ::raise (sig);
+    }
+
+    void installPosixCrashHandlers()
+    {
+        const auto folder = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+                                .getChildFile ("Retrokielto");
+        folder.createDirectory();
+
+        const auto fullPath = folder.getFullPathName();
+        const auto* utf8 = fullPath.toRawUTF8();
+        int len = 0;
+        for (int i = 0; utf8[i] != 0 && len < 1023; ++i)
+            crashDiagnosticsFolder[len++] = utf8[i];
+        crashDiagnosticsFolder[len] = 0;
+
+        const int signals[] = { SIGSEGV, SIGABRT, SIGILL, SIGFPE, SIGBUS };
+        for (const int sig : signals)
+        {
+            struct sigaction action {};
+            action.sa_handler = bluePrinterPosixCrashHandler;
+            sigemptyset (&action.sa_mask);
+            action.sa_flags = SA_RESETHAND;
+            ::sigaction (sig, &action, nullptr);
+        }
+    }
+}
+#endif
+
+//==============================================================================
 BluePrinterAudioProcessor::BluePrinterAudioProcessor()
 #ifndef JucePlugin_PreferredChannelConfigurations
      : AudioProcessor (BusesProperties()
@@ -321,6 +522,8 @@ BluePrinterAudioProcessor::BluePrinterAudioProcessor()
 {
 #ifdef JUCE_WINDOWS
     SetUnhandledExceptionFilter (bluePrinterCrashHandler);
+#else
+    installPosixCrashHandlers();
 #endif
 
     // Restore the non-chain standalone user state at startup: the library
@@ -3123,11 +3326,17 @@ juce::String BluePrinterAudioProcessor::buildDiagnosticsReport()
     for (int i = 1; i <= 3; ++i)
         appendCrashFile ("crash-info." + juce::String (i) + ".txt");
 
+   #if JUCE_WINDOWS
     report << "\nFor full crash dumps, run an elevated (Administrator) Command Prompt:\n";
     report << "  reg add \"HKLM\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\LocalDumps\\BluePrinter.exe\""
               " /v DumpFolder /t REG_EXPAND_SZ /d C:\\BluePrinterDumps"
               " /v DumpType /t REG_DWORD /d 2 /v DumpCount /t REG_DWORD /d 10 /f\n";
     report << "then open the .dmp in WinDbg with the matching build's PDB/MAP.\n";
+   #else
+    report << "\nFor full crash dumps, enable core dumps (ulimit -c unlimited) or use the\n";
+    report << "system crash reporter; symbolicate the backtrace addresses against the\n";
+    report << "matching build's debug symbols.\n";
+   #endif
 
     return report;
 }
