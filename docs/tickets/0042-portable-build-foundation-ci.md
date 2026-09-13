@@ -1,7 +1,7 @@
 ---
 id: "0042"
 title: "Portable build foundation + macOS/Linux CI"
-status: in-progress
+status: done
 blocked_by: []
 ---
 
@@ -77,5 +77,14 @@ Packaging/installers (0044, 0045) and portable crash diagnostics (0043).
 - Docs: AGENTS.md build/CI + README.md project overview updated for ADR-0006.
 
 Verified locally: Windows Debug standalone + tests build and `ctest` is green
-(2/2). macOS/Linux verify via CI (push triggers the new jobs); the manual UI
-smoke test per platform is still required.
+(2/2). **CI is green on all three jobs** (windows-latest, macos-latest,
+ubuntu-latest — run 34777658731).
+
+Two CI-only fixes landed along the way: the Ubuntu job needed the GTK 3 +
+fontconfig dev headers (juce_gui_extra includes `gtk/gtk.h`), and the target
+needed `NEEDS_WEB_BROWSER TRUE` so JUCE links the Linux WebKitGTK/GTK include
+dirs (the manual `-DJUCE_WEB_BROWSER=1` was removed — JUCE sets it from the
+property and it was being redefined).
+
+The manual UI smoke test per platform (real WKWebView / WebKitGTK) is still
+required and is a human step.
