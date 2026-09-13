@@ -111,7 +111,7 @@ and briefed.
 | [0036](0036-reverse-halfspeed-loop.md) | Reverse and half-speed loop playback | done | — |
 | [0037](0037-multi-take-comping.md) | Multi-take recording and comping | done | — |
 | [0038](0038-stem-per-chain-export.md) | Stem export: render each chain separately | in-progress | — |
-| [0039](0039-auto-update-check.md) | Update check and in-app upgrade notice | needs-triage | 0015 |
+| [0039](0039-auto-update-check.md) | Update check and in-app upgrade notice | ready-for-agent | 0015 |
 | [0040](0040-plugin-manager-scan-ui.md) | Plugin manager: scan status, browse and quarantine control | done | — |
 
 ### Backlog / deferred
