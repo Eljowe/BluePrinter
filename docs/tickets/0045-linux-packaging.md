@@ -1,7 +1,7 @@
 ---
 id: "0045"
 title: "Linux packaging (AppImage + .deb)"
-status: ready-for-agent
+status: in-progress
 blocked_by: ["0042"]
 ---
 
@@ -48,3 +48,23 @@ which must be declared and documented.
 ## Out of scope
 
 Flatpak/Snap; distro-specific repos; signing.
+
+## Comments
+
+2026-09-13 — Implemented:
+
+- `installer/build-linux-release.sh`: parses the version, builds WebUI +
+  `BluePrinter_Standalone`/`_VST3`, and produces:
+  - a **`.deb`** (`blueprinter`) installing the standalone to
+    `/opt/blueprinter` (+ `WebUI/dist` beside it), the VST3 to
+    `/usr/lib/vst3`, a `.desktop` entry and a scalable icon, with
+    `Depends: libwebkit2gtk-4.1-0 | libwebkit2gtk-4.0-37, libasound2`.
+  - an **AppImage** (best-effort: `appimagetool` downloaded if absent,
+    `rsvg-convert` for the icon) with the standalone + its `WebUI/dist`.
+  - top-level `LICENSE`/`README.md`/`SHA256SUMS.txt`.
+- CI: the `ubuntu-latest` job installs `librsvg2-bin` and runs the script,
+  uploading the packages as the `BluePrinter-Linux` artifact.
+- Docs: README Linux install section, release-checklist step 3b, AGENTS.md.
+
+Verification: the `.deb`/AppImage are produced by CI. The `dpkg -i` +
+WebKitGTK launch smoke test (acceptance criteria) is a human step on Ubuntu.

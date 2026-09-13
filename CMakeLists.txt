@@ -190,6 +190,36 @@ if(WIN32)
     endif()
 endif()
 
+# Make the built artefacts self-contained on every platform (0044/0045):
+# `findLocalWebUiDistIndex()` walks up from the executable and accepts either
+# `<dir>/WebUI/dist` or `<dir>/Contents/Resources/WebUI/dist`, so copy the
+# WebUI next to the standalone and into each plugin bundle's Resources. The
+# Windows VST3 embed lives in the `if(WIN32)` block above; this covers the
+# non-Windows VST3 and the macOS AU.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/WebUI/dist/index.html")
+    add_custom_command(TARGET BluePrinter_Standalone POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_CURRENT_SOURCE_DIR}/WebUI/dist"
+            "$<TARGET_FILE_DIR:BluePrinter_Standalone>/WebUI/dist"
+        COMMENT "Copying WebUI next to the standalone")
+
+    if(NOT WIN32)
+        add_custom_command(TARGET BluePrinter_VST3 POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${CMAKE_CURRENT_SOURCE_DIR}/WebUI/dist"
+                "$<TARGET_FILE_DIR:BluePrinter_VST3>/../../Contents/Resources/WebUI/dist"
+            COMMENT "Embedding WebUI into VST3 bundle")
+    endif()
+
+    if(APPLE)
+        add_custom_command(TARGET BluePrinter_AU POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${CMAKE_CURRENT_SOURCE_DIR}/WebUI/dist"
+                "$<TARGET_FILE_DIR:BluePrinter_AU>/../../Contents/Resources/WebUI/dist"
+            COMMENT "Embedding WebUI into AU bundle")
+    endif()
+endif()
+
 # ==============================================================================
 # Tests
 #

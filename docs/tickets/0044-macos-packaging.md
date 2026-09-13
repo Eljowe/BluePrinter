@@ -1,7 +1,7 @@
 ---
 id: "0044"
 title: "macOS packaging (unsigned)"
-status: ready-for-agent
+status: in-progress
 blocked_by: ["0042"]
 ---
 
@@ -53,3 +53,23 @@ notarization is deferred.
 
 Notarization/signing (a follow-up once an Apple Developer account exists);
 Mac App Store distribution.
+
+## Comments
+
+2026-09-13 — Implemented:
+
+- `CMakeLists.txt`: the WebUI is copied next to the standalone on every
+  platform and embedded into the macOS AU (`Contents/Resources/WebUI/dist`),
+  so packaged bundles are self-contained for
+  `findLocalWebUiDistIndex()`.
+- `installer/build-macos-release.sh`: parses the version from
+  `CMakeLists.txt`, builds WebUI + `BluePrinter_Standalone`/`_AU`/`_VST3`,
+  stages the `.app` + `.component` + `.vst3` + `INSTALL.txt` +
+  `/Applications` symlink, and makes an unsigned `BluePrinter-<version>.dmg`
+  with `hdiutil`, then `SHA256SUMS.txt`.
+- CI: the `macos-latest` job runs the script and uploads the DMG as the
+  `BluePrinter-macOS` artifact, so the script is machine-checked.
+- Docs: README macOS install section, release-checklist step 3b, AGENTS.md.
+
+Verification: the DMG is produced by CI. The DAW/AU install + launch smoke
+test (acceptance criteria 2 and 3) is a human step on a Mac.
