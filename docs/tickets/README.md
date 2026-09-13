@@ -114,11 +114,15 @@ and briefed.
 | [0039](0039-auto-update-check.md) | Update check and in-app upgrade notice | ready-for-agent | 0015 |
 | [0040](0040-plugin-manager-scan-ui.md) | Plugin manager: scan status, browse and quarantine control | done | — |
 
-### Backlog / deferred
+### Phase 8 — Cross-platform (macOS + Linux)
 
 | Ticket | Title | Status | Blocked by |
 | ------ | ----- | ------ | ---------- |
-| [0028](0028-cross-platform-macos-linux.md) | Cross-platform support: macOS and Linux builds (deferred) | needs-triage | — |
+| [0028](0028-cross-platform-macos-linux.md) | Cross-platform support: macOS and Linux builds (spec) | in-progress | — |
+| [0042](0042-portable-build-foundation-ci.md) | Portable build foundation + macOS/Linux CI | ready-for-agent | — |
+| [0043](0043-portable-crash-diagnostics.md) | Portable crash diagnostics (macOS/Linux) | ready-for-agent | 0042 |
+| [0044](0044-macos-packaging.md) | macOS packaging (unsigned) | ready-for-agent | 0042 |
+| [0045](0045-linux-packaging.md) | Linux packaging (AppImage + .deb) | ready-for-agent | 0042 |
 
 ## Roadmap notes
 
@@ -126,9 +130,8 @@ and briefed.
   (0027) trailing behind the tests + CI that make it safe.
 - Tickets marked `needs-info` / `needs-triage` have open decisions in the body
   and are not ready for an AFK agent yet.
-- **Deferred backlog**: 0028 (cross-platform) is recorded for later and must not
-  be started until the Windows safety net and release path are stable and its
-  open decisions are made. It would supersede ADR-0001 if green-lit.
+- **Cross-platform (0028)** was green-lit on 2026-09-13 and supersedes ADR-0001
+  with ADR-0006; start with 0042 (portable build + CI), then 0043–0045.
 - **Phase 7** holds untriaged candidate features spun up from the roadmap
   brainstorm; triage/grill them before claiming. 0039 sits behind 0015 so update
   delivery only ever ships signed binaries.

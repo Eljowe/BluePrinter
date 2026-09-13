@@ -16,7 +16,6 @@ editor falls back to a plain native message.
 
 ## Status
 
-Accepted. **Proposed supersession (not yet accepted):** ticket
-[0028](../tickets/0028-cross-platform-macos-linux.md) records a deferred plan for
-macOS and Linux builds. If that is green-lit, this ADR is superseded by a new one
-and the Windows-only assumptions above become per-platform.
+**Superseded by [ADR-0006](0006-cross-platform-macos-linux.md)** on 2026-09-13:
+ticket [0028](../tickets/0028-cross-platform-macos-linux.md) was green-lit, so the
+Windows-only assumptions above become per-platform. Kept for history.
