@@ -33,6 +33,10 @@ juce_add_plugin(BluePrinter
     PLUGIN_MANUFACTURER_CODE Rtrk
     PLUGIN_CODE BlPt
     FORMATS ${BLUEPRINTER_FORMATS}
+    # Enables juce::WebBrowserComponent and (on Linux) links WebKitGTK + GTK.
+    NEEDS_WEB_BROWSER TRUE
+    # Windows-only: links the WebView2 loader; other platforms use WKWebView /
+    # WebKitGTK from the platform SDK.
     NEEDS_WEBVIEW2 ${BLUEPRINTER_NEEDS_WEBVIEW2}
     COPY_PLUGIN_AFTER_BUILD FALSE
     NEEDS_MIDI_INPUT TRUE
@@ -68,7 +72,6 @@ target_include_directories(BluePrinter PRIVATE
     ${CMAKE_CURRENT_BINARY_DIR})
 
 target_compile_definitions(BluePrinter PRIVATE
-    JUCE_WEB_BROWSER=1
     JUCE_USE_CURL=0
     JUCE_PLUGINHOST_VST3=1
     JUCE_IGNORE_VST3_MISMATCHED_PARAMETER_ID_WARNING=1
