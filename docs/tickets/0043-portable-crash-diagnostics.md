@@ -1,7 +1,7 @@
 ---
 id: "0043"
 title: "Portable crash diagnostics (macOS/Linux)"
-status: in-progress
+status: done
 blocked_by: ["0042"]
 ---
 
@@ -81,4 +81,8 @@ Verified locally on Windows: Debug standalone + tests build, `ctest` 2/2
 green. The POSIX block is not compiled on Windows, so it was additionally
 syntax-checked with WSL g++ (extracted block + minimal JUCE stubs, `-Wall
 -Wextra`) and run to confirm it writes the file and rotates .1/.2/.3 before
-re-raising. macOS/Linux compile+tests are verified by CI.
+re-raising. macOS/Linux compile+tests are verified by CI (run 34779042885 — all three
+jobs green).
+
+Acceptance criterion 1 (a deliberate crash on macOS/Linux writes the file)
+is not exercised by CI; the delivered-crash smoke test is a human step.
