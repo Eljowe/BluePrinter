@@ -1,7 +1,7 @@
 ---
 id: "0044"
 title: "macOS packaging (unsigned)"
-status: in-progress
+status: done
 blocked_by: ["0042"]
 ---
 
@@ -71,5 +71,6 @@ Mac App Store distribution.
   `BluePrinter-macOS` artifact, so the script is machine-checked.
 - Docs: README macOS install section, release-checklist step 3b, AGENTS.md.
 
-Verification: the DMG is produced by CI. The DAW/AU install + launch smoke
+Verification: the DMG is produced and uploaded by CI (run 34779913034,
+`BluePrinter-macOS` artifact, ~14.6 MB). The DAW/AU install + launch smoke
 test (acceptance criteria 2 and 3) is a human step on a Mac.

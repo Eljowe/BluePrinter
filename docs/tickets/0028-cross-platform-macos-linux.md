@@ -1,7 +1,7 @@
 ---
 id: "0028"
 title: "Cross-platform support: macOS and Linux builds (deferred)"
-status: in-progress
+status: done
 blocked_by: []
 ---
 
