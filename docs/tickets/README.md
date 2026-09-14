@@ -138,15 +138,16 @@ before claiming.
 | [0050](0050-click-subdivisions.md) | Click subdivisions and accents | ready-for-agent | — |
 | [0051](0051-backing-track-import.md) | Backing-track import with tempo/key detection | needs-triage | — |
 | [0052](0052-tempo-locked-loop-playback.md) | Tempo-locked (time-stretched) loop playback | needs-triage | — |
-| [0053](0053-practice-scale-helper.md) | Practice helper: scale/chord overlay from the detected key | needs-triage | — |
+| [0053](0053-practice-scale-helper.md) | Practice helper: scale/chord overlay from the detected key | ready-for-agent | — |
 
 Themes: **audio integrity** (0046–0048) and **practice & songwriting**
 (0049–0053). Suggested order: 0046 → 0049/0050 → 0051 → 0052, with 0047/0048
 and 0053 as smaller follow-ups.
 
-**0046 (PDC), 0047 (CPU/latency readout), 0048 (clip guard), 0049 (tap tempo) and
-0050 (click subdivisions) were triaged and are now `ready-for-agent`** — see
-their Agent Briefs. The rest still start `needs-triage`.
+**0046 (PDC), 0047 (CPU/latency readout), 0048 (clip guard), 0049 (tap tempo),
+0050 (click subdivisions) and 0053 (practice scale helper) were triaged and are
+now `ready-for-agent`** — see their Agent Briefs. 0051 and 0052 still start
+`needs-triage`.
 
 ## Roadmap notes
 
