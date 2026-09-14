@@ -131,11 +131,11 @@ before claiming.
 
 | Ticket | Title | Status | Blocked by |
 | ------ | ----- | ------ | ---------- |
-| [0046](0046-plugin-delay-compensation.md) | Plugin delay compensation for parallel chains | needs-triage | — |
+| [0046](0046-plugin-delay-compensation.md) | Plugin delay compensation for parallel chains | ready-for-agent | — |
 | [0047](0047-chain-cpu-latency-readout.md) | Per-chain CPU and reported latency readout | needs-triage | — |
 | [0048](0048-monitor-clip-guard.md) | Monitor/output clip guard | needs-triage | — |
-| [0049](0049-tap-tempo.md) | Tap tempo | needs-triage | — |
-| [0050](0050-click-subdivisions.md) | Click subdivisions and accents | needs-triage | — |
+| [0049](0049-tap-tempo.md) | Tap tempo | ready-for-agent | — |
+| [0050](0050-click-subdivisions.md) | Click subdivisions and accents | ready-for-agent | — |
 | [0051](0051-backing-track-import.md) | Backing-track import with tempo/key detection | needs-triage | — |
 | [0052](0052-tempo-locked-loop-playback.md) | Tempo-locked (time-stretched) loop playback | needs-triage | — |
 | [0053](0053-practice-scale-helper.md) | Practice helper: scale/chord overlay from the detected key | needs-triage | — |
@@ -143,6 +143,10 @@ before claiming.
 Themes: **audio integrity** (0046–0048) and **practice & songwriting**
 (0049–0053). Suggested order: 0046 → 0049/0050 → 0051 → 0052, with 0047/0048
 and 0053 as smaller follow-ups.
+
+**0046 (PDC), 0049 (tap tempo) and 0050 (click subdivisions) were triaged on
+2026-09-14 and are now `ready-for-agent`** — see their Agent Briefs. The rest
+still start `needs-triage`.
 
 ## Roadmap notes
 
