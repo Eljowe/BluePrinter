@@ -1054,6 +1054,16 @@ void BluePrinterWebViewEditor::timerCallback()
     // serialize every plugin's state), so bursts of chain mutations
     // (e.g. dragging a volume knob or clicking MIDI channel chips) are
     // batched into at most one snapshot per 30 Hz tick.
+    //
+    // Also re-emit when the audio bus width changes: the device can
+    // reconfigure at runtime (standalone Audio/MIDI Settings), which
+    // changes getTotalNumInputChannels() with no chain mutation, and the
+    // per-chain input chips must follow it.
+    const int currentInputChannels = audioProcessor.getTotalNumInputChannels();
+    if (currentInputChannels != lastInputChannels)
+        chainUpdatePending.store (true, std::memory_order_release);
+    lastInputChannels = currentInputChannels;
+
     if (chainUpdatePending.exchange(false, std::memory_order_acq_rel))
         emitVst3ChainSnapshot();
 

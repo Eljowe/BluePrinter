@@ -323,6 +323,13 @@ private:
     int64_t editorSizePersistDeadline = 0;
     void flushEditorSizePersist();
 
+    // Last reported input-bus width. The audio device can reconfigure the
+    // bus at runtime (standalone Audio/MIDI Settings), which changes
+    // getTotalNumInputChannels() without any chain mutation — so the 30 Hz
+    // timer polls it and re-emits the chain snapshot when it moves, keeping
+    // the per-chain input chips in sync. Message thread only.
+    int lastInputChannels = 0;
+
     // Held by the FileChooser callbacks. Reset once the dialog closes.
     std::unique_ptr<juce::FileChooser> activeFileChooser;
 
