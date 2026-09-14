@@ -513,9 +513,9 @@ BluePrinterAudioProcessor::BluePrinterAudioProcessor()
      : AudioProcessor (BusesProperties()
                      #if ! JucePlugin_IsMidiEffect
                       #if ! JucePlugin_IsSynth
-                       .withInput  ("Input",  juce::AudioChannelSet::stereo(), true)
+                       .withInput  ("Input",  juce::AudioChannelSet::quadraphonic(), true)
                       #endif
-                       .withOutput ("Output", juce::AudioChannelSet::stereo(), true)
+                       .withOutput ("Output", juce::AudioChannelSet::quadraphonic(), true)
                      #endif
                        )
 #endif
@@ -1177,9 +1177,16 @@ bool BluePrinterAudioProcessor::isBusesLayoutSupported (const BusesLayout& layou
     juce::ignoreUnused (layouts);
     return true;
   #else
-    // Accept any layout with 1..8 input channels and the same output
-    // channel count, so a multi-input interface can route separate
-    // inputs to separate chains. Stereo remains the preferred default.
+    // Accept any layout with 1..8 input and 1..8 output channels, with
+    // the two counts independent. Chains only route INPUT channels, so
+    // the input width alone decides how many per-chain input chips the
+    // UI shows; the output count is the monitor width a DAW/interface
+    // provides. Tying them together (numOut == numIn) forced a 4-in
+    // user to also run 4 outputs, and let an output-only change fake
+    // extra (silent) input channels via the layout fallback.
+    // Quadraphonic is the declared default on both buses (the
+    // standalone's Audio/MIDI Settings caps selectable channels at
+    // getDefaultLayout().size(), so a stereo default hid inputs 3/4).
     const auto inSet  = layouts.getMainInputChannelSet();
     const auto outSet = layouts.getMainOutputChannelSet();
 
@@ -1188,7 +1195,7 @@ bool BluePrinterAudioProcessor::isBusesLayoutSupported (const BusesLayout& layou
 
     const int numIn  = inSet.size();
     const int numOut = outSet.size();
-    if (numIn < 1 || numIn > 8 || numOut != numIn)
+    if (numIn < 1 || numIn > 8 || numOut < 1 || numOut > 8)
         return false;
 
     return true;
