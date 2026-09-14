@@ -548,6 +548,23 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
                     static_cast<float> (obj->getProperty ("noise")));
             }
         })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetClickSubdivisionEvent, [&processor](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+                processor.setClickSubdivision (static_cast<int> (obj->getProperty ("subdivision")));
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetClickAccentsEvent, [&processor](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+            {
+                uint16_t mask = 0;
+                if (auto* arr = obj->getProperty ("accents").getArray())
+                    for (int i = 0; i < arr->size() && i < 16; ++i)
+                        if (static_cast<bool> ((*arr)[i]))
+                            mask = static_cast<uint16_t> (mask | (1u << i));
+                processor.setClickAccentMask (mask);
+            }
+        })
         .withEventListener(BluePrinterWebViewEditor::frontendSetMidiClockEvent, [&processor](juce::var data)
         {
             if (auto* obj = data.getDynamicObject())
@@ -1175,6 +1192,15 @@ juce::var BluePrinterWebViewEditor::makeTransportSnapshot() const
     obj->setProperty ("clickVolume",       audioProcessor.getClickVolume());
     obj->setProperty ("clickAccentVolume", audioProcessor.getClickAccentVolume());
     obj->setProperty ("clickNoise",        audioProcessor.getClickNoise());
+    obj->setProperty ("clickSubdivision",  audioProcessor.getClickSubdivision());
+    {
+        const auto mask = audioProcessor.getClickAccentMask();
+        const int beats = juce::jmax (1, audioProcessor.getTimeSignatureNumerator());
+        juce::Array<juce::var> accents;
+        for (int i = 0; i < beats; ++i)
+            accents.add (juce::var (((mask >> i) & 1) != 0));
+        obj->setProperty ("clickAccents", juce::var (accents));
+    }
     obj->setProperty ("midiClockEnabled", audioProcessor.isMidiClockEnabled());
     obj->setProperty ("midiClockOnRecord", audioProcessor.isMidiClockOnRecord());
     obj->setProperty ("clickDuringCapture", audioProcessor.getClickDuringCapture());

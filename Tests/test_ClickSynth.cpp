@@ -110,3 +110,24 @@ BP_TEST (ClickSynth_rendersDeterministicallyAndClamps)
     BP_CHECK_NEAR (clamped.amplitude, 1.0f, 0.001f);
     BP_CHECK_NEAR (clamped.noise, 0.3f, 0.001f);
 }
+
+BP_TEST (ClickSynth_derivedSubdivisionVoiceIsSofterThanTheTick)
+{
+    // ClickSynth derives the subdivision voice from the tick (0050): same
+    // pitch/decay/duration, half the amplitude.
+    const float tickPitch = 1000.0f, tickDecay = 90.0f, tickVol = 0.35f, noise = 0.1f;
+    const ClickSynth::Voice tickVoice { tickPitch, tickDecay, 0.040, tickVol, noise };
+    const auto tick = ClickSynth::render (48000.0, tickVoice);
+    const auto sub  = ClickSynth::render (48000.0, ClickSynth::subdivisionVoice (tickVoice));
+
+    BP_CHECK_EQ (static_cast<int> (tick.size()), static_cast<int> (sub.size()));
+
+    float tickPeak = 0.0f, subPeak = 0.0f;
+    for (size_t i = 0; i < tick.size(); ++i)
+    {
+        tickPeak = juce::jmax (tickPeak, std::abs (tick[i]));
+        subPeak  = juce::jmax (subPeak,  std::abs (sub[i]));
+    }
+    BP_CHECK (subPeak > 0.0f);
+    BP_CHECK (subPeak < tickPeak);
+}

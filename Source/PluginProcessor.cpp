@@ -1166,6 +1166,7 @@ void BluePrinterAudioProcessor::releaseResources()
     }
     clickBuffer.reset();
     accentClickBuffer.reset();
+    subClickBuffer.reset();
     metronomePlayer.reset();
 }
 
@@ -1218,7 +1219,9 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     metronomePlayer.setContext (currentSampleRate,
                                 bpm.load (std::memory_order_acquire),
                                 meter.beatsPerBar,
-                                meter.beatUnit);
+                                meter.beatUnit,
+                                clickSubdivision.load (std::memory_order_acquire),
+                                clickAccentMask.load (std::memory_order_acquire));
 
     // Apply the input trim (the record level). This is the post-DSP
     // signal we want to record and the pass-through signal when nothing
@@ -1497,7 +1500,7 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     {
         const int64_t startPos = metronomePosition.load (std::memory_order_acquire);
         if (metronomeEnabled.load (std::memory_order_acquire))
-            metronomePlayer.render (buffer, startPos, numSamples, clickBuffer, accentClickBuffer);
+            metronomePlayer.render (buffer, startPos, numSamples, clickBuffer, accentClickBuffer, subClickBuffer);
 
         const int64_t newPos = startPos + numSamples;
         const bool done = PreRoll::isComplete (
@@ -1532,7 +1535,7 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     if (takeRecorder.isPreRollActive())
     {
         const int64_t startPos = metronomePosition.load (std::memory_order_acquire);
-        metronomePlayer.render (buffer, startPos, numSamples, clickBuffer, accentClickBuffer);
+        metronomePlayer.render (buffer, startPos, numSamples, clickBuffer, accentClickBuffer, subClickBuffer);
 
         const int64_t newPos = startPos + numSamples;
         const bool done = PreRoll::isComplete (
@@ -1570,7 +1573,7 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         const int64_t startPos = metronomePosition.load (std::memory_order_acquire);
         if (metronomeEnabled.load (std::memory_order_acquire)
             && clickDuringCapture.load (std::memory_order_acquire))
-            metronomePlayer.render (buffer, startPos, numSamples, clickBuffer, accentClickBuffer);
+            metronomePlayer.render (buffer, startPos, numSamples, clickBuffer, accentClickBuffer, subClickBuffer);
 
         const int64_t newPos = startPos + numSamples;
         metronomePosition.store (newPos, std::memory_order_release);
@@ -1589,7 +1592,7 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         const int64_t startPos = metronomePosition.load (std::memory_order_acquire);
         if (metronomeEnabled.load (std::memory_order_acquire)
             && clickDuringCapture.load (std::memory_order_acquire))
-            metronomePlayer.render (buffer, startPos, numSamples, clickBuffer, accentClickBuffer);
+            metronomePlayer.render (buffer, startPos, numSamples, clickBuffer, accentClickBuffer, subClickBuffer);
 
         const int64_t newPos = startPos + numSamples;
         metronomePosition.store (newPos, std::memory_order_release);
@@ -1630,7 +1633,7 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             // same clock and gate their own click with clickDuringCapture.
             if (midiClockEnabled.load (std::memory_order_acquire)
                 && metronomeEnabled.load (std::memory_order_acquire))
-                metronomePlayer.render (buffer, blockStartMetronomePos, numSamples, clickBuffer, accentClickBuffer);
+                metronomePlayer.render (buffer, blockStartMetronomePos, numSamples, clickBuffer, accentClickBuffer, subClickBuffer);
         }
 
         const int64_t clockPos = metronomePosition.load (std::memory_order_acquire);
@@ -2839,6 +2842,12 @@ void BluePrinterAudioProcessor::setTimeSignature (int numerator, int denominator
         return;
     timeSignatureNumerator.store (n, std::memory_order_release);
     timeSignatureDenominator.store (d, std::memory_order_release);
+
+    // The accent pattern is per beat of the bar (0050): keep the bits that
+    // fit the new numerator and pad new beats as unaccented.
+    clickAccentMask.store (MetronomePlayer::fitAccentMaskToBeats (clickAccentMask.load (std::memory_order_acquire), n),
+                           std::memory_order_release);
+
     listeners.call ([](Listener& l) { l.transportChanged(); });
 }
 
@@ -2944,6 +2953,28 @@ void BluePrinterAudioProcessor::setClickParams (float pitch, float accentPitch,
     listeners.call ([](Listener& l) { l.transportChanged(); });
 }
 
+void BluePrinterAudioProcessor::setClickSubdivision (int subdivision)
+{
+    const int value = MetronomePlayer::normaliseSubdivision (subdivision);
+    if (clickSubdivision.load (std::memory_order_acquire) == value)
+        return;
+    clickSubdivision.store (value, std::memory_order_release);
+    listeners.call ([](Listener& l) { l.transportChanged(); });
+}
+
+void BluePrinterAudioProcessor::setClickAccentMask (uint16_t mask)
+{
+    // Clamp to the current bar length so a stale/oversized payload can't leave
+    // bits for beats the meter doesn't have.
+    const int beats = juce::jmax (1, timeSignatureNumerator.load (std::memory_order_acquire));
+    const uint16_t clamped = MetronomePlayer::fitAccentMaskToBeats (mask, beats);
+
+    if (clickAccentMask.load (std::memory_order_acquire) == clamped)
+        return;
+    clickAccentMask.store (clamped, std::memory_order_release);
+    listeners.call ([](Listener& l) { l.transportChanged(); });
+}
+
 void BluePrinterAudioProcessor::resynthesizeClicks()
 {
     const double sampleRate = currentSampleRate;
@@ -2952,15 +2983,20 @@ void BluePrinterAudioProcessor::resynthesizeClicks()
 
     // Click synthesis lives in ClickSynth (pure, unit-tested). The accent
     // decays a little slower and rings a touch longer than the tick; both
-    // get the same onset noise.
+    // get the same onset noise. The subdivision click is derived from the
+    // tick voice (half the amplitude) so it sits under the beat.
+    const ClickSynth::Voice tickVoice { clickPitch, clickDecay, 0.040, clickVolume, clickNoise };
+
     clickBuffer = std::make_shared<const std::vector<float>> (
-        ClickSynth::render (sampleRate,
-                            { clickPitch, clickDecay, 0.040, clickVolume, clickNoise }));
+        ClickSynth::render (sampleRate, tickVoice));
 
     accentClickBuffer = std::make_shared<const std::vector<float>> (
         ClickSynth::render (sampleRate,
                             { clickAccentPitch, clickDecay * 0.78, 0.055,
                               clickAccentVolume, clickNoise }));
+
+    subClickBuffer = std::make_shared<const std::vector<float>> (
+        ClickSynth::render (sampleRate, ClickSynth::subdivisionVoice (tickVoice)));
 }
 
 // -------------------------------------------------------------------------
@@ -3994,6 +4030,9 @@ void BluePrinterAudioProcessor::getStateInformation (juce::MemoryBlock& destData
     state.setProperty ("clickVolume",       clickVolume,       nullptr);
     state.setProperty ("clickAccentVolume", clickAccentVolume, nullptr);
     state.setProperty ("clickNoise",        clickNoise,        nullptr);
+    // Click rhythm (0050).
+    state.setProperty ("clickSubdivision",  clickSubdivision.load(), nullptr);
+    state.setProperty ("clickAccentMask",   static_cast<int> (clickAccentMask.load()), nullptr);
     // VST3 chains: per-slot path + bypass + base64 plugin state for
     // both the MIDI and the audio chain, plus the folder-wide
     // blocklist and cached scan result. Stored as a JSON string so
@@ -4061,6 +4100,16 @@ void BluePrinterAudioProcessor::setStateInformation (const void* data, int sizeI
             clickVolume       = static_cast<float> (state.getProperty ("clickVolume",         0.35f));
             clickAccentVolume = static_cast<float> (state.getProperty ("clickAccentVolume",   0.50f));
             clickNoise        = static_cast<float> (state.getProperty ("clickNoise",          0.10f));
+            {
+                clickSubdivision.store (MetronomePlayer::normaliseSubdivision (
+                    static_cast<int> (state.getProperty ("clickSubdivision", 0))),
+                    std::memory_order_release);
+
+                const int beats = juce::jmax (1, timeSignatureNumerator.load (std::memory_order_acquire));
+                clickAccentMask.store (MetronomePlayer::fitAccentMaskToBeats (
+                    static_cast<uint16_t> (static_cast<int> (state.getProperty ("clickAccentMask", 1))), beats),
+                    std::memory_order_release);
+            }
             resynthesizeClicks();
 
             // Read either the new "pluginChains" key or the pre-split

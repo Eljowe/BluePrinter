@@ -6,23 +6,40 @@
 
 MetronomePlayer::MetronomePlayer()
 {
-    // A clump of clicks can overlap at high BPM; reserve a typical ceiling
-    // so the audio thread doesn't allocate on the common path.
-    activeClicks.reserve (16);
+    // A clump of clicks can overlap at high BPM (more with subdivisions);
+    // reserve a typical ceiling so the audio thread doesn't allocate on the
+    // common path.
+    activeClicks.reserve (32);
 }
 
-void MetronomePlayer::setContext (double newSampleRate, double newBpm, int newBeatsPerBar, int newBeatUnit)
+void MetronomePlayer::setContext (double newSampleRate, double newBpm, int newBeatsPerBar, int newBeatUnit,
+                                  int newSubdivision, uint16_t newAccentMask)
 {
     sampleRate  = newSampleRate;
     bpm         = newBpm;
-    beatsPerBar = newBeatsPerBar;
+    beatsPerBar = juce::jmax (1, newBeatsPerBar);
     beatUnit    = newBeatUnit > 0 ? newBeatUnit : 4;
+    // 0/1 = beats only; 2/3/4 subdivisions per beat.
+    subdivision = juce::jmax (1, normaliseSubdivision (newSubdivision));
+    accentMask  = newAccentMask;
 }
 
 void MetronomePlayer::reset()
 {
     activeClicks.clear();
     lastStartPos = 0;
+}
+
+int MetronomePlayer::normaliseSubdivision (int subdivision) noexcept
+{
+    return (subdivision == 2 || subdivision == 3 || subdivision == 4) ? subdivision : 0;
+}
+
+uint16_t MetronomePlayer::fitAccentMaskToBeats (uint16_t mask, int beats) noexcept
+{
+    const int n = juce::jmax (1, beats);
+    const uint16_t limit = static_cast<uint16_t> ((n >= 16) ? 0xFFFFu : ((1u << n) - 1u));
+    return static_cast<uint16_t> (mask & limit);
 }
 
 void MetronomePlayer::renderTail (juce::AudioBuffer<float>& buffer,
@@ -62,12 +79,14 @@ void MetronomePlayer::render (juce::AudioBuffer<float>& buffer,
                               juce::int64 startPos,
                               int numSamples,
                               const std::shared_ptr<const std::vector<float>>& tick,
-                              const std::shared_ptr<const std::vector<float>>& accent)
+                              const std::shared_ptr<const std::vector<float>>& accent,
+                              const std::shared_ptr<const std::vector<float>>& sub)
 {
     // Copy the shared_ptrs once per call so a message-thread resynth can
     // never invalidate the buffers mid-render.
     const auto normalClick = tick;
     const auto accentClick = accent;
+    const auto subClick    = sub;
 
     if (bpm <= 0.0 || sampleRate <= 0.0)
         return;
@@ -105,30 +124,61 @@ void MetronomePlayer::render (juce::AudioBuffer<float>& buffer,
                         activeClicks.end());
 
     if ((normalClick == nullptr || normalClick->empty())
-     && (accentClick == nullptr || accentClick->empty()))
+     && (accentClick == nullptr || accentClick->empty())
+     && (subClick == nullptr || subClick->empty()))
         return;
 
-    // Accent the first beat of every bar, sized by the current numerator.
-    const int barLength = juce::jmax (1, beatsPerBar);
+    // Schedule on a subdivision grid: grid index g lands at
+    // g * (samplesPerBeat / subdivision). An index that is a whole beat
+    // (g % subdivision == 0) gets the tick or, per the accent mask, the
+    // accent; the in-between indices get the softer sub-click (never
+    // accented). Walking the grid — rather than only the integer beats —
+    // also catches a beat's accent or sub-clicks when they land in a later
+    // block than the beat itself.
+    const int subdiv = juce::jmax (1, subdivision);
+    const double samplesPerClick = samplesPerBeat / subdiv;
+    if (samplesPerClick <= 0.0)
+        return;
 
-    const int firstBeat = static_cast<int> (std::ceil (static_cast<double> (startPos) / samplesPerBeat));
-    const int lastBeat  = static_cast<int> (std::floor (static_cast<double> (endPos) / samplesPerBeat));
+    const bool haveTick   = normalClick != nullptr && ! normalClick->empty();
+    const bool haveAccent = accentClick != nullptr && ! accentClick->empty();
+    const bool haveSub    = subClick != nullptr && ! subClick->empty();
+    const int  barLength  = juce::jmax (1, beatsPerBar);
 
-    for (int beat = firstBeat; beat <= lastBeat; ++beat)
+    const juce::int64 firstGrid = static_cast<juce::int64> (std::ceil (static_cast<double> (startPos) / samplesPerClick));
+    const juce::int64 lastGrid  = static_cast<juce::int64> (std::floor (static_cast<double> (endPos) / samplesPerClick));
+
+    for (juce::int64 grid = firstGrid; grid <= lastGrid; ++grid)
     {
-        const juce::int64 beatSample = static_cast<juce::int64> (beat * samplesPerBeat);
-        if (beatSample < startPos || beatSample >= endPos)
+        const juce::int64 clickSample = static_cast<juce::int64> (grid * samplesPerClick);
+        if (clickSample < startPos || clickSample >= endPos)
             continue;
 
-        const bool isAccent = (beat % barLength == 0)
-            && accentClick != nullptr && ! accentClick->empty();
-        if (isAccent == false
-         && (normalClick == nullptr || normalClick->empty()))
-            continue;
+        const bool isBeat = (grid % subdiv) == 0;
+
+        std::shared_ptr<const std::vector<float>> click;
+        if (! isBeat)
+        {
+            if (! haveSub)
+                continue;
+            click = subClick;
+        }
+        else
+        {
+            const juce::int64 beat = grid / subdiv;
+            const bool accented = haveAccent
+                && ((accentMask >> (beat % barLength)) & 1) != 0;
+            if (accented)
+                click = accentClick;
+            else if (haveTick)
+                click = normalClick;
+            else
+                continue;
+        }
 
         ActiveClick ac;
-        ac.buffer     = isAccent ? accentClick : normalClick;
-        ac.nextSample = beatSample;
+        ac.buffer     = click;
+        ac.nextSample = clickSample;
         ac.readPos    = 0;
         renderTail (buffer, ac, startPos, endPos, numChannels);
         activeClicks.push_back (ac);

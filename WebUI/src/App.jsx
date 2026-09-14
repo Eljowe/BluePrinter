@@ -85,6 +85,7 @@ function readInitialTransport() {
     metronomeEnabled: true, bpm: 120, countInBeats: 4, loopLevel: 0, overdubLevel: 0, dryLevel: 0, clickDuringCapture: true,
     timeSignatureNumerator: 4, timeSignatureDenominator: 4,
     clickPitch: 1000, clickAccentPitch: 1500, clickDecay: 90, clickVolume: 0.35, clickAccentVolume: 0.5, clickNoise: 0.1,
+    clickSubdivision: 0, clickAccents: [],
     midiClockEnabled: false, midiClockOnRecord: false, midiOutputDevice: "", midiOutputDeviceList: [],
     tunerOpen: false, tunerMonitorMute: false, tunerFrequency: 0, tunerConfidence: 0, tunerReferencePitch: 440, tunerNote: "", tunerCents: 0,
      preRollActive: false, transportPosition: 0,
@@ -132,6 +133,8 @@ function readInitialTransport() {
     clickVolume: Number(raw.clickVolume ?? 0.35),
     clickAccentVolume: Number(raw.clickAccentVolume ?? 0.5),
     clickNoise: Number(raw.clickNoise ?? 0.1),
+    clickSubdivision: Number(raw.clickSubdivision ?? 0),
+    clickAccents: Array.isArray(raw.clickAccents) ? raw.clickAccents.map(Boolean) : [],
     midiClockEnabled: Boolean(raw.midiClockEnabled),
     midiClockOnRecord: Boolean(raw.midiClockOnRecord),
     midiOutputDevice: typeof raw.midiOutputDevice === "string" ? raw.midiOutputDevice : "",
@@ -399,6 +402,8 @@ export default function App() {
         clickVolume:       payload.clickVolume       !== undefined ? Number(payload.clickVolume)       : prev.clickVolume,
         clickAccentVolume: payload.clickAccentVolume !== undefined ? Number(payload.clickAccentVolume) : prev.clickAccentVolume,
         clickNoise:        payload.clickNoise        !== undefined ? Number(payload.clickNoise)        : prev.clickNoise,
+        clickSubdivision:  payload.clickSubdivision  !== undefined ? Number(payload.clickSubdivision)  : prev.clickSubdivision,
+        clickAccents:      Array.isArray(payload.clickAccents) ? payload.clickAccents.map(Boolean) : prev.clickAccents,
         midiClockEnabled: payload.midiClockEnabled !== undefined ? Boolean(payload.midiClockEnabled) : prev.midiClockEnabled,
         midiClockOnRecord: payload.midiClockOnRecord !== undefined ? Boolean(payload.midiClockOnRecord) : prev.midiClockOnRecord,
         midiOutputDevice: typeof payload.midiOutputDevice === "string" ? payload.midiOutputDevice : prev.midiOutputDevice,
@@ -570,6 +575,16 @@ export default function App() {
       timeSignatureDenominator: denominator,
     }));
     emit(FRONTEND_EVENTS.setTimeSignature, { numerator, denominator });
+  };
+
+  const handleClickSubdivisionChange = (subdivision) => {
+    setTransport((prev) => ({ ...prev, clickSubdivision: subdivision }));
+    emit(FRONTEND_EVENTS.setClickSubdivision, { subdivision });
+  };
+
+  const handleClickAccentsChange = (accents) => {
+    setTransport((prev) => ({ ...prev, clickAccents: accents }));
+    emit(FRONTEND_EVENTS.setClickAccents, { accents });
   };
 
   const handleTunerOpenChange = (open) => {
@@ -857,6 +872,10 @@ export default function App() {
               clickDuringCapture={transport.clickDuringCapture !== false}
               onClickDuringCaptureChange={handleClickDuringCaptureChange}
               clickParams={transport}
+              clickSubdivision={transport.clickSubdivision}
+              onClickSubdivisionChange={handleClickSubdivisionChange}
+              clickAccents={transport.clickAccents}
+              onClickAccentsChange={handleClickAccentsChange}
               timeSignatureNumerator={transport.timeSignatureNumerator}
               timeSignatureDenominator={transport.timeSignatureDenominator}
               onTimeSignatureChange={handleTimeSignatureChange}

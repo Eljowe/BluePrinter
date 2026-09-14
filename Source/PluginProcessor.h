@@ -353,6 +353,14 @@ public:
     void setClickParams (float pitch, float accentPitch, float decay,
                          float volume, float accentVolume, float noise);
 
+    // Click rhythm (0050): subdivisions per beat (0 = off, 2/3/4 =
+    // eighth/triplet/sixteenth) and a per-beat accent mask, bit (beat index
+    // mod numerator). Both audio-thread read, persisted + shipped.
+    int      getClickSubdivision() const { return clickSubdivision.load (std::memory_order_acquire); }
+    uint16_t getClickAccentMask()  const { return clickAccentMask.load (std::memory_order_acquire); }
+    void setClickSubdivision (int subdivision);
+    void setClickAccentMask (uint16_t mask);
+
     // Audio looper. Captures the post-chain audio (so synth and FX
     // sounds are baked into the loop) into the shared recordBuffer,
     // then plays it back as an audio-only loop. Optional click +
@@ -788,6 +796,8 @@ private:
     // after a parameter change.
     std::shared_ptr<const std::vector<float>> clickBuffer;
     std::shared_ptr<const std::vector<float>> accentClickBuffer;
+    // The softer subdivision click (0050): tick pitch, fixed lower amplitude.
+    std::shared_ptr<const std::vector<float>> subClickBuffer;
 
     // Audio-thread metronome rendering: schedules beats and rings each
     // click out across the blocks it spans. The player owns only the
@@ -803,6 +813,11 @@ private:
     float clickVolume       = 0.35f;    // normal tick level
     float clickAccentVolume = 0.50f;    // accent tick level
     float clickNoise        = 0.10f;    // onset transient level
+
+    // Click rhythm (0050). Read on the audio thread; set on the message
+    // thread. 0 = beats only; the mask defaults to beat 1 of the bar.
+    std::atomic<int>      clickSubdivision { 0 };
+    std::atomic<uint16_t> clickAccentMask  { 0x0001 };
     void resynthesizeClicks();
     double currentSampleRate = 44100.0;
 
