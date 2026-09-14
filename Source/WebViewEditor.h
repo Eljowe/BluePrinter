@@ -102,6 +102,9 @@ public:
     static constexpr const char* frontendAddSnippetsToSetlistEvent = "frontendAddSnippetsToSetlist";
     static constexpr const char* frontendSetMetronomeEvent     = "frontendSetMetronome";
     static constexpr const char* frontendSetBpmEvent           = "frontendSetBpm";
+    // { t } — a tap at a monotonic JS timestamp (ms). The backend averages
+    // the last few taps and sets the BPM; ignored while a capture is active.
+    static constexpr const char* frontendTapTempoEvent         = "frontendTapTempo";
     // Notated meter: { numerator, denominator } (e.g. { 6, 8 }).
     static constexpr const char* frontendSetTimeSignatureEvent  = "frontendSetTimeSignature";
     static constexpr const char* frontendSetCountInBeatsEvent  = "frontendSetCountInBeats";

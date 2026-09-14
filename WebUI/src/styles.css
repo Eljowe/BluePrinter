@@ -633,6 +633,65 @@ button {
   justify-content: flex-end;
 }
 
+/* Tempo cell (0049): the BPM knob with its Tap button alongside. */
+.tempo-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.tap-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  padding: 0 14px;
+  border: 2px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 0.08s linear, border-color 0.08s linear, transform 0.06s linear;
+}
+
+.tap-btn:hover:not(:disabled) {
+  background: var(--btn-hover-bg);
+}
+
+.tap-btn:active:not(:disabled) {
+  transform: translate(1px, 1px);
+}
+
+.tap-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Ring that pulses out on every tap. HeaderControls remounts the span with a
+   new key each tap, so the animation restarts. */
+.tap-pulse {
+  position: absolute;
+  inset: -4px;
+  border: 2px solid var(--accent);
+  border-radius: calc(var(--radius-sm) + 4px);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.tap-pulse.is-active {
+  animation: tap-pulse 0.32s ease-out;
+}
+
+@keyframes tap-pulse {
+  from { opacity: 0.85; transform: scale(0.9); }
+  to   { opacity: 0;    transform: scale(1.2); }
+}
+
 .monitor-lamp {
   display: inline-flex;
   align-items: center;

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Knob } from "./controls";
 import { LevelMeter } from "./LevelMeter";
 
@@ -29,14 +30,17 @@ export function HeaderControls({
   onOutputChange,
   bpm,
   onBpmChange,
+  onTapTempo,
   dryLevel,
   onDryLevelChange,
   transport,
   onResetClip,
 }) {
   const resetClip = (target) => (onResetClip ? () => onResetClip(target) : undefined);
+
   // The REC bus prints during a take or a loop capture (count-ins included),
   // so the lamp above the REC meter mirrors the Transport/Looper state pills.
+  // Tap tempo is unavailable at the same times.
   const captureLive = Boolean(
     transport?.recording
     || transport?.preRollActive
@@ -44,18 +48,58 @@ export function HeaderControls({
     || transport?.looperPreRoll,
   );
 
+  // Tap tempo (0049): a pointer-down tap (crisp timing) or Enter/Space on the
+  // focused button. `tapPulse` remounts the ring so its animation restarts on
+  // every tap.
+  const [tapPulse, setTapPulse] = useState(0);
+  const handleTap = () => {
+    if (captureLive) return;
+    setTapPulse((n) => n + 1);
+    if (onTapTempo) onTapTempo();
+  };
+  const handleTapKeyDown = (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      handleTap();
+    }
+  };
+  // Real clicks are handled on pointer-down; this catches assistive-tech and
+  // programmatic activation, which dispatch a click with detail 0.
+  const handleTapClick = (event) => {
+    if (event.detail === 0) handleTap();
+  };
+
   return (
     <div className="header-knobs">
-      <Knob
-        label="BPM"
-        min={40}
-        max={240}
-        value={bpm}
-        onChange={onBpmChange}
-        step="1"
-        decimals={0}
-        title="Tempo — shared by the take recorder, the looper and the MIDI clock"
-      />
+      <div className="tempo-cell">
+        <Knob
+          label="BPM"
+          min={40}
+          max={240}
+          value={bpm}
+          onChange={onBpmChange}
+          step="1"
+          decimals={0}
+          title="Tempo — shared by the take recorder, the looper and the MIDI clock"
+        />
+        <button
+          type="button"
+          className="tap-btn"
+          aria-label="Tap tempo"
+          disabled={captureLive}
+          onPointerDown={(event) => { if (event.button === 0) handleTap(); }}
+          onClick={handleTapClick}
+          onKeyDown={handleTapKeyDown}
+          title={captureLive
+            ? "Tap tempo — unavailable while a take or loop capture is running"
+            : "Tap tempo — click or press T in time with the beat"}
+        >
+          Tap
+          {tapPulse > 0
+            ? <span key={tapPulse} className="tap-pulse is-active" aria-hidden="true" />
+            : null}
+        </button>
+      </div>
       <div className="monitor-cell">
         <Knob
           label="Input"

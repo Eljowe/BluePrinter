@@ -2800,6 +2800,19 @@ void BluePrinterAudioProcessor::setBpm (float newBpm)
     listeners.call ([](Listener& l) { l.transportChanged(); });
 }
 
+void BluePrinterAudioProcessor::registerTapTempo (int64_t nowMs)
+{
+    // Ignore taps while a capture is armed/recording (count-ins included): a
+    // mid-capture BPM change would move the looper's fixed-length target and
+    // grid trim. The Tap control is disabled in the UI at the same time; this
+    // is the authoritative guard.
+    if (takeRecorder.isActive() || looper.isActive())
+        return;
+
+    if (const auto averaged = tapTempo.tap (nowMs))
+        setBpm (static_cast<float> (*averaged));
+}
+
 // Notated meter. Only standard denominators are accepted; anything else falls
 // back to 4. Changing it never re-times existing loop audio — the grid trim,
 // fixed-length target, crop beats and click accents use it going forward.
