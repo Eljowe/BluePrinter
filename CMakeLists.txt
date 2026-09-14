@@ -78,8 +78,15 @@ target_compile_definitions(BluePrinter PRIVATE
     JUCE_ENABLE_DBG_OUTPUT=1)
 
 # The WebView2 backend definition only makes sense on Windows.
+# JUCE_ASIO enables the ASIO audio backend (Windows-only) so ASIO drivers
+# such as FlexASIO and interfaces' native ASIO drivers show up in the
+# standalone's Audio/MIDI Settings. JUCE 8 bundles the ASIO headers, so no
+# Steinberg SDK download is needed — but the resulting binary depends on
+# those headers and must follow Steinberg's ASIO license terms.
 if(WIN32)
-    target_compile_definitions(BluePrinter PRIVATE JUCE_USE_WIN_WEBVIEW2=1)
+    target_compile_definitions(BluePrinter PRIVATE
+        JUCE_USE_WIN_WEBVIEW2=1
+        JUCE_ASIO=1)
 endif()
 
 target_link_libraries(BluePrinter PRIVATE
