@@ -257,6 +257,7 @@ if(BUILD_TESTING)
         Tests/test_ChainPreset.cpp
         Tests/test_TakeRecorder.cpp
         Tests/test_Looper.cpp
+        Tests/test_TapTempo.cpp
         Tests/test_RestoreSelfHeal.cpp
         Tests/test_StemCapture.cpp
         Tests/test_SetlistStore.cpp

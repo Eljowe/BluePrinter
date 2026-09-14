@@ -84,6 +84,9 @@ export const FRONTEND_EVENTS = {
   addSnippetsToSetlist: "frontendAddSnippetsToSetlist", // { setlistId, ids }
   setMetronome: "frontendSetMetronome",
   setBpm: "frontendSetBpm",
+  // { t } — a tap at a monotonic timestamp (ms) for tap tempo. The backend
+  // averages the last few taps and sets the BPM; ignored during a capture.
+  tapTempo: "frontendTapTempo",
   // Notated meter: { numerator, denominator } (e.g. { 6, 8 }). BPM stays a
   // quarter-note tempo; an eighth beat is half a quarter.
   setTimeSignature: "frontendSetTimeSignature",

@@ -17,6 +17,7 @@
 #include "MidiClockOutput.h"
 #include "Meter.h"
 #include "LooperGridMath.h"
+#include "TapTempo.h"
 #include "TakeRecorder.h"
 #include "Looper.h"
 #include "StemCapture.h"
@@ -305,6 +306,10 @@ public:
 
     void setMetronomeEnabled (bool enabled);
     void setBpm (float newBpm);
+    // Tap tempo (0049): register a tap at `nowMs` (non-decreasing milliseconds,
+    // message thread). Ignored while a take or loop capture is active; otherwise
+    // sets the BPM once enough taps have been averaged.
+    void registerTapTempo (int64_t nowMs);
     void setCountInBeats (int beats);
     // Set the notated meter (numerator/denominator), clamped to the supported
     // values. Affects future captures, the grid trim and the click accents.
@@ -707,6 +712,8 @@ private:
     std::atomic<bool>    metronomeEnabled { true };
     std::atomic<bool>    clickDuringCapture { true };
     std::atomic<float>   bpm              { 120.0f };
+    // Tap-tempo averaging state (0049). Message-thread only.
+    TapTempo             tapTempo;
     std::atomic<int>     countInBeats     { 4 };
     // Notated meter (numerator/denominator), default 4/4. Set on the message
     // thread, read on the audio thread.

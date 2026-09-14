@@ -256,6 +256,13 @@ export default function App() {
         return;
       }
 
+      // Tap tempo (0049): the backend ignores taps during a capture.
+      if (e.key === "t" || e.key === "T") {
+        e.preventDefault();
+        emit(FRONTEND_EVENTS.tapTempo, { t: performance.now() });
+        return;
+      }
+
       if (e.key === "Escape") {
         if (Number(transport.playingSnippetId ?? -1) >= 0) emit(FRONTEND_EVENTS.stopPlayback);
         if (transport.takePlaying) emit(FRONTEND_EVENTS.setTakePlayback, { enabled: false });
@@ -549,6 +556,13 @@ export default function App() {
     emit(FRONTEND_EVENTS.setBpm, { bpm: next });
   };
 
+  // Tap tempo (0049): send the tap's high-resolution timestamp; the backend
+  // averages the last few taps and sets the BPM, and ignores taps while a
+  // capture is active (the button is disabled then too).
+  const handleTapTempo = () => {
+    emit(FRONTEND_EVENTS.tapTempo, { t: performance.now() });
+  };
+
   const handleTimeSignatureChange = (numerator, denominator) => {
     setTransport((prev) => ({
       ...prev,
@@ -768,6 +782,7 @@ export default function App() {
               <div><dt>Space</dt><dd>Start / stop capture (Take or Loop tab)</dd></div>
               <div><dt>Enter</dt><dd>Save the selected take</dd></div>
               <div><dt>Delete</dt><dd>Delete the selected take (no confirmation)</dd></div>
+              <div><dt>T</dt><dd>Tap tempo</dd></div>
               <div><dt>Esc</dt><dd>Stop playback</dd></div>
             </dl>
           </details>
@@ -787,6 +802,7 @@ export default function App() {
             onOutputChange={handleOutputChange}
             bpm={transport.bpm}
             onBpmChange={handleBpmChange}
+            onTapTempo={handleTapTempo}
             dryLevel={transport.dryLevel}
             onDryLevelChange={handleDryLevelChange}
             transport={transport}

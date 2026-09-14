@@ -499,6 +499,11 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
             if (auto* obj = data.getDynamicObject())
                 processor.setBpm (static_cast<float> (obj->getProperty ("bpm")));
         })
+        .withEventListener(BluePrinterWebViewEditor::frontendTapTempoEvent, [&processor](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+                processor.registerTapTempo (static_cast<juce::int64> (obj->getProperty ("t")));
+        })
         .withEventListener(BluePrinterWebViewEditor::frontendSetTimeSignatureEvent, [&processor](juce::var data)
         {
             if (auto* obj = data.getDynamicObject())
