@@ -115,11 +115,13 @@ params. There is no subdivision and no configurable accent pattern.
    APVTS parameters, shipped in the transport snapshot so the UI reflects a restore.
    The accent pattern crosses the bridge as an array of booleans and is stored
    internally as a per-beat mask (the supported meters cap at 12 beats, so a 16-bit
-   mask suffices). Subdivision and mask persist in the properties file and round-trip
-   through host state.
+   mask suffices). Subdivision and mask persist with the other click-sound settings
+   (host state, `getStateInformation`/`setStateInformation`) and are shipped in the
+   transport snapshot.
 5. Meter change: when the time signature changes, resize the stored mask to the new
-   beat count — keep the leading entries that fit, pad the new beats off; default to
-   beat-1-only when there is no usable pattern. This happens on the message thread.
+   beat count — keep the leading entries that fit, pad the new beats off. A stored
+   value that is absent/invalid defaults to beat-1-only; an all-off pattern is allowed
+   and preserved. This happens on the message thread.
 6. UI: the sync strip shows a subdivision selector beside Meter (Off / 8ths /
    Triplets / 16ths). The Click sound popover shows a bar-accent step row (one toggle
    per beat of the current meter) plus a reset-to-beat-1 affordance. Both are
@@ -151,10 +153,10 @@ params. There is no subdivision and no configurable accent pattern.
       mask accents beat 1 only.
 - [ ] `ClickSynth` unit tests cover the third sub voice (deterministic, softer than the
       tick).
-- [ ] A meter change resizes the mask (keep what fits, pad off) and the default is
-      beat-1-only when unusable.
-- [ ] Subdivision and accent mask round-trip through the properties file and host
-      state, with defaults 0 and beat-1-only.
+- [ ] A meter change resizes the mask (keep what fits, pad off); the default is
+      beat-1-only when the stored value is absent/invalid (all-off is allowed).
+- [ ] Subdivision and accent mask round-trip through host state, with defaults 0 and
+      beat-1-only.
 - [ ] The transport snapshot ships the subdivision and the accent array; the UI
       reflects a restored state.
 - [ ] Count-ins, takes, loop captures and the free-running clock all honour the

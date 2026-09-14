@@ -116,6 +116,10 @@ public:
     // "output" | "loop" | "all").
     static constexpr const char* frontendResetClipEvent         = "frontendResetClip";
     static constexpr const char* frontendSetClickParamsEvent   = "frontendSetClickParams";
+    // Click rhythm (0050): { subdivision } (0/2/3/4) and { accents: [bool…] }
+    // (one per beat of the current meter) drive the metronome scheduling.
+    static constexpr const char* frontendSetClickSubdivisionEvent = "frontendSetClickSubdivision";
+    static constexpr const char* frontendSetClickAccentsEvent     = "frontendSetClickAccents";
     static constexpr const char* frontendSetMidiClockEvent     = "frontendSetMidiClock";
     static constexpr const char* frontendSetMidiClockOnRecordEvent = "frontendSetMidiClockOnRecord";
     static constexpr const char* frontendSetMidiDeviceEvent    = "frontendSetMidiDevice";

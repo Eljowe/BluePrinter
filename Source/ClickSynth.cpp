@@ -67,4 +67,11 @@ std::vector<float> render (double sampleRate, const Voice& rawVoice)
     return buffer;
 }
 
+Voice subdivisionVoice (const Voice& tick)
+{
+    Voice v = tick;
+    v.amplitude = tick.amplitude * 0.5f;
+    return v;
+}
+
 } // namespace ClickSynth

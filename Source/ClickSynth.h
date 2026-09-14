@@ -35,4 +35,8 @@ namespace ClickSynth
     // Renders one voice at `sampleRate`. Returns an empty vector when
     // sampleRate <= 0, otherwise sampleRate * duration samples.
     std::vector<float> render (double sampleRate, const Voice& voice);
+
+    // The softer subdivision click derived from the tick voice (0050): same
+    // pitch/decay/duration, half the amplitude.
+    Voice subdivisionVoice (const Voice& tick);
 }

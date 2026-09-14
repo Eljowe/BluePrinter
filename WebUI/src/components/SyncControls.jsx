@@ -32,7 +32,7 @@ function ClickSlider({ label, min, max, step, value, onChange, format, title }) 
 // by the take recorder, the looper and the free-running clock. Lives in
 // the sync strip next to the click toggles so both recording sections
 // stay lean.
-function ClickSoundPopover({ transport, onClose }) {
+function ClickSoundPopover({ transport, beats, accents, onAccentsChange, onClose }) {
   // Optimistic local state: values are initialized from the last
   // backend push and every change emits the full parameter set. The
   // popup never re-binds to the 30 Hz transport snapshot, so dragging
@@ -114,6 +114,37 @@ function ClickSoundPopover({ transport, onClose }) {
         onChange={(v) => update("noise", v)}
         format={(v) => v.toFixed(2)}
       />
+
+      <div className="click-accents" role="group" aria-label="Bar accents">
+        <span className="click-slider-label">Bar accents</span>
+        <div className="click-accents-row">
+          {Array.from({ length: beats }).map((_, i) => (
+            <button
+              key={i}
+              type="button"
+              className={`click-accent-step ${accents[i] ? "is-on" : ""}`}
+              aria-pressed={Boolean(accents[i])}
+              aria-label={`Beat ${i + 1} accent`}
+              title={`Accent beat ${i + 1}`}
+              onClick={() => {
+                const next = Array.from({ length: beats }, (_, j) => Boolean(accents[j]));
+                next[i] = !next[i];
+                onAccentsChange(next);
+              }}
+            >
+              {i + 1}
+            </button>
+          ))}
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={() => onAccentsChange(Array.from({ length: beats }, (_, i) => i === 0))}
+            title="Accent the first beat only"
+          >
+            Reset
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -128,6 +159,10 @@ export function SyncControls({
   clickDuringCapture,
   onClickDuringCaptureChange,
   clickParams,
+  clickSubdivision,
+  onClickSubdivisionChange,
+  clickAccents,
+  onClickAccentsChange,
   timeSignatureNumerator,
   timeSignatureDenominator,
   onTimeSignatureChange,
@@ -147,6 +182,7 @@ export function SyncControls({
   const numerator = Number(timeSignatureNumerator ?? 4);
   const denominator = Number(timeSignatureDenominator ?? 4);
   const meterValue = `${numerator}/${denominator}`;
+  const accents = Array.isArray(clickAccents) ? clickAccents : [];
   // Keep a value restored from old/edited state visible even when it isn't one
   // of the presets (a controlled <select> would otherwise render blank).
   const METERS = ["2/4", "3/4", "4/4", "5/4", "6/8", "7/8", "9/8", "12/8"];
@@ -171,6 +207,20 @@ export function SyncControls({
             {meterOptions.map((m) => (
               <option key={m} value={m}>{m}</option>
             ))}
+          </select>
+        </label>
+
+        <label className="sync-device" title="Click subdivisions — soft extra clicks between the beats">
+          <span className="sync-device-label">Subdiv</span>
+          <select
+            className="midi-device-select meter-select"
+            value={String(clickSubdivision ?? 0)}
+            onChange={(e) => onClickSubdivisionChange(Number(e.target.value))}
+          >
+            <option value="0">Off</option>
+            <option value="2">8ths</option>
+            <option value="3">Triplets</option>
+            <option value="4">16ths</option>
           </select>
         </label>
 
@@ -210,7 +260,13 @@ export function SyncControls({
           Click sound
         </button>
         {clickOpen ? (
-          <ClickSoundPopover transport={clickParams} onClose={() => setClickOpen(false)} />
+          <ClickSoundPopover
+            transport={clickParams}
+            beats={numerator}
+            accents={accents}
+            onAccentsChange={onClickAccentsChange}
+            onClose={() => setClickOpen(false)}
+          />
         ) : null}
       </div>
 

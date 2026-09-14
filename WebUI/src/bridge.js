@@ -106,6 +106,10 @@ export const FRONTEND_EVENTS = {
   // Click sound tuning popup: { pitch, accentPitch, decay, volume,
   // accentVolume, noise } — all values sent on every change.
   setClickParams: "frontendSetClickParams",
+  // Click rhythm (0050): { subdivision } (0 = off, 2/3/4 per beat) and
+  // { accents: [bool…] } (one per beat of the current meter).
+  setClickSubdivision: "frontendSetClickSubdivision",
+  setClickAccents: "frontendSetClickAccents",
   setMidiClock: "frontendSetMidiClock",
   // { enabled } — when on (and the MIDI clock toggle is on), the clock
   // doesn't free-run: it starts when a take or loop capture begins
