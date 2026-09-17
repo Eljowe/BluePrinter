@@ -86,6 +86,7 @@ juce::AudioPluginInstance* PluginChain::createInstance (const juce::File& file,
 
     if (types.isEmpty())
     {
+        BluePrinterAudioProcessor::setCrashOp ("no chain operation in progress");
         outError = "No VST3 plugin found in file: " + file.getFullPathName();
         return nullptr;
     }
@@ -98,6 +99,8 @@ juce::AudioPluginInstance* PluginChain::createInstance (const juce::File& file,
                                                         outError);
     if (instance != nullptr)
         outName = instance->getName();
+    // Clear the op so a crash after this load is not misattributed to it.
+    BluePrinterAudioProcessor::setCrashOp ("no chain operation in progress");
     return instance.release();
 }
 
@@ -146,6 +149,7 @@ int PluginChain::addPlugin (const juce::File& vst3File, juce::String& outError)
     {
         BluePrinterAudioProcessor::setCrashOp ("preparing plugin (prepareToPlay)", vst3File.getFileName().toRawUTF8());
         instance->prepareToPlay (currentSampleRate, currentBlockSize);
+        BluePrinterAudioProcessor::setCrashOp ("no chain operation in progress");
     }
 
     auto slot = std::make_unique<ChainSlot>();
@@ -200,6 +204,7 @@ int PluginChain::finalizeAsyncLoad (std::unique_ptr<juce::AudioPluginInstance> i
     {
         BluePrinterAudioProcessor::setCrashOp ("preparing plugin (finalizeAsyncLoad)", file.getFileName().toRawUTF8());
         instance->prepareToPlay (currentSampleRate, currentBlockSize);
+        BluePrinterAudioProcessor::setCrashOp ("no chain operation in progress");
     }
 
     auto slot = std::make_unique<ChainSlot>();
