@@ -39,6 +39,24 @@ BP_TEST (ChainRouting_silencesChannelsTheBlockLacks)
     BP_CHECK_NEAR (dest.getSample (1, 0), 0.0f, 0.0001f);
 }
 
+BP_TEST (ChainRouting_compactsSelectedChannels)
+{
+    auto source = makeBuffer (4, 4, 1.0f);   // ch0=1, ch1=2, ch2=3, ch3=4
+    auto dest = makeBuffer (4, 4, 9.0f);
+
+    // Only channel 4 (index 3) selected: it lands on the chain's ch0 so a
+    // mono/stereo plugin can read it.
+    ChainRouting::copyInputChannels (dest, source, 1 << 3, 4, 4);
+    BP_CHECK_NEAR (dest.getSample (0, 0), 4.0f, 0.0001f);
+    BP_CHECK_NEAR (dest.getSample (1, 0), 0.0f, 0.0001f);
+
+    // Channels 3 and 4 (indices 2,3) compact to ch0/ch1.
+    ChainRouting::copyInputChannels (dest, source, (1 << 2) | (1 << 3), 4, 4);
+    BP_CHECK_NEAR (dest.getSample (0, 0), 3.0f, 0.0001f);
+    BP_CHECK_NEAR (dest.getSample (1, 0), 4.0f, 0.0001f);
+    BP_CHECK_NEAR (dest.getSample (2, 0), 0.0f, 0.0001f);
+}
+
 BP_TEST (ChainRouting_sumsWithGainAcrossSharedChannels)
 {
     auto dest = makeBuffer (2, 4, 1.0f);

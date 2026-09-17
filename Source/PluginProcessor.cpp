@@ -513,9 +513,9 @@ BluePrinterAudioProcessor::BluePrinterAudioProcessor()
      : AudioProcessor (BusesProperties()
                      #if ! JucePlugin_IsMidiEffect
                       #if ! JucePlugin_IsSynth
-                       .withInput  ("Input",  juce::AudioChannelSet::quadraphonic(), true)
+                       .withInput  ("Input",  juce::AudioChannelSet::create7point1(), true)
                       #endif
-                       .withOutput ("Output", juce::AudioChannelSet::quadraphonic(), true)
+                       .withOutput ("Output", juce::AudioChannelSet::create7point1(), true)
                      #endif
                        )
 #endif
@@ -1185,9 +1185,11 @@ bool BluePrinterAudioProcessor::isBusesLayoutSupported (const BusesLayout& layou
     // provides. Tying them together (numOut == numIn) forced a 4-in
     // user to also run 4 outputs, and let an output-only change fake
     // extra (silent) input channels via the layout fallback.
-    // Quadraphonic is the declared default on both buses (the
-    // standalone's Audio/MIDI Settings caps selectable channels at
-    // getDefaultLayout().size(), so a stereo default hid inputs 3/4).
+    // 7.1 (8ch) is the declared default on both buses: the standalone's
+    // Audio/MIDI Settings derives its max channels from the bus default
+    // and caps active stereo pairs at half that, so a narrow (stereo/quad)
+    // default hid extra inputs — e.g. an aggregated ASIO device's 3rd+
+    // pair.
     const auto inSet  = layouts.getMainInputChannelSet();
     const auto outSet = layouts.getMainOutputChannelSet();
 
