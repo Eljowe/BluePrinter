@@ -9,10 +9,13 @@
 // (Tests/test_ChainRouting.cpp).
 namespace ChainRouting
 {
-    // Clears dest, then copies only the channels the chain selected
-    // (`mask`, bit n = channel n) that actually exist in this block
-    // (ch < numChannels). Channels the chain didn't select — or that the
-    // layout doesn't have — stay silent.
+    // Clears dest, then copies the selected channels the layout actually
+    // has (mask bit n = channel n, ch < numChannels) **compacted** onto
+    // dest's first channels, in ascending order. Compacting (rather than
+    // preserving positions) lets any input feed a chain: a mono/stereo
+    // plugin only reads its first channels, so a mic on input 4 would be
+    // invisible if it were left on scratch channel 4. Channels the chain
+    // didn't select — or that the layout doesn't have — stay silent.
     inline void copyInputChannels (juce::AudioBuffer<float>& dest,
                                    const juce::AudioBuffer<float>& source,
                                    int mask,
@@ -20,10 +23,12 @@ namespace ChainRouting
                                    int numSamples)
     {
         dest.clear();
-        const int scratchCh = dest.getNumChannels();
-        for (int ch = 0; ch < scratchCh; ++ch)
-            if ((mask & (1 << ch)) != 0 && ch < numChannels)
-                dest.copyFrom (ch, 0, source, ch, 0, numSamples);
+        const int destChannels   = dest.getNumChannels();
+        const int sourceChannels = juce::jmin (numChannels, source.getNumChannels());
+        int out = 0;
+        for (int ch = 0; ch < sourceChannels && out < destChannels; ++ch)
+            if ((mask & (1 << ch)) != 0)
+                dest.copyFrom (out++, 0, source, ch, 0, numSamples);
     }
 
     // Adds source into dest (scaled by gain) across the channels the two
