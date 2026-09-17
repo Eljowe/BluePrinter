@@ -1,6 +1,7 @@
 import { FRONTEND_EVENTS, emit } from "../bridge";
 import { IconPlay, IconSave, IconStop, IconTrash } from "./icons";
 import { Waveform } from "./Waveform";
+import { PianoRoll, midiToNoteName } from "./PianoRoll";
 import { formatTime } from "../utils";
 
 // Review panel for the take stack (0037). Every stopped take is retained
@@ -96,6 +97,14 @@ export function TakeReview({ transport }) {
         </div>
       </div>
 
+      <MelodyPanel
+        transport={transport}
+        selectedTakeId={selected?.id}
+        totalSamples={length}
+        sampleRate={sampleRate}
+        recording={recording}
+      />
+
       <label
         className={`take-review-dub ${recording ? "is-disabled" : ""}`}
         title={recording
@@ -163,5 +172,124 @@ export function TakeReview({ transport }) {
         </button>
       </div>
     </section>
+  );
+}
+
+// Melody extraction (0054) for the selected take: analyse the pitches, show
+// them as a piano-roll with the detected key, and audition them with the
+// built-in synth.
+function MelodyPanel({ transport, selectedTakeId, totalSamples, sampleRate, recording }) {
+  const notes = Array.isArray(transport?.melodyNotes) ? transport.melodyNotes : [];
+  const hasMelody = notes.length > 0;
+  const analysing = Boolean(transport?.melodyAnalysing);
+  const analysed = Boolean(transport?.melodyAnalysed);
+  const playing = Boolean(transport?.melodyPlaying);
+
+  const bpm = Number(transport?.bpm ?? 0);
+  const beatsPerBar = Number(transport?.timeSignatureNumerator ?? 4) || 4;
+
+  const auditionFrom = (startSample) =>
+    emit(FRONTEND_EVENTS.setMelodyPlayback, { enabled: true, startSample });
+
+  const copyMelody = () => {
+    const sr = Number(sampleRate) > 0 ? Number(sampleRate) : 0;
+    const lines = notes.map((n) => {
+      const name = midiToNoteName(n.midi);
+      if (sr <= 0) return name;
+      const start = (Number(n.startSample) || 0) / sr;
+      const length = (Number(n.lengthSamples) || 0) / sr;
+      return `${name}\t${start.toFixed(3)}s\t${length.toFixed(3)}s`;
+    });
+    const header = transport?.melodyKey ? `Key: ${transport.melodyKey}` : "";
+    const text = [header, ...lines].filter(Boolean).join("\n");
+    try {
+      navigator.clipboard?.writeText(text);
+    } catch {
+      /* clipboard unavailable — ignore */
+    }
+  };
+
+  let status = "";
+  let statusKind = "is-hint";
+  if (analysing) {
+    status = "Analysing melody…";
+    statusKind = "is-analysing";
+  } else if (hasMelody) {
+    status = `${notes.length} note${notes.length === 1 ? "" : "s"} found`;
+    statusKind = "is-ok";
+  } else if (analysed) {
+    status = "No melody found — try a longer, sustained hum or a single sung line.";
+    statusKind = "is-empty";
+  } else if (recording) {
+    status = "Stop the capture to analyse the melody.";
+  } else {
+    status = "Analyse the take to see and hear its melody.";
+  }
+
+  const buttonLabel = analysing
+    ? "Analysing…"
+    : (hasMelody || analysed ? "Re-analyse" : "Analyse melody");
+
+  return (
+    <div className={`take-review-melody ${playing ? "is-playing" : ""}`}>
+      <div className="take-review-melody-head">
+        <span className="take-review-melody-title">Melody</span>
+        {transport?.melodyKey ? (
+          <span className="take-review-melody-key" title="Detected key">
+            Key {transport.melodyKey}
+          </span>
+        ) : null}
+        {analysing ? <span className="melody-spinner" aria-hidden="true" /> : null}
+        {hasMelody && !analysing ? (
+          <span className="take-review-melody-hint">scroll zoom · shift-scroll pan · click a note to hear it</span>
+        ) : null}
+      </div>
+
+      <PianoRoll
+        notes={notes}
+        totalSamples={totalSamples}
+        sampleRate={sampleRate}
+        position={Number(transport?.melodyPosition ?? 0)}
+        playing={playing}
+        keySignature={transport?.melodyKey ?? ""}
+        bpm={bpm}
+        beatsPerBar={beatsPerBar}
+        onAudition={auditionFrom}
+      />
+
+      <p className={`take-review-melody-status ${statusKind}`} role="status" aria-live="polite">
+        {status}
+      </p>
+
+      <div className="take-review-melody-actions">
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          disabled={recording || analysing}
+          onClick={() => emit(FRONTEND_EVENTS.analyzeTakeMelody, { id: selectedTakeId })}
+          title="Extract the melody (monophonic pitches) from this take"
+        >
+          {buttonLabel}
+        </button>
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          disabled={recording || !hasMelody}
+          onClick={() => emit(FRONTEND_EVENTS.setMelodyPlayback, { enabled: !playing })}
+          title="Play the extracted melody with the built-in synth (monitor only)"
+        >
+          {playing ? <IconStop size={13} /> : <IconPlay size={13} />} {playing ? "Stop melody" : "Play melody"}
+        </button>
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          disabled={!hasMelody}
+          onClick={copyMelody}
+          title="Copy the detected key and note list (name, start, length) to the clipboard"
+        >
+          Copy notes
+        </button>
+      </div>
+    </div>
   );
 }

@@ -144,6 +144,8 @@ juce::var snippetToVar (const Snippet& s)
     obj->setProperty ("color", s.color);
     obj->setProperty ("gainDb", s.gainDb);
     obj->setProperty ("favourite", s.favourite);
+    // Extracted melody (0054): the card shows the note count beside the key.
+    obj->setProperty ("melodyCount", static_cast<int> (s.melody.size()));
 
     juce::Array<juce::var> notesVar;
     notesVar.ensureStorageAllocated (s.detectedNotes.size());
@@ -251,6 +253,26 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
         .withEventListener(BluePrinterWebViewEditor::frontendDiscardAllTakesEvent, [&processor](juce::var)
         {
             processor.discardAllTakes();
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendAnalyzeTakeMelodyEvent, [&processor](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+                processor.analyzeTakeMelody (static_cast<int> (obj->getProperty ("id")));
+            else
+                processor.analyzeTakeMelody (0);
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetMelodyPlaybackEvent, [&processor](juce::var data)
+        {
+            bool enabled = false;
+            int64_t startSample = -1;
+            if (auto* obj = data.getDynamicObject())
+            {
+                enabled = (bool) obj->getProperty ("enabled");
+                const auto from = obj->getProperty ("startSample");
+                if (! from.isVoid())
+                    startSample = static_cast<int64_t> (static_cast<double> (from));
+            }
+            processor.setMelodyPlayback (enabled, startSample);
         })
         .withEventListener(BluePrinterWebViewEditor::frontendStartPlaybackEvent, [&processor](juce::var data)
         {
@@ -1248,6 +1270,40 @@ juce::var BluePrinterWebViewEditor::makeTransportSnapshot() const
             takes.add (juce::var (takeObj));
         }
         obj->setProperty ("takes", juce::var (takes));
+    }
+    // Melody extraction (0054): the selected take's cached analysis, if any.
+    obj->setProperty ("melodyAnalysing", audioProcessor.isMelodyAnalysing());
+    obj->setProperty ("melodyAnalysingTakeId", audioProcessor.getMelodyAnalysingTakeId());
+    obj->setProperty ("melodyPlaying", audioProcessor.isMelodyPlaying());
+    obj->setProperty ("melodyPosition", static_cast<double> (audioProcessor.getMelodyPlaybackPos()));
+    obj->setProperty ("melodyLength", static_cast<double> (audioProcessor.getMelodyLength()));
+    // Whether an analysis has completed for the selected take (even if it
+    // found no notes) — distinguishes "found nothing" from "not analysed".
+    obj->setProperty ("melodyAnalysed",
+                      audioProcessor.getTakeMelody (audioProcessor.getSelectedTakeId()) != nullptr);
+    {
+        juce::Array<juce::var> melodyArray;
+        if (const auto* melody = audioProcessor.getTakeMelody (audioProcessor.getSelectedTakeId()))
+        {
+            obj->setProperty ("melodyKey", melody->key);
+            obj->setProperty ("melodyKeyConfidence", melody->keyConfidence);
+            melodyArray.ensureStorageAllocated (static_cast<int> (melody->notes.size()));
+            for (const auto& note : melody->notes)
+            {
+                auto* noteObj = new juce::DynamicObject();
+                noteObj->setProperty ("startSample", static_cast<double> (note.startSample));
+                noteObj->setProperty ("lengthSamples", static_cast<double> (note.lengthSamples));
+                noteObj->setProperty ("midi", note.midi);
+                noteObj->setProperty ("cents", note.cents);
+                melodyArray.add (juce::var (noteObj));
+            }
+        }
+        else
+        {
+            obj->setProperty ("melodyKey", juce::String());
+            obj->setProperty ("melodyKeyConfidence", 0.0);
+        }
+        obj->setProperty ("melodyNotes", juce::var (melodyArray));
     }
     obj->setProperty ("looperRecording", audioProcessor.isLooperRecording());
     obj->setProperty ("looperPreRoll", audioProcessor.isLooperPreRolling());

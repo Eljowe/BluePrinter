@@ -19,12 +19,15 @@
 #include "LooperGridMath.h"
 #include "TapTempo.h"
 #include "TakeRecorder.h"
+#include "MelodyAnalyzer.h"
+#include "MelodyPlayer.h"
 #include "Looper.h"
 #include "StemCapture.h"
 #include "SetlistStore.h"
 #include "RestoreSelfHeal.h"
 #include "ChainStatePersistence.h"
 #include <deque>
+#include <map>
 
 //==============================================================================
 // A dedicated thread that owns every VST3 instantiation so every
@@ -150,6 +153,21 @@ public:
     // and the new layer is wrapped-mixed into it on stop.
     bool isTakeOverdub() const { return takeRecorder.isOverdubEnabled(); }
     void setTakeOverdub (bool enabled);
+
+    // Melody extraction (0054). Analysis runs off the message thread on the
+    // selected take's audio; the result is cached per take id (session-only)
+    // and can be auditioned with the built-in synth. Saving a take copies the
+    // cached melody into the snippet's sidecar JSON.
+    void    analyzeTakeMelody (int id);
+    void    setMelodyPlayback (bool enabled, int64_t startSample = -1);
+    bool    isMelodyPlaying() const { return melodyPlayer.isPlaying(); }
+    int64_t getMelodyPlaybackPos() const { return melodyPlayer.getPosition(); }
+    int64_t getMelodyLength() const { return melodyPlayer.getLength(); }
+    bool    isMelodyAnalysing() const { return melodyAnalysing.load (std::memory_order_acquire); }
+    int     getMelodyAnalysingTakeId() const { return melodyAnalysingTakeId.load (std::memory_order_acquire); }
+    // The cached melody for a take (nullptr when none has been analysed).
+    // Message thread only.
+    const MelodyAnalyzer::Result* getTakeMelody (int id) const;
 
     bool deleteSnippet (int id);
     bool updateSnippetMeta (int id, const juce::String& name, const juce::String& comments);
@@ -706,6 +724,14 @@ private:
     // the module owns each take's audio and the review state. See
     // TakeRecorder.h.
     TakeRecorder takeRecorder;
+
+    // Melody audition + per-take analysis cache (0054). The player renders
+    // monitor-only in processBlock; the cache is message-thread only.
+    MelodyPlayer melodyPlayer;
+    std::atomic<bool> melodyAnalysing     { false };
+    std::atomic<int>  melodyAnalysingTakeId { -1 };
+    std::map<int, MelodyAnalyzer::Result> takeMelodies;
+    void refreshMelodyPlayer();
 
     std::atomic<bool> playbackActive { false };
     std::atomic<int> playingSnippetId { -1 };

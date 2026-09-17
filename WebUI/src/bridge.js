@@ -23,6 +23,11 @@ export const FRONTEND_EVENTS = {
   discardTake: "frontendDiscardTake",
   selectTake: "frontendSelectTake",
   discardAllTakes: "frontendDiscardAllTakes",
+  // Melody extraction (0054): { id } analyses the selected take's melody;
+  // { enabled, startSample? } auditions it with the built-in synth (a
+  // startSample auditions from that note; -1/absent plays from the top).
+  analyzeTakeMelody: "frontendAnalyzeTakeMelody",
+  setMelodyPlayback: "frontendSetMelodyPlayback",
   startPlayback: "frontendStartPlayback",
   stopPlayback: "frontendStopPlayback",
   updateSnippet: "frontendUpdateSnippetMeta",

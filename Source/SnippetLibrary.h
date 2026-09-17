@@ -39,6 +39,17 @@ struct Snippet
     // User favourite (star). Persisted in the sidecar JSON; drives the
     // toolbar's Favourites filter.
     bool favourite = false;
+    // Extracted melody (0054): note events from the take this snippet was
+    // saved from. Persisted in the sidecar JSON so a saved take keeps its
+    // piano-roll and key readout. Empty when no melody was analysed.
+    struct MelodyNote
+    {
+        int64_t startSample   = 0;
+        int64_t lengthSamples = 0;
+        int     midi          = 0;
+        float   cents         = 0.0f;
+    };
+    std::vector<MelodyNote> melody;
 };
 
 class SnippetLibrary
@@ -63,6 +74,9 @@ public:
 
     // Set the user favourite (star) flag.
     bool updateFavourite (int id, bool favourite);
+
+    // Replace a snippet's extracted melody (0054). Message thread only.
+    bool updateMelody (int id, std::vector<Snippet::MelodyNote> melody);
 
     bool markSaved (int id, const juce::String& path);
 
