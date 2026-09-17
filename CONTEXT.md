@@ -59,6 +59,12 @@ _Avoid_: Metronome (the APVTS-independent settings object is `metronomeEnabled`)
 Materialising a loop as a new library snippet.
 _Avoid_: Export (export writes a file; bounce creates a snippet)
 
+**Melody**:
+The monophonic note events extracted from a finished take (pitch track →
+segmentation) together with the take's detected key. Session-only until the take
+is saved, when it is written into the snippet's sidecar and shown on the card.
+_Avoid_: Transcription (implies polyphony/notation), tab
+
 ### Routing
 
 **Chain**:
@@ -154,6 +160,8 @@ _Avoid_: Message, IPC event
 | VST3 scanning | `Source/Vst3Library.h/.cpp` |
 | Snippet library + WAV/JSON | `Source/SnippetLibrary.h/.cpp` |
 | Key detection | `Source/KeyDetector.h/.cpp` |
+| Take melody extraction (0054) | `Source/MelodyAnalyzer.h/.cpp` |
+| Melody audition synth (0054) | `Source/MelodyPlayer.h/.cpp` |
 | Metronome click synthesis | `Source/ClickSynth.h/.cpp` |
 | Metronome click scheduling + ring-out | `Source/MetronomePlayer.h/.cpp` |
 | MIDI clock pulse scheduling | `Source/MidiClockMath.h` |
@@ -179,5 +187,7 @@ _Avoid_: Message, IPC event
 - The audio thread never allocates and never takes a lock inside `processBlock`.
 - Chains run in parallel on a pristine input snapshot and never hear each other.
 - Monitor controls (Output, Solo, monitor-mute, Loop level) never change the print.
+- Melody audition is monitor-only; it is stopped when a capture starts and never
+  enters the recording mix.
 - Restore is deferred one plugin per loop turn; persist is gated while it runs.
 - Event names live once in `WebViewEditor.h` and once in `bridge.js`; they must match.

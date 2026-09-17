@@ -45,6 +45,10 @@ public:
     // { id } — select a take; discard every take.
     static constexpr const char* frontendSelectTakeEvent       = "frontendSelectTake";
     static constexpr const char* frontendDiscardAllTakesEvent  = "frontendDiscardAllTakes";
+    // Melody extraction (0054): { id } analyses the selected take's melody;
+    // { enabled } auditions it with the built-in synth.
+    static constexpr const char* frontendAnalyzeTakeMelodyEvent = "frontendAnalyzeTakeMelody";
+    static constexpr const char* frontendSetMelodyPlaybackEvent = "frontendSetMelodyPlayback";
     static constexpr const char* frontendStartPlaybackEvent    = "frontendStartPlayback";
     static constexpr const char* frontendStopPlaybackEvent     = "frontendStopPlayback";
     static constexpr const char* frontendUpdateSnippetEvent    = "frontendUpdateSnippetMeta";

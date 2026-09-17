@@ -67,6 +67,9 @@ BluePrinter uses JUCE for audio processing, VST3 hosting, and WebView2 UI integr
 7. Snippet playback: substitute the recorded buffer in place of live input
    (does NOT re-run the chains); selected-take review playback renders
    similarly (TakeRecorder::renderReview, one-shot, scaled by the master Output)
+   Melody audition (0054) is added on top after review playback
+   (MelodyPlayer::render — monitor-only, never in recordingMixBuffer;
+   startRecording and the other playback entry points stop it)
 8. Looper count-in pre-roll: render the click, advance the beat clock, flip
    into capture when the configured beats elapse
 9. Take-recorder pre-roll: same flow, flips into actual recording

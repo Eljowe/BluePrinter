@@ -420,6 +420,12 @@ export function SnippetCard({
                     title={`Detected pitch classes: ${snippet.notes.join(", ")}`}
                   > · notes <strong>{snippet.notes.join(" ")}</strong></span>
                 : null}
+              {Number(snippet.melodyCount) > 0
+                ? <span
+                    className="snippet-melody-inline"
+                    title="Notes extracted from the take's melody"
+                  > · melody <strong>{Number(snippet.melodyCount)}</strong></span>
+                : null}
               {snippet.savedPath ? <span className="snippet-saved"> · saved</span> : null}
             </div>
             <div className="snippet-actions">

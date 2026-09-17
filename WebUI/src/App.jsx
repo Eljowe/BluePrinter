@@ -90,6 +90,7 @@ function readInitialTransport() {
     tunerOpen: false, tunerMonitorMute: false, tunerFrequency: 0, tunerConfidence: 0, tunerReferencePitch: 440, tunerNote: "", tunerCents: 0,
      preRollActive: false, transportPosition: 0,
      takePending: false, takeLength: 0, takePlaying: false, takePosition: 0, takePeaks: [], takes: [], selectedTakeId: -1,
+     melodyAnalysing: false, melodyAnalysed: false, melodyPlaying: false, melodyPosition: 0, melodyLength: 0, melodyKey: "", melodyNotes: [],
      looperRecording: false, looperPreRoll: false, looperPlaying: false, looperLooping: true, looperOverdub: false, loopPlaybackReverse: false, loopPlaybackHalfSpeed: false, captureStemsEnabled: false, stemsAvailable: false, stemSource: "", looperCountInBeats: 4, looperCropStartBeats: 0, looperCropEndBeats: 0, audioLoopStart: 0, audioLoopPosition: 0, audioLoopLength: 0, audioLoopPeaks: [], chainLevels: [], maxRecordSamples: 0, loopUndoAvailable: false, loopRedoAvailable: false,
   };
   return {
@@ -417,6 +418,13 @@ export default function App() {
          takePeaks: Array.isArray(payload.takePeaks) ? payload.takePeaks : (prev.takePeaks ?? []),
          takes: Array.isArray(payload.takes) ? payload.takes : (prev.takes ?? []),
          selectedTakeId: payload.selectedTakeId !== undefined ? Number(payload.selectedTakeId) : prev.selectedTakeId,
+         melodyAnalysing: payload.melodyAnalysing !== undefined ? Boolean(payload.melodyAnalysing) : prev.melodyAnalysing,
+         melodyAnalysed: payload.melodyAnalysed !== undefined ? Boolean(payload.melodyAnalysed) : prev.melodyAnalysed,
+         melodyPlaying: payload.melodyPlaying !== undefined ? Boolean(payload.melodyPlaying) : prev.melodyPlaying,
+         melodyPosition: Number(payload.melodyPosition ?? prev.melodyPosition ?? 0),
+         melodyLength: Number(payload.melodyLength ?? prev.melodyLength ?? 0),
+         melodyKey: typeof payload.melodyKey === "string" ? payload.melodyKey : (prev.melodyKey ?? ""),
+         melodyNotes: Array.isArray(payload.melodyNotes) ? payload.melodyNotes : (prev.melodyNotes ?? []),
          looperRecording: payload.looperRecording !== undefined ? Boolean(payload.looperRecording) : prev.looperRecording,
          looperPreRoll: payload.looperPreRoll !== undefined ? Boolean(payload.looperPreRoll) : prev.looperPreRoll,
          looperPlaying: payload.looperPlaying !== undefined ? Boolean(payload.looperPlaying) : prev.looperPlaying,

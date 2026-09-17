@@ -55,6 +55,8 @@ target_sources(BluePrinter PRIVATE
     Source/PluginChain.cpp
     Source/Vst3Library.cpp
     Source/KeyDetector.cpp
+    Source/MelodyAnalyzer.cpp
+    Source/MelodyPlayer.cpp
     Source/LooperGridMath.cpp
     Source/ChainStateMigration.cpp
     Source/ChainPreset.cpp
@@ -261,6 +263,8 @@ if(BUILD_TESTING)
         Tests/test_CaptureCopy.cpp
         Tests/test_PreRollMath.cpp
         Tests/test_Tuner.cpp
+        Tests/test_MelodyAnalyzer.cpp
+        Tests/test_MelodyPlayer.cpp
         Tests/test_ChainPreset.cpp
         Tests/test_TakeRecorder.cpp
         Tests/test_Looper.cpp
@@ -272,6 +276,8 @@ if(BUILD_TESTING)
         # test target never pulls in WebView2, the plugin host, or the
         # audio device layer.
         Source/KeyDetector.cpp
+        Source/MelodyAnalyzer.cpp
+        Source/MelodyPlayer.cpp
         Source/SnippetLibrary.cpp
         Source/LooperGridMath.cpp
         Source/ChainStateMigration.cpp

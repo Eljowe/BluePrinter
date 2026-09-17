@@ -142,6 +142,20 @@ bool SnippetLibrary::updateFavourite (int id, bool favourite)
     return false;
 }
 
+bool SnippetLibrary::updateMelody (int id, std::vector<Snippet::MelodyNote> melody)
+{
+    const std::lock_guard<std::mutex> lock (mutex);
+    for (auto& s : snippets)
+    {
+        if (s->id == id)
+        {
+            s->melody = std::move (melody);
+            return true;
+        }
+    }
+    return false;
+}
+
 bool SnippetLibrary::markSaved (int id, const juce::String& path)
 {
     const std::lock_guard<std::mutex> lock (mutex);
@@ -318,6 +332,7 @@ bool SnippetLibrary::loadFromFolder (const juce::File& folder, juce::String& out
         juce::String key;
         float keyConfidence = 0.0f;
         juce::StringArray detectedNotes;
+        std::vector<Snippet::MelodyNote> melody;
         juce::String color;
         float gainDb = 0.0f;
         bool favourite = false;
@@ -350,6 +365,23 @@ bool SnippetLibrary::loadFromFolder (const juce::File& folder, juce::String& out
                         detectedNotes.add (n.toString());
                 }
 
+                // Old sidecars won't have a melody; missing field is fine.
+                if (auto* melodyArray = obj->getProperty ("melody").getArray())
+                {
+                    for (const auto& entry : *melodyArray)
+                    {
+                        if (auto* noteObj = entry.getDynamicObject())
+                        {
+                            Snippet::MelodyNote note;
+                            note.startSample   = static_cast<int64_t> (static_cast<double> (noteObj->getProperty ("startSample")));
+                            note.lengthSamples = static_cast<int64_t> (static_cast<double> (noteObj->getProperty ("lengthSamples")));
+                            note.midi          = static_cast<int> (noteObj->getProperty ("midi"));
+                            note.cents         = static_cast<float> (noteObj->getProperty ("cents"));
+                            melody.push_back (note);
+                        }
+                    }
+                }
+
                 auto createdAtStr = obj->getProperty ("createdAt").toString();
                 if (createdAtStr.isNotEmpty())
                 {
@@ -378,6 +410,7 @@ bool SnippetLibrary::loadFromFolder (const juce::File& folder, juce::String& out
         snippet->color        = color;
         snippet->gainDb       = juce::jlimit (-24.0f, 24.0f, gainDb);
         snippet->favourite    = favourite;
+        snippet->melody       = std::move (melody);
 
         {
             const std::lock_guard<std::mutex> lock (mutex);
@@ -480,6 +513,23 @@ bool SnippetLibrary::writeMetadataFile (const Snippet& snippet, const juce::File
     meta->setProperty ("gainDb", snippet.gainDb);
     // Always written so the sidecar round-trips the favourite flag.
     meta->setProperty ("favourite", snippet.favourite);
+
+    // Extracted melody (0054): written only when one was analysed.
+    if (! snippet.melody.empty())
+    {
+        juce::Array<juce::var> melodyVar;
+        melodyVar.ensureStorageAllocated (static_cast<int> (snippet.melody.size()));
+        for (const auto& note : snippet.melody)
+        {
+            auto* noteObj = new juce::DynamicObject();
+            noteObj->setProperty ("startSample", static_cast<double> (note.startSample));
+            noteObj->setProperty ("lengthSamples", static_cast<double> (note.lengthSamples));
+            noteObj->setProperty ("midi", note.midi);
+            noteObj->setProperty ("cents", note.cents);
+            melodyVar.add (juce::var (noteObj));
+        }
+        meta->setProperty ("melody", melodyVar);
+    }
 
     jsonFile.deleteFile();
     juce::FileOutputStream stream (jsonFile);

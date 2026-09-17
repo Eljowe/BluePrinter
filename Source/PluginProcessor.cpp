@@ -1102,6 +1102,7 @@ void BluePrinterAudioProcessor::prepareToPlay (double sampleRate, int samplesPer
         startTunerWorker();
 
     currentSampleRate = sampleRate;
+    melodyPlayer.prepare (sampleRate);
     loopCrossfadeSamples = juce::jlimit (1, 256, static_cast<int> (sampleRate * 0.003));
 
     // Hand the new rate/block size to every chain so all loaded
@@ -1498,6 +1499,12 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     if (takeRecorder.isReviewPlaying())
         takeRecorder.renderReview (buffer, numSamples);
 
+    // 7c. Melody audition (0054): add the extracted melody on top of the
+    //     output. Monitor-only — never part of recordingMixBuffer — and
+    //     startRecording stops it so it can never leak into a capture.
+    if (melodyPlayer.isPlaying())
+        melodyPlayer.render (buffer, numSamples);
+
     // 8. Looper count-in: play the click, advance the beat clock, and flip
     //    into capture once the configured beats have elapsed. Mirrors the
     //    take-recorder pre-roll below but drives the looper's own capture
@@ -1787,6 +1794,10 @@ void BluePrinterAudioProcessor::startRecording()
 
     if (playbackActive.load (std::memory_order_acquire))
         stopPlayback();
+
+    // A capture started while a melody audition was playing: stop it so the
+    // synth can never leak into the take (0054).
+    melodyPlayer.stop();
 
     if (recordBuffer == nullptr || maxRecordSamples <= 0)
         return;
@@ -2189,6 +2200,9 @@ void BluePrinterAudioProcessor::setLooperPlaying (bool enabled)
     if (enabled && takeRecorder.isReviewPlaying())
         takeRecorder.stopReview();
 
+    if (enabled)
+        melodyPlayer.stop();
+
     looper.setPlaying (enabled);
     updateClockRunState();
     listeners.call ([](Listener& l) { l.transportChanged(); });
@@ -2420,6 +2434,8 @@ void BluePrinterAudioProcessor::startPlayback (int snippetId)
     // Snippet playback supersedes take-review playback.
     if (takeRecorder.isReviewPlaying())
         takeRecorder.stopReview();
+
+    melodyPlayer.stop();
 
     if (library.indexOfId (snippetId) < 0)
         return;
@@ -3858,7 +3874,10 @@ void BluePrinterAudioProcessor::discardTake (int id)
 {
     if (takeRecorder.isActive() || takeRecorder.isOverdubCapture())
         return;
-    takeRecorder.deleteTake (id > 0 ? id : takeRecorder.getSelectedTakeId());
+    const int takeId = id > 0 ? id : takeRecorder.getSelectedTakeId();
+    takeRecorder.deleteTake (takeId);
+    takeMelodies.erase (takeId);
+    refreshMelodyPlayer();
     if (stemCapture.getSource() == "take")
         stemCapture.clear();
     listeners.call ([](Listener& l) { l.transportChanged(); });
@@ -3871,6 +3890,7 @@ void BluePrinterAudioProcessor::selectTake (int id)
     if (id != takeRecorder.getSelectedTakeId() && stemCapture.getSource() == "take")
         stemCapture.clear();
     takeRecorder.selectTake (id);
+    refreshMelodyPlayer();
     listeners.call ([](Listener& l) { l.transportChanged(); });
 }
 
@@ -3879,6 +3899,8 @@ void BluePrinterAudioProcessor::discardAllTakes()
     if (takeRecorder.isActive() || takeRecorder.isOverdubCapture())
         return;
     takeRecorder.clearTakes();
+    takeMelodies.clear();
+    refreshMelodyPlayer();
     if (stemCapture.getSource() == "take")
         stemCapture.clear();
     listeners.call ([](Listener& l) { l.transportChanged(); });
@@ -3897,6 +3919,7 @@ void BluePrinterAudioProcessor::setTakePlayback (bool enabled)
         if (looper.isPlaying())
             setLooperPlaying (false);
 
+        melodyPlayer.stop();
         takeRecorder.startReview();
     }
     else
@@ -3914,6 +3937,110 @@ void BluePrinterAudioProcessor::setTakeOverdub (bool enabled)
     // Turning Dub on while a capture is already in flight only affects
     // the next capture; don't disturb the running one.
     listeners.call ([](Listener& l) { l.transportChanged(); });
+}
+
+void BluePrinterAudioProcessor::analyzeTakeMelody (int)
+{
+    if (takeRecorder.isActive() || takeRecorder.isOverdubCapture())
+        return;
+
+    const int takeId = takeRecorder.getSelectedTakeId();
+    if (takeId <= 0)
+        return;
+
+    // Strong ref so the worker can read the take's audio even if the take is
+    // deleted while the analysis runs. Only the selected take is exposed by
+    // the recorder, so analysis always targets it.
+    auto audio = takeRecorder.getSelectedTakeAudio();
+    if (audio == nullptr || audio->getNumSamples() <= 0)
+        return;
+
+    melodyPlayer.stop();
+    melodyAnalysing.store (true, std::memory_order_release);
+    melodyAnalysingTakeId.store (takeId, std::memory_order_release);
+    listeners.call ([](Listener& l) { l.transportChanged(); });
+
+    // The analysis walks the whole take (YIN per frame), so run it on a
+    // worker and post the result back, mirroring detectSnippetKeyAndNotes.
+    const double sr = getSampleRate();
+    std::thread ([this, takeId, audio, sr]()
+    {
+        MelodyAnalyzer::Result result;
+        BluePrinterAudioProcessor::setCrashOp ("analyzing take melody (MelodyAnalyzer)");
+        try
+        {
+            result = MelodyAnalyzer::analyze (*audio, sr);
+        }
+        catch (...)
+        {
+            // Never leave the UI spinning: post an empty result instead.
+            result = {};
+        }
+        BluePrinterAudioProcessor::setCrashOp ("no chain operation in progress");
+
+        juce::MessageManager::callAsync ([this, takeId, result]()
+        {
+            // A newer analysis (or a different take) superseded this one.
+            if (melodyAnalysingTakeId.load (std::memory_order_acquire) != takeId)
+                return;
+
+            takeMelodies[takeId] = result;
+            melodyAnalysing.store (false, std::memory_order_release);
+            melodyAnalysingTakeId.store (-1, std::memory_order_release);
+            refreshMelodyPlayer();
+            listeners.call ([](Listener& l) { l.transportChanged(); });
+        });
+    }).detach();
+}
+
+void BluePrinterAudioProcessor::setMelodyPlayback (bool enabled, int64_t startSample)
+{
+    if (takeRecorder.isActive() || takeRecorder.isOverdubCapture())
+        return;
+
+    if (enabled)
+    {
+        const int selected = takeRecorder.getSelectedTakeId();
+        const auto it = takeMelodies.find (selected);
+        if (it == takeMelodies.end() || it->second.notes.empty())
+            return;
+
+        // One player at a time: stop snippet playback, the looper and take
+        // review so the melody audition is the only thing sounding.
+        stopPlayback();
+        if (looper.isPlaying())
+            setLooperPlaying (false);
+        if (takeRecorder.isReviewPlaying())
+            takeRecorder.stopReview();
+
+        melodyPlayer.setNotes (it->second.notes);
+        // A start offset auditions from a chosen note; -1 plays from the top.
+        melodyPlayer.start (startSample);
+    }
+    else
+    {
+        melodyPlayer.stop();
+    }
+
+    listeners.call ([](Listener& l) { l.transportChanged(); });
+}
+
+const MelodyAnalyzer::Result* BluePrinterAudioProcessor::getTakeMelody (int id) const
+{
+    const auto it = takeMelodies.find (id);
+    return it != takeMelodies.end() ? &it->second : nullptr;
+}
+
+void BluePrinterAudioProcessor::refreshMelodyPlayer()
+{
+    // Reload the player for the newly selected take and stop any audition
+    // that belonged to the previous one.
+    const int selected = takeRecorder.getSelectedTakeId();
+    const auto it = takeMelodies.find (selected);
+    if (it != takeMelodies.end())
+        melodyPlayer.setNotes (it->second.notes);
+    else
+        melodyPlayer.clearNotes();
 }
 
 void BluePrinterAudioProcessor::savePendingTake()
@@ -3942,6 +4069,23 @@ void BluePrinterAudioProcessor::savePendingTake()
     // The take owns its audio (a private buffer), so no record lock is needed.
     auto defaultName = "Snippet " + juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H:%M:%S");
     auto snippet = library.addSnippet (audio, getSampleRate(), defaultName);
+
+    // Attach the analysed melody (0054), if any, and drop the session cache:
+    // the melody now lives with the library item (and its sidecar).
+    melodyPlayer.stop();
+    if (snippet != nullptr)
+    {
+        const auto melodyIt = takeMelodies.find (id);
+        if (melodyIt != takeMelodies.end() && ! melodyIt->second.notes.empty())
+        {
+            std::vector<Snippet::MelodyNote> notes;
+            notes.reserve (melodyIt->second.notes.size());
+            for (const auto& n : melodyIt->second.notes)
+                notes.push_back ({ n.startSample, n.lengthSamples, n.midi, n.cents });
+            snippet->melody = std::move (notes);
+        }
+    }
+    takeMelodies.erase (id);
 
     // The saved take leaves the stack — it is a library snippet now.
     takeRecorder.deleteTake (id);
