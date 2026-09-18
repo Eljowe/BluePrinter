@@ -127,7 +127,7 @@ juce::String getStringProp (const juce::var& v, const char* name, const juce::St
     return prop.isVoid() ? defaultValue : prop.toString();
 }
 
-juce::var snippetToVar (const Snippet& s)
+juce::var snippetToVar (const Snippet& s, bool melodyAnalysing)
 {
     auto* obj = new juce::DynamicObject();
     obj->setProperty ("id", s.id);
@@ -144,14 +144,28 @@ juce::var snippetToVar (const Snippet& s)
     obj->setProperty ("color", s.color);
     obj->setProperty ("gainDb", s.gainDb);
     obj->setProperty ("favourite", s.favourite);
-    // Extracted melody (0054): the card shows the note count beside the key.
+    // Extracted melody (0054): the card shows the count and draws the notes.
     obj->setProperty ("melodyCount", static_cast<int> (s.melody.size()));
+    obj->setProperty ("melodyAnalysing", melodyAnalysing);
 
     juce::Array<juce::var> notesVar;
     notesVar.ensureStorageAllocated (s.detectedNotes.size());
     for (const auto& n : s.detectedNotes)
         notesVar.add (n);
     obj->setProperty ("notes", notesVar);
+
+    juce::Array<juce::var> melodyVar;
+    melodyVar.ensureStorageAllocated (static_cast<int> (s.melody.size()));
+    for (const auto& note : s.melody)
+    {
+        auto* noteObj = new juce::DynamicObject();
+        noteObj->setProperty ("startSample", static_cast<double> (note.startSample));
+        noteObj->setProperty ("lengthSamples", static_cast<double> (note.lengthSamples));
+        noteObj->setProperty ("midi", note.midi);
+        noteObj->setProperty ("cents", note.cents);
+        melodyVar.add (juce::var (noteObj));
+    }
+    obj->setProperty ("melody", melodyVar);
 
     auto* peaks = new juce::DynamicObject();
     juce::Array<juce::var> peakArray;
@@ -274,14 +288,45 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
             }
             processor.setMelodyPlayback (enabled, startSample);
         })
+        .withEventListener(BluePrinterWebViewEditor::frontendAnalyzeSnippetMelodyEvent, [&processor](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+                processor.analyzeSnippetMelody (static_cast<int> (obj->getProperty ("id")));
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetSnippetMelodyPlaybackEvent, [&processor](juce::var data)
+        {
+            int id = 0;
+            bool enabled = false;
+            int64_t startSample = -1;
+            if (auto* obj = data.getDynamicObject())
+            {
+                id = static_cast<int> (obj->getProperty ("id"));
+                enabled = (bool) obj->getProperty ("enabled");
+                const auto from = obj->getProperty ("startSample");
+                if (! from.isVoid())
+                    startSample = static_cast<int64_t> (static_cast<double> (from));
+            }
+            processor.setSnippetMelodyPlayback (id, enabled, startSample);
+        })
         .withEventListener(BluePrinterWebViewEditor::frontendStartPlaybackEvent, [&processor](juce::var data)
         {
             if (auto* obj = data.getDynamicObject())
-                processor.startPlayback (static_cast<int> (obj->getProperty("id")));
+            {
+                int startSample = 0;
+                const auto from = obj->getProperty ("startSample");
+                if (! from.isVoid())
+                    startSample = static_cast<int> (static_cast<double> (from));
+                processor.startPlayback (static_cast<int> (obj->getProperty("id")), startSample);
+            }
         })
         .withEventListener(BluePrinterWebViewEditor::frontendStopPlaybackEvent, [&processor](juce::var)
         {
             processor.stopPlayback();
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetPlaybackPositionEvent, [&processor](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+                processor.setPlaybackPosition (static_cast<int> (static_cast<double> (obj->getProperty ("position"))));
         })
         .withEventListener(BluePrinterWebViewEditor::frontendUpdateSnippetEvent, [&processor, owner](juce::var data)
         {
@@ -365,6 +410,27 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
         {
             if (owner != nullptr)
                 owner->handleSaveLoop();
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendLoadSnippetIntoLooperEvent, [&processor, owner](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+            {
+                const int id = static_cast<int> (obj->getProperty ("id"));
+                juce::String error;
+                if (processor.loadSnippetIntoLooper (id, error))
+                {
+                    if (owner != nullptr)
+                        owner->sendNotification ("Loaded \"" + processor.getLooperSourceName()
+                                                 + "\" into the looper.",
+                                                 "ok");
+                }
+                else if (owner != nullptr)
+                {
+                    owner->sendNotification (error.isNotEmpty() ? error
+                                                                : "Could not load the snippet into the looper.",
+                                             "error");
+                }
+            }
         })
         .withEventListener(BluePrinterWebViewEditor::frontendExportSnippetEvent, [owner](juce::var data)
         {
@@ -1157,7 +1223,7 @@ juce::var BluePrinterWebViewEditor::makeSnippetsSnapshot() const
     juce::Array<juce::var> arr;
     arr.ensureStorageAllocated (static_cast<int> (snippets.size()));
     for (auto& s : snippets)
-        arr.add (snippetToVar (*s));
+        arr.add (snippetToVar (*s, audioProcessor.isSnippetMelodyAnalysing (s->id)));
     return juce::var (arr);
 }
 
@@ -1275,6 +1341,8 @@ juce::var BluePrinterWebViewEditor::makeTransportSnapshot() const
     obj->setProperty ("melodyAnalysing", audioProcessor.isMelodyAnalysing());
     obj->setProperty ("melodyAnalysingTakeId", audioProcessor.getMelodyAnalysingTakeId());
     obj->setProperty ("melodyPlaying", audioProcessor.isMelodyPlaying());
+    obj->setProperty ("melodyPlayingSource", audioProcessor.getMelodyPlayingSource());
+    obj->setProperty ("melodyPlayingId", audioProcessor.getMelodyPlayingId());
     obj->setProperty ("melodyPosition", static_cast<double> (audioProcessor.getMelodyPlaybackPos()));
     obj->setProperty ("melodyLength", static_cast<double> (audioProcessor.getMelodyLength()));
     // Whether an analysis has completed for the selected take (even if it
@@ -1334,6 +1402,7 @@ juce::var BluePrinterWebViewEditor::makeTransportSnapshot() const
     }
     obj->setProperty ("looperCountInBeats", audioProcessor.getLooperCountInBeats());
     obj->setProperty ("looperLengthBars", audioProcessor.getLooperLengthBars());
+    obj->setProperty ("looperSourceName", audioProcessor.getLooperSourceName());
     obj->setProperty ("loopUndoAvailable", audioProcessor.isLoopUndoAvailable());
     obj->setProperty ("loopRedoAvailable", audioProcessor.isLoopRedoAvailable());
     obj->setProperty ("looperCropStartBeats", audioProcessor.getLooperCropStartBeats());

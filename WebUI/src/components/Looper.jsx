@@ -398,6 +398,14 @@ export function Looper({ transport, onOverdubChange, onLoopLevelChange, onOverdu
         <div>
           <h2>Capture a loop. Play over it.</h2>
           <p>Records whatever the chains make — synth, guitar, FX — so the loop sounds exactly like what you heard.</p>
+          {transport?.looperSourceName ? (
+            <p
+              className="looper-source"
+              title="This loop was loaded from a library snippet — Save to library adds a new version and leaves the original untouched"
+            >
+              Loaded: <strong>{transport.looperSourceName}</strong>
+            </p>
+          ) : null}
         </div>
         <div className="looper-state" aria-live="polite">
           <span className="looper-state-dot" />

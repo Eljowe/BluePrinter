@@ -140,6 +140,9 @@ before claiming.
 | [0052](0052-tempo-locked-loop-playback.md) | Tempo-locked (time-stretched) loop playback | needs-triage | — |
 | [0053](0053-practice-scale-helper.md) | Practice helper: scale/chord overlay from the detected key | ready-for-agent | — |
 | [0054](0054-take-melody-extraction.md) | Take melody extraction: piano-roll, note/key readout and synth audition | done | — |
+| [0055](0055-library-snippet-melody.md) | Library snippet melody: analyse existing snippets and draw the piano-roll in the card | done | 0054 |
+| [0056](0056-load-snippet-into-looper.md) | Load a library snippet into the looper to overdub and save a new version | done | — |
+| [0057](0057-snippet-playback-seek.md) | Seek snippet playback from the library waveform | done | — |
 
 Themes: **audio integrity** (0046–0048) and **practice & songwriting**
 (0049–0054). Suggested order: 0046 → 0049/0050 → 0051 → 0052, with 0047/0048,

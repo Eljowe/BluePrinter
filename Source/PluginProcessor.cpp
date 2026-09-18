@@ -20,6 +20,7 @@
 #include "PreRollMath.h"
 #include "Tuner.h"
 #include "ChainPreset.h"
+#include "Resampler.h"
 
 #include <algorithm>
 #include <set>
@@ -1736,6 +1737,14 @@ void BluePrinterAudioProcessor::renderPlayback (juce::AudioBuffer<float>& destin
     auto readPos = static_cast<int> (playbackReadPos.load (std::memory_order_acquire));
     const int totalSamples = audio.getNumSamples();
 
+    // A seek queued by the message thread (click/drag on the waveform, or a
+    // start-with-offset) is applied here, after the re-fetch above may have
+    // reset playbackReadPos to 0. Clamp so a seek past the end can't skip
+    // the whole snippet.
+    const auto pendingSeek = playbackSeekSamples.exchange (-1, std::memory_order_acq_rel);
+    if (pendingSeek >= 0)
+        readPos = juce::jlimit (0, juce::jmax (0, totalSamples - 1), static_cast<int> (pendingSeek));
+
     if (readPos >= totalSamples)
     {
         playbackActive.store (false, std::memory_order_release);
@@ -1799,7 +1808,7 @@ void BluePrinterAudioProcessor::startRecording()
 
     // A capture started while a melody audition was playing: stop it so the
     // synth can never leak into the take (0054).
-    melodyPlayer.stop();
+    stopMelodyPlayback();
 
     if (recordBuffer == nullptr || maxRecordSamples <= 0)
         return;
@@ -1878,6 +1887,9 @@ void BluePrinterAudioProcessor::setLooperRecording (bool enabled)
         else
         {
             looper.armFresh();
+            // A freshly captured loop is no longer a loaded snippet (0056).
+            looperSourceName.clear();
+            looperSourceId = -1;
             armStemsForCapture ("loop");
         }
 
@@ -2056,7 +2068,16 @@ int BluePrinterAudioProcessor::saveLoopSnippet()
         if (snippetBuffer == nullptr)
             return -1;
 
-        auto defaultName = "Loop " + juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H:%M:%S");
+        // A loop loaded from a snippet (0056) saves as a new version of it;
+        // a freshly captured loop keeps the timestamped default. The id is a
+        // fallback for an unnamed source.
+        juce::String defaultName;
+        if (looperSourceName.isNotEmpty())
+            defaultName = looperSourceName + " overdub";
+        else if (looperSourceId >= 0)
+            defaultName = "Snippet " + juce::String (looperSourceId) + " overdub";
+        else
+            defaultName = "Loop " + juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H:%M:%S");
         snippet = library.addSnippet (snippetBuffer, getSampleRate(), defaultName);
     }
 
@@ -2086,6 +2107,113 @@ int BluePrinterAudioProcessor::saveLoopSnippet()
     }
 
     return snippet->id;
+}
+
+// Loads a library snippet into the looper as the current loop (0056). The
+// snippet is resampled to the session rate and channel-mapped onto the shared
+// record buffer; the loop descriptor is then published via Looper::setLoaded
+// (which clears the layer history). Non-destructive: the snippet and its files
+// are untouched, and a later save writes a new "<source> overdub" snippet.
+// Message thread only — resampling allocates.
+bool BluePrinterAudioProcessor::loadSnippetIntoLooper (int id, juce::String& outError)
+{
+    outError.clear();
+
+    if (recordBuffer == nullptr || maxRecordSamples <= 0 || currentSampleRate <= 0.0)
+    {
+        outError = "The audio device is not ready yet.";
+        return false;
+    }
+
+    // Refuse while a take or loop capture is active (count-in included). The
+    // audio thread is writing the record buffer then.
+    if (takeRecorder.isActive() || looper.isActive() || looper.isOverdubCapture())
+    {
+        outError = "Stop the current capture before loading a snippet.";
+        return false;
+    }
+
+    auto snippet = library.findById (id);
+    if (snippet == nullptr || snippet->audio == nullptr || snippet->numSamples <= 0)
+    {
+        outError = "Snippet not found.";
+        return false;
+    }
+
+    const double sourceRate = snippet->sampleRate > 0.0 ? snippet->sampleRate : currentSampleRate;
+    const double targetRate = currentSampleRate;
+
+    const int64_t resampledSamples = Resampler::resampledLength (snippet->numSamples,
+                                                                sourceRate, targetRate);
+    if (resampledSamples <= 0)
+    {
+        outError = "The snippet has no audio to load.";
+        return false;
+    }
+
+    // Overdub layers are written after the loop, so keep half the record buffer
+    // free for them (the whole point of loading a snippet is to play over it).
+    const int64_t capacity = static_cast<int64_t> (maxRecordSamples) / 2;
+    if (resampledSamples > capacity)
+    {
+        const auto maxSeconds = static_cast<int> (capacity / targetRate);
+        outError = "Snippet is too long to load into the looper (max "
+                   + juce::String (maxSeconds) + " s at this rate).";
+        return false;
+    }
+
+    // Resample + channel-map on the message thread. A null result means the
+    // snippet had no usable audio.
+    auto resampled = Resampler::resample (*snippet->audio, sourceRate, targetRate);
+    if (resampled.getNumSamples() <= 0)
+    {
+        outError = "The snippet has no audio to load.";
+        return false;
+    }
+
+    auto mapped = Resampler::mapChannels (resampled, juce::jmax (1, recordBuffer->getNumChannels()));
+    if (mapped.getNumSamples() <= 0)
+    {
+        outError = "The snippet has no audio to load.";
+        return false;
+    }
+
+    // Everything that can fail has succeeded; now stop every playback path
+    // before swapping the loop out (each would otherwise overwrite the monitor
+    // while the buffer changes under it).
+    setLooperPlaying (false);
+    stopPlayback();
+    if (takeRecorder.isReviewPlaying())
+        takeRecorder.stopReview();
+    stopMelodyPlayback();
+
+    const auto loadedLength = static_cast<int64_t> (mapped.getNumSamples());
+
+    {
+        const juce::ScopedLock sl (recordLock);
+        recordBuffer->clear();
+
+        const int channels = juce::jmin (recordBuffer->getNumChannels(), mapped.getNumChannels());
+        const int samples = static_cast<int> (juce::jmin (
+            loadedLength, static_cast<int64_t> (recordBuffer->getNumSamples())));
+        for (int ch = 0; ch < channels; ++ch)
+            recordBuffer->copyFrom (ch, 0, mapped, ch, 0, samples);
+
+        // Publishes the descriptor and clears the layer undo/redo history.
+        looper.setLoaded (loadedLength);
+    }
+
+    if (stemCapture.getSource() == "loop")
+        stemCapture.clear();
+
+    looperSourceName = snippet->name;
+    looperSourceId   = snippet->id;
+
+    refreshLooperPeaks();
+    updateLoopClipLatch();
+    updateClockRunState();
+    listeners.call ([](Listener& l) { l.transportChanged(); });
+    return true;
 }
 
 //==============================================================================
@@ -2203,7 +2331,7 @@ void BluePrinterAudioProcessor::setLooperPlaying (bool enabled)
         takeRecorder.stopReview();
 
     if (enabled)
-        melodyPlayer.stop();
+        stopMelodyPlayback();
 
     looper.setPlaying (enabled);
     updateClockRunState();
@@ -2326,6 +2454,8 @@ void BluePrinterAudioProcessor::redoLoopLayer()
 void BluePrinterAudioProcessor::clearLoop()
 {
     looper.clear();
+    looperSourceName.clear();
+    looperSourceId = -1;
     if (stemCapture.getSource() == "loop")
         stemCapture.clear();
     updateClockRunState();
@@ -2425,7 +2555,7 @@ void BluePrinterAudioProcessor::stopRecording()
     listeners.call ([](Listener& l) { l.transportChanged(); });
 }
 
-void BluePrinterAudioProcessor::startPlayback (int snippetId)
+void BluePrinterAudioProcessor::startPlayback (int snippetId, int startSample)
 {
     if (snippetId < 0)
         return;
@@ -2437,17 +2567,30 @@ void BluePrinterAudioProcessor::startPlayback (int snippetId)
     if (takeRecorder.isReviewPlaying())
         takeRecorder.stopReview();
 
-    melodyPlayer.stop();
+    stopMelodyPlayback();
 
     if (library.indexOfId (snippetId) < 0)
         return;
 
-    playbackReadPos.store (0, std::memory_order_release);
+    const auto clampedStart = static_cast<int64_t> (juce::jmax (0, startSample));
+    playbackReadPos.store (clampedStart, std::memory_order_release);
+    playbackSeekSamples.store (clampedStart, std::memory_order_release);
     playingSnippetId.store (snippetId, std::memory_order_release);
     playbackActive.store (true, std::memory_order_release);
     playbackSnippet.reset();
 
     listeners.call ([](Listener& l) { l.transportChanged(); });
+}
+
+void BluePrinterAudioProcessor::setPlaybackPosition (int sample)
+{
+    // Message thread only. Ignore when nothing is sounding; the audio thread
+    // clamps against the real snippet length when it applies the seek.
+    if (! playbackActive.load (std::memory_order_acquire))
+        return;
+
+    playbackSeekSamples.store (static_cast<int64_t> (juce::jmax (0, sample)),
+                               std::memory_order_release);
 }
 
 void BluePrinterAudioProcessor::stopPlayback()
@@ -2459,6 +2602,7 @@ void BluePrinterAudioProcessor::stopPlayback()
     playbackActive.store (false, std::memory_order_release);
     playingSnippetId.store (-1, std::memory_order_release);
     playbackReadPos.store (0, std::memory_order_release);
+    playbackSeekSamples.store (-1, std::memory_order_release);
     playbackSnippet.reset();
 
     listeners.call ([](Listener& l) { l.transportChanged(); });
@@ -3921,7 +4065,7 @@ void BluePrinterAudioProcessor::setTakePlayback (bool enabled)
         if (looper.isPlaying())
             setLooperPlaying (false);
 
-        melodyPlayer.stop();
+        stopMelodyPlayback();
         takeRecorder.startReview();
     }
     else
@@ -3957,7 +4101,7 @@ void BluePrinterAudioProcessor::analyzeTakeMelody (int)
     if (audio == nullptr || audio->getNumSamples() <= 0)
         return;
 
-    melodyPlayer.stop();
+    stopMelodyPlayback();
     melodyAnalysing.store (true, std::memory_order_release);
     melodyAnalysingTakeId.store (takeId, std::memory_order_release);
     listeners.call ([](Listener& l) { l.transportChanged(); });
@@ -4018,13 +4162,85 @@ void BluePrinterAudioProcessor::setMelodyPlayback (bool enabled, int64_t startSa
         melodyPlayer.setNotes (it->second.notes);
         // A start offset auditions from a chosen note; -1 plays from the top.
         melodyPlayer.start (startSample);
+        melodySource   = MelodySource::take;
+        melodySourceId = selected;
     }
     else
     {
-        melodyPlayer.stop();
+        stopMelodyPlayback();
     }
 
     listeners.call ([](Listener& l) { l.transportChanged(); });
+}
+
+void BluePrinterAudioProcessor::setSnippetMelodyPlayback (int id, bool enabled, int64_t startSample)
+{
+    if (takeRecorder.isActive() || takeRecorder.isOverdubCapture())
+        return;
+
+    if (enabled)
+    {
+        // Copy the notes out under the library lock, then hand them to the
+        // player (message thread only, so no audio-thread hazard).
+        MelodyPlayer::Notes notes;
+        {
+            auto snippet = library.findById (id);
+            if (snippet == nullptr || snippet->melody.empty())
+                return;
+
+            notes.reserve (snippet->melody.size());
+            for (const auto& n : snippet->melody)
+                notes.push_back ({ n.startSample, n.lengthSamples, n.midi, n.cents, 1.0f });
+        }
+
+        // One player at a time, exactly like the take audition.
+        stopPlayback();
+        if (looper.isPlaying())
+            setLooperPlaying (false);
+        if (takeRecorder.isReviewPlaying())
+            takeRecorder.stopReview();
+
+        melodyPlayer.setNotes (std::move (notes));
+        melodyPlayer.start (startSample);
+        melodySource   = MelodySource::snippet;
+        melodySourceId = id;
+    }
+    else
+    {
+        stopMelodyPlayback();
+    }
+
+    listeners.call ([](Listener& l) { l.transportChanged(); });
+}
+
+void BluePrinterAudioProcessor::stopMelodyPlayback()
+{
+    melodyPlayer.stop();
+    melodySource   = MelodySource::none;
+    melodySourceId = -1;
+}
+
+juce::String BluePrinterAudioProcessor::getMelodyPlayingSource() const
+{
+    if (! melodyPlayer.isPlaying())
+        return {};
+    switch (melodySource)
+    {
+        case MelodySource::take:    return "take";
+        case MelodySource::snippet: return "snippet";
+        case MelodySource::none:    break;
+    }
+    return {};
+}
+
+int BluePrinterAudioProcessor::getMelodyPlayingId() const
+{
+    return melodyPlayer.isPlaying() ? melodySourceId : -1;
+}
+
+bool BluePrinterAudioProcessor::isSnippetMelodyAnalysing (int id) const
+{
+    return snippetMelodyAnalysing.find (id) != snippetMelodyAnalysing.end();
 }
 
 const MelodyAnalyzer::Result* BluePrinterAudioProcessor::getTakeMelody (int id) const
@@ -4033,10 +4249,95 @@ const MelodyAnalyzer::Result* BluePrinterAudioProcessor::getTakeMelody (int id) 
     return it != takeMelodies.end() ? &it->second : nullptr;
 }
 
+void BluePrinterAudioProcessor::analyzeSnippetMelody (int id)
+{
+    // Hold a strong ref to the snippet's audio so the worker can analyse it
+    // even if the snippet is deleted meanwhile (mirrors detectSnippetKeyAndNotes).
+    std::shared_ptr<const juce::AudioBuffer<float>> audio;
+    double sampleRate = 0.0;
+    {
+        auto snippet = library.findById (id);
+        if (snippet == nullptr || snippet->audio == nullptr
+            || snippet->audio->getNumSamples() <= 0)
+            return;
+        audio = snippet->audio;
+        sampleRate = snippet->sampleRate;
+    }
+
+    // A fresh request supersedes any in-flight analysis of the same snippet,
+    // so a slow worker can't clobber a newer result.
+    const int generation = ++snippetMelodyGeneration;
+    snippetMelodyGenerations[id] = generation;
+    snippetMelodyAnalysing.insert (id);
+
+    // Stop auditioning this snippet's old melody while it is re-analysed.
+    if (melodySource == MelodySource::snippet && melodySourceId == id)
+        stopMelodyPlayback();
+
+    listeners.call ([](Listener& l) { l.libraryChanged(); l.transportChanged(); });
+
+    std::thread ([this, id, generation, audio, sampleRate]()
+    {
+        MelodyAnalyzer::Result result;
+        BluePrinterAudioProcessor::setCrashOp ("analyzing snippet melody (MelodyAnalyzer)");
+        try
+        {
+            result = MelodyAnalyzer::analyze (*audio, sampleRate);
+        }
+        catch (...)
+        {
+            result = {};
+        }
+        BluePrinterAudioProcessor::setCrashOp ("no chain operation in progress");
+
+        juce::MessageManager::callAsync ([this, id, generation, result]()
+        {
+            // Superseded by a newer request (or the snippet was deleted).
+            const auto genIt = snippetMelodyGenerations.find (id);
+            if (genIt == snippetMelodyGenerations.end()
+                || genIt->second != generation)
+                return;
+
+            snippetMelodyGenerations.erase (genIt);
+            snippetMelodyAnalysing.erase (id);
+
+            auto snippet = library.findById (id);
+            if (snippet != nullptr)
+            {
+                std::vector<Snippet::MelodyNote> notes;
+                notes.reserve (result.notes.size());
+                for (const auto& n : result.notes)
+                    notes.push_back ({ n.startSample, n.lengthSamples, n.midi, n.cents });
+                if (library.updateMelody (id, std::move (notes)))
+                {
+                    // The analyser also names the key; fill it in when the
+                    // snippet has never had key detection run on it.
+                    if (snippet->key.isEmpty() && result.key.isNotEmpty())
+                    {
+                        snippet->key           = result.key;
+                        snippet->keyConfidence = result.keyConfidence;
+                        snippet->detectedNotes = result.detectedNotes;
+                    }
+
+                    if (! library.persistMetadata (id))
+                    {
+                        juce::ScopedLock lock (libraryFolderLock);
+                        lastSaveError = "Melody analysis result could not be saved to disk. "
+                                        "Make sure a library folder is set and the file is writable.";
+                    }
+                }
+            }
+
+            listeners.call ([](Listener& l) { l.libraryChanged(); l.transportChanged(); });
+        });
+    }).detach();
+}
+
 void BluePrinterAudioProcessor::refreshMelodyPlayer()
 {
     // Reload the player for the newly selected take and stop any audition
-    // that belonged to the previous one.
+    // that belonged to the previous one (including a library snippet's).
+    stopMelodyPlayback();
     const int selected = takeRecorder.getSelectedTakeId();
     const auto it = takeMelodies.find (selected);
     if (it != takeMelodies.end())
@@ -4074,7 +4375,7 @@ void BluePrinterAudioProcessor::savePendingTake()
 
     // Attach the analysed melody (0054), if any, and drop the session cache:
     // the melody now lives with the library item (and its sidecar).
-    melodyPlayer.stop();
+    stopMelodyPlayback();
     if (snippet != nullptr)
     {
         const auto melodyIt = takeMelodies.find (id);

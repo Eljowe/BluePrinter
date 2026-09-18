@@ -28,8 +28,15 @@ export const FRONTEND_EVENTS = {
   // startSample auditions from that note; -1/absent plays from the top).
   analyzeTakeMelody: "frontendAnalyzeTakeMelody",
   setMelodyPlayback: "frontendSetMelodyPlayback",
+  // Library-snippet melody (0054 follow-up): { id } analyses an existing
+  // snippet's melody; { id, enabled, startSample? } auditions it.
+  analyzeSnippetMelody: "frontendAnalyzeSnippetMelody",
+  setSnippetMelodyPlayback: "frontendSetSnippetMelodyPlayback",
   startPlayback: "frontendStartPlayback",
   stopPlayback: "frontendStopPlayback",
+  // { position } — jump the currently-playing snippet to a sample offset
+  // (waveform click/drag seek on a library snippet card).
+  setPlaybackPosition: "frontendSetPlaybackPosition",
   updateSnippet: "frontendUpdateSnippetMeta",
   // Organisational colour tag for a snippet: { id, color } where
   // color is one of the 8 palette keys or "" to clear.
@@ -52,6 +59,10 @@ export const FRONTEND_EVENTS = {
   setCaptureStems: "frontendSetCaptureStems",
   exportStems: "frontendExportStems",
   saveLoop: "frontendSaveLoop",
+  // { id } — load a library snippet into the looper as the current loop
+  // (resampled to the session rate). Non-destructive; saving the overdubbed
+  // loop makes a new "<source> overdub" snippet (0056).
+  loadSnippetIntoLooper: "frontendLoadSnippetIntoLooper",
   revealSnippet: "frontendRevealSnippet",
   chooseLibraryFolder: "frontendChooseLibraryFolder",
   openLibraryFolder: "frontendOpenLibraryFolder",

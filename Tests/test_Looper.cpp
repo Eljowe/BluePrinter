@@ -140,6 +140,26 @@ BP_TEST (Looper_layerUndoRedoRestoresTheFullRegion)
     BP_CHECK (loop.isUndoAvailable());
 }
 
+BP_TEST (Looper_setLoadedPublishesAFreshLoopAndClearsHistory)
+{
+    Looper loop;
+    loop.setGridTrimmed (4);
+    loop.pushUndoSnapshot (ramp (1, 8, 0.0f));
+    loop.setPlaying (true);
+    BP_CHECK (loop.isUndoAvailable());
+
+    loop.setLoaded (8);
+    BP_CHECK_EQ (loop.getStart(), static_cast<int64_t> (0));
+    BP_CHECK_EQ (loop.getLength(), static_cast<int64_t> (8));
+    BP_CHECK_EQ (loop.getFullLength(), static_cast<int64_t> (8));
+    BP_CHECK_EQ (loop.getCropStartBeats(), 0);
+    BP_CHECK_EQ (loop.getCropEndBeats(), 0);
+    BP_CHECK (! loop.isUndoAvailable());
+    BP_CHECK (! loop.isRedoAvailable());
+    BP_CHECK (! loop.isPlaying());
+    BP_CHECK (loop.isIdle());
+}
+
 BP_TEST (Looper_clearAndOverdubSettingsResetState)
 {
     Looper loop;

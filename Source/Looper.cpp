@@ -122,20 +122,26 @@ void Looper::armFresh()
 {
     // Fresh capture: wipe the loop and start from sample 0. The layer
     // history no longer applies (0030).
+    resetLoopState();
+    peaks.clear();
+}
+
+void Looper::resetLoopState()
+{
     clearHistory();
+    autoStopPending.store (false, std::memory_order_release);
     preRollActive.store (false, std::memory_order_release);
     captureArmed.store (false, std::memory_order_release);
     recording.store (false, std::memory_order_release);
-    playing.store (false, std::memory_order_release);
     overdubCapture.store (false, std::memory_order_release);
     overdubWritePos.store (0, std::memory_order_release);
+    playing.store (false, std::memory_order_release);
     start.store (0, std::memory_order_release);
     length.store (0, std::memory_order_release);
     fullLength.store (0, std::memory_order_release);
     position.store (0, std::memory_order_release);
     cropStartBeats = 0;
     cropEndBeats = 0;
-    peaks.clear();
 }
 
 void Looper::armOverdub (bool countIn)
@@ -185,6 +191,14 @@ void Looper::setGridTrimmed (int64_t target)
     fullLength.store (target, std::memory_order_release);
     cropStartBeats = 0;
     cropEndBeats = 0;
+}
+
+void Looper::setLoaded (int64_t loadedLength)
+{
+    const auto clamped = juce::jmax<int64_t> (0, loadedLength);
+    resetLoopState();
+    length.store (clamped, std::memory_order_release);
+    fullLength.store (clamped, std::memory_order_release);
 }
 
 bool Looper::setCrop (int startBeats, int endBeats, double sampleRate, float bpm,

@@ -28,6 +28,7 @@
 #include "ChainStatePersistence.h"
 #include <deque>
 #include <map>
+#include <set>
 
 //==============================================================================
 // A dedicated thread that owns every VST3 instantiation so every
@@ -120,8 +121,13 @@ public:
     void stopRecording();
     bool isRecordingRequested() const { return takeRecorder.isRecordingRequested(); }
 
-    void startPlayback (int snippetId);
+    // `startSample` optionally starts the snippet partway through (clamped
+    // by the audio thread) so the UI can click a waveform to play from there.
+    void startPlayback (int snippetId, int startSample = 0);
     void stopPlayback();
+    // Jump the currently-playing snippet to `sample` (message thread; the
+    // audio thread applies it next block). No-op when nothing is playing.
+    void setPlaybackPosition (int sample);
     bool isPlaybackActive() const { return playbackActive.load (std::memory_order_acquire); }
 
     // Take review. Every stopped take is retained in a bounded stack (0037)
@@ -168,6 +174,18 @@ public:
     // The cached melody for a take (nullptr when none has been analysed).
     // Message thread only.
     const MelodyAnalyzer::Result* getTakeMelody (int id) const;
+
+    // Library-snippet melody (0054 follow-up). Analyses a snippet already in
+    // the library off the message thread and persists the notes into its
+    // sidecar; the card can then draw the piano-roll and audition it. A
+    // re-analysis supersedes an in-flight one. `isSnippetMelodyAnalysing`
+    // drives the card's spinner; `getMelodyPlayingSource`/`getMelodyPlayingId`
+    // tell the take review and the cards which melody is currently sounding.
+    void         analyzeSnippetMelody (int id);
+    void         setSnippetMelodyPlayback (int id, bool enabled, int64_t startSample = -1);
+    bool         isSnippetMelodyAnalysing (int id) const;
+    juce::String getMelodyPlayingSource() const;
+    int          getMelodyPlayingId() const;
 
     bool deleteSnippet (int id);
     bool updateSnippetMeta (int id, const juce::String& name, const juce::String& comments);
@@ -446,6 +464,19 @@ public:
     // only. Returns the new snippet id, or -1 if there is no captured
     // loop.
     int saveLoopSnippet();
+
+    // Load a library snippet into the looper (0056): resample it to the
+    // session rate, map it onto recordBuffer's channels, publish it as the
+    // current loop (clearing the layer history) and remember the source so a
+    // later save is named "<source> overdub". Non-destructive: the snippet
+    // and its files are never modified. Refused while a capture is active;
+    // loop/snippet/take-review/melody playback is stopped first. Message
+    // thread only. Returns false and sets outError on failure.
+    bool    loadSnippetIntoLooper (int id, juce::String& outError);
+    // Name of the snippet the current loop was loaded from ("" for a loop
+    // captured in the looper). Message thread only; shipped in the transport
+    // snapshot so the UI can show a "loaded from" chip.
+    juce::String getLooperSourceName() const { return looperSourceName; }
 
     // Per-chain stem capture (0038). Session-only: when enabled, a fresh
     // take or loop capture also records the dry pass-through and each
@@ -732,10 +763,28 @@ private:
     std::atomic<int>  melodyAnalysingTakeId { -1 };
     std::map<int, MelodyAnalyzer::Result> takeMelodies;
     void refreshMelodyPlayer();
+    void stopMelodyPlayback();
+
+    // Which melody (if any) the shared player currently holds, so the take
+    // review and the library cards can show the right play/stop state.
+    enum class MelodySource { none, take, snippet };
+    MelodySource melodySource = MelodySource::none;
+    int          melodySourceId = -1;
+
+    // Library-snippet melody analysis: per-snippet generation counter + the
+    // in-flight set (message thread only), so a newer analysis supersedes an
+    // older worker and the card can show a spinner.
+    int                snippetMelodyGeneration = 0;
+    std::map<int, int> snippetMelodyGenerations;
+    std::set<int>      snippetMelodyAnalysing;
 
     std::atomic<bool> playbackActive { false };
     std::atomic<int> playingSnippetId { -1 };
     std::atomic<int64_t> playbackReadPos { 0 };
+    // Pending seek target in samples (-1 = none), applied by the audio
+    // thread at the top of renderPlayback so a seek survives the snippet
+    // re-fetch that resets playbackReadPos. Message-thread writes only.
+    std::atomic<int64_t> playbackSeekSamples { -1 };
 
     // Metronome / count-in. Settings are user-tweakable and persisted; the
     // preRoll* / transportPosition fields are audio-thread runtime state.
@@ -782,6 +831,10 @@ private:
     // Audio looper state + loop-layer undo/redo (0027 step 6c). See
     // Looper.h; the shared capture buffer and record lock stay here.
     Looper looper;
+    // The library snippet the current loop was loaded from (0056), or empty
+    // for a captured loop. Message thread only.
+    juce::String looperSourceName;
+    int          looperSourceId = -1;
 
     // Per-chain stem capture (0038). The message thread arms/finalises
     // (allocating); the audio thread only copies into the preallocated

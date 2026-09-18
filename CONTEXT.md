@@ -59,10 +59,19 @@ _Avoid_: Metronome (the APVTS-independent settings object is `metronomeEnabled`)
 Materialising a loop as a new library snippet.
 _Avoid_: Export (export writes a file; bounce creates a snippet)
 
+**Loaded loop**:
+A library snippet copied into the looper (resampled to the session rate) so it
+can be overdubbed. The snippet is never modified; saving the result makes a new
+`<source> overdub` snippet. The loop remembers its source name (`looperSourceName`)
+so the UI can show a "Loaded:" chip.
+_Avoid_: Import (import adds a snippet to the library, it does not seed the looper)
+
 **Melody**:
-The monophonic note events extracted from a finished take (pitch track →
-segmentation) together with the take's detected key. Session-only until the take
-is saved, when it is written into the snippet's sidecar and shown on the card.
+The monophonic note events extracted from a finished take or a library snippet
+(pitch track → segmentation) together with the detected key. A take's melody is
+session-only until the take is saved, when it is written into the snippet's
+sidecar; a library snippet can be analysed in place (`analyzeSnippetMelody`),
+persisted to its sidecar, and auditioned from its card.
 _Avoid_: Transcription (implies polyphony/notation), tab
 
 ### Routing
@@ -172,6 +181,7 @@ _Avoid_: Message, IPC event
 | Chain input select + monitor/record sum | `Source/ChainRouting.h` |
 | Capture-buffer write clamp | `Source/CaptureWrite.h` |
 | Capture-region copy (finalize) | `Source/CaptureCopy.h` |
+| Snippet→looper rate/channel prep (0056) | `Source/Resampler.h/.cpp` |
 | Count-in completion test | `Source/PreRollMath.h` |
 | MIDI output device + direct sends | `Source/MidiClockOutput.h/.cpp` |
 | Metering math | `Source/MeterMath.h` |
@@ -188,6 +198,7 @@ _Avoid_: Message, IPC event
 - Chains run in parallel on a pristine input snapshot and never hear each other.
 - Monitor controls (Output, Solo, monitor-mute, Loop level) never change the print.
 - Melody audition is monitor-only; it is stopped when a capture starts and never
-  enters the recording mix.
+  enters the recording mix. One melody player at a time (`MelodySource` tracks
+  whether a take or a library snippet is sounding).
 - Restore is deferred one plugin per loop turn; persist is gated while it runs.
 - Event names live once in `WebViewEditor.h` and once in `bridge.js`; they must match.
