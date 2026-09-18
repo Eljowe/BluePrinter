@@ -65,6 +65,7 @@ target_sources(BluePrinter PRIVATE
     Source/MidiClockOutput.cpp
     Source/TakeRecorder.cpp
     Source/Looper.cpp
+    Source/Resampler.cpp
     Source/RestoreSelfHeal.cpp
     Source/StemCapture.cpp
     Source/SetlistStore.cpp
@@ -268,6 +269,7 @@ if(BUILD_TESTING)
         Tests/test_ChainPreset.cpp
         Tests/test_TakeRecorder.cpp
         Tests/test_Looper.cpp
+        Tests/test_Resampler.cpp
         Tests/test_TapTempo.cpp
         Tests/test_RestoreSelfHeal.cpp
         Tests/test_StemCapture.cpp
@@ -286,6 +288,7 @@ if(BUILD_TESTING)
         Source/MetronomePlayer.cpp
         Source/TakeRecorder.cpp
         Source/Looper.cpp
+        Source/Resampler.cpp
         Source/RestoreSelfHeal.cpp
         Source/StemCapture.cpp
         Source/SetlistStore.cpp)

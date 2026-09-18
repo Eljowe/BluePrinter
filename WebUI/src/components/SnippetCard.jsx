@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Waveform } from "./Waveform";
 import { Knob } from "./controls";
+import { PianoRoll } from "./PianoRoll";
 import { formatDate, formatTime, SNIPPET_COLORS, snippetColor } from "../utils";
 import { FRONTEND_EVENTS, emit } from "../bridge";
 import {
@@ -27,6 +28,9 @@ export function SnippetCard({
   reorderContext,
   isPlaying,
   playPositionSeconds,
+  isMelodyPlaying = false,
+  loopHasLoop = false,
+  onLoadIntoLooper,
 }) {
   const [name, setName] = useState(snippet.name ?? "");
   const [comments, setComments] = useState(snippet.comments ?? "");
@@ -41,6 +45,9 @@ export function SnippetCard({
   // Two-step delete: the first click arms the button ("Confirm?"), the
   // second commits. Arming auto-disarms after a few seconds.
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // Two-step "replace the loop" for Load into looper (0056): only when the
+  // looper already holds a loop does the first click arm instead of loading.
+  const [confirmLoad, setConfirmLoad] = useState(false);
 
   // Track the last values we successfully committed so we never
   // skip a commit because the backend echoed the same prop values
@@ -114,11 +121,83 @@ export function SnippetCard({
     else emit(FRONTEND_EVENTS.startPlayback, { id: snippet.id });
   };
 
+  // Waveform seeking: click starts playback from that point, drag scrubs.
+  // The sample offset is derived from the pointer x within the track (the
+  // playhead's 6px inset) so the cursor tracks the waveform, not the border.
+  const waveformRef = useRef(null);
+  const seekDragging = useRef(false);
+
+  const sampleFromClientX = (clientX) => {
+    const el = waveformRef.current;
+    const totalSamples = Number(snippet.numSamples) || 0;
+    if (!el || totalSamples <= 0) return 0;
+    const rect = el.getBoundingClientRect();
+    const track = Math.max(1, rect.width - 12);
+    const frac = Math.min(1, Math.max(0, (clientX - rect.left - 6) / track));
+    return Math.round(frac * Math.max(0, totalSamples - 1));
+  };
+
+  const seekToSample = (sample) => {
+    if (isPlaying) emit(FRONTEND_EVENTS.setPlaybackPosition, { position: sample });
+    else emit(FRONTEND_EVENTS.startPlayback, { id: snippet.id, startSample: sample });
+  };
+
+  const handleWavePointerDown = (e) => {
+    if (e.button !== 0 || duration <= 0) return;
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    seekDragging.current = true;
+    seekToSample(sampleFromClientX(e.clientX));
+  };
+
+  const handleWavePointerMove = (e) => {
+    if (!seekDragging.current) return;
+    seekToSample(sampleFromClientX(e.clientX));
+  };
+
+  const handleWavePointerUp = (e) => {
+    if (!seekDragging.current) return;
+    seekDragging.current = false;
+    e.currentTarget.releasePointerCapture?.(e.pointerId);
+  };
+
+  const handleWaveKeyDown = (e) => {
+    const totalSamples = Number(snippet.numSamples) || 0;
+    const sampleRate = Number(snippet.sampleRate) || 0;
+    if (totalSamples <= 0 || sampleRate <= 0) return;
+    const step = Math.max(1, Math.round(sampleRate));
+    const current = isPlaying ? Math.round(showPosition * sampleRate) : 0;
+    let next = null;
+    if (e.key === "ArrowRight") next = current + step;
+    else if (e.key === "ArrowLeft") next = current - step;
+    else if (e.key === "PageUp") next = current + step * 5;
+    else if (e.key === "PageDown") next = current - step * 5;
+    else if (e.key === "Home") next = 0;
+    else if (e.key === "End") next = totalSamples - 1;
+    if (next === null) return;
+    e.preventDefault();
+    seekToSample(Math.min(totalSamples - 1, Math.max(0, next)));
+  };
+
   useEffect(() => {
     if (!confirmDelete) return undefined;
     const t = setTimeout(() => setConfirmDelete(false), 3500);
     return () => clearTimeout(t);
   }, [confirmDelete]);
+
+  useEffect(() => {
+    if (!confirmLoad) return undefined;
+    const t = setTimeout(() => setConfirmLoad(false), 3500);
+    return () => clearTimeout(t);
+  }, [confirmLoad]);
+
+  const handleLoadIntoLooper = () => {
+    if (loopHasLoop && !confirmLoad) {
+      setConfirmLoad(true);
+      return;
+    }
+    setConfirmLoad(false);
+    onLoadIntoLooper?.(snippet.id);
+  };
 
   const handleDelete = () => {
     if (!confirmDelete) {
@@ -146,6 +225,25 @@ export function SnippetCard({
     emit(FRONTEND_EVENTS.detectSnippetKey, { id: snippet.id });
   };
 
+  const handleAnalyzeMelody = () => {
+    emit(FRONTEND_EVENTS.analyzeSnippetMelody, { id: snippet.id });
+  };
+
+  const handlePlayMelody = () => {
+    emit(FRONTEND_EVENTS.setSnippetMelodyPlayback, {
+      id: snippet.id,
+      enabled: !isMelodyPlaying,
+    });
+  };
+
+  const auditionMelodyFrom = (startSample) => {
+    emit(FRONTEND_EVENTS.setSnippetMelodyPlayback, {
+      id: snippet.id,
+      enabled: true,
+      startSample,
+    });
+  };
+
   const toggleExpanded = () => setExpanded((v) => !v);
 
   const duration = Number(snippet.durationSeconds) || 0;
@@ -157,6 +255,9 @@ export function SnippetCard({
   const hasKey = typeof snippet.key === "string" && snippet.key.length > 0;
   const hasNotes = Array.isArray(snippet.notes) && snippet.notes.length > 0;
   const hasAnalysis = hasKey || hasNotes;
+  const melodyNotes = Array.isArray(snippet.melody) ? snippet.melody : [];
+  const hasMelody = melodyNotes.length > 0;
+  const melodyAnalysing = Boolean(snippet.melodyAnalysing);
   const keyConfidence = Number(snippet.keyConfidence) || 0;
   const keyTitle = hasKey
     ? `Detected key: ${snippet.key} (confidence ${Math.round(keyConfidence * 100)}%)`
@@ -262,7 +363,21 @@ export function SnippetCard({
       {expanded ? (
         <div className="snippet-details">
           <div
-            className="snippet-waveform"
+            ref={waveformRef}
+            className={`snippet-waveform ${duration > 0 ? "is-seekable" : ""}`}
+            role="slider"
+            tabIndex={duration > 0 ? 0 : -1}
+            aria-label="Playback position"
+            aria-valuemin={0}
+            aria-valuemax={Math.round(duration * 10) / 10}
+            aria-valuenow={Math.round(showPosition * 10) / 10}
+            aria-valuetext={`${formatTime(showPosition)} of ${formatTime(duration)}`}
+            title={duration > 0 ? "Click or drag to play from a point" : undefined}
+            onPointerDown={handleWavePointerDown}
+            onPointerMove={handleWavePointerMove}
+            onPointerUp={handleWavePointerUp}
+            onPointerCancel={handleWavePointerUp}
+            onKeyDown={handleWaveKeyDown}
             style={currentColor ? { background: currentColor.soft } : undefined}
           >
             <Waveform peaks={snippet.peaks ?? []} width={520} height={56} />
@@ -406,6 +521,55 @@ export function SnippetCard({
             </div>
           </div>
 
+          <div className="snippet-field snippet-melody-field">
+            <span>Melody</span>
+            <div className="snippet-melody">
+              <div className="snippet-melody-head">
+                {hasKey ? (
+                  <span className="snippet-melody-key" title={keyTitle}>Key {snippet.key}</span>
+                ) : null}
+                {melodyAnalysing ? <span className="melody-spinner" aria-hidden="true" /> : null}
+                <span className="snippet-melody-status" role="status" aria-live="polite">
+                  {melodyAnalysing
+                    ? "Analysing melody…"
+                    : hasMelody
+                      ? `${melodyNotes.length} note${melodyNotes.length === 1 ? "" : "s"} found — click a note to hear it`
+                      : "No melody analysed yet — extract the pitches to see and hear the line"}
+                </span>
+              </div>
+              <PianoRoll
+                notes={melodyNotes}
+                totalSamples={Number(snippet.numSamples) || 0}
+                sampleRate={Number(snippet.sampleRate) || 0}
+                keySignature={snippet.key ?? ""}
+                onAudition={auditionMelodyFrom}
+                height={72}
+              />
+              <div className="snippet-melody-actions">
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  onClick={handleAnalyzeMelody}
+                  disabled={melodyAnalysing}
+                  title="Extract the melody (monophonic pitches) from this snippet"
+                >
+                  <IconAnalyze size={13} />
+                  {melodyAnalysing ? "Analysing…" : hasMelody ? "Re-analyse melody" : "Analyse melody"}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  onClick={handlePlayMelody}
+                  disabled={!hasMelody}
+                  title="Play the extracted melody with the built-in synth (monitor only)"
+                >
+                  {isMelodyPlaying ? <IconStop size={13} /> : <IconPlay size={13} />}
+                  {isMelodyPlaying ? "Stop melody" : "Play melody"}
+                </button>
+              </div>
+            </div>
+          </div>
+
           <footer className="snippet-footer">
             <div className="snippet-meta">
               #{snippet.id} · {Number(snippet.numChannels) || 0}ch · {Math.round(Number(snippet.sampleRate) || 0)} Hz
@@ -451,6 +615,18 @@ export function SnippetCard({
               >
                 <IconSave size={13} />
                 Save
+              </button>
+              <button
+                type="button"
+                className={`btn btn-sm ${confirmLoad ? "is-armed" : ""}`}
+                onClick={handleLoadIntoLooper}
+                title={loopHasLoop
+                  ? (confirmLoad
+                      ? "Click again to replace the current loop"
+                      : "Load this snippet into the looper, replacing the current loop")
+                  : "Load this snippet into the looper to play over it"}
+              >
+                {confirmLoad ? "Replace loop?" : "Load into looper"}
               </button>
               <button
                 type="button"

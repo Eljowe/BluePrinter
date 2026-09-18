@@ -1450,6 +1450,17 @@ button {
   font-size: 0.78rem;
 }
 
+/* "Loaded from a snippet" chip (0056): a loaded loop saves as a new version. */
+.looper-header p.looper-source {
+  margin-top: 6px;
+  color: var(--accent-ink);
+  font-size: 0.74rem;
+}
+
+.looper-source strong {
+  font-weight: 700;
+}
+
 .looper-state {
   display: flex;
   align-items: center;
@@ -1998,6 +2009,44 @@ button {
 
 .take-review-melody-actions {
   display: flex;
+  gap: 8px;
+}
+
+/* Library snippet melody (0054 follow-up): the piano-roll + controls sit in
+   the expanded card details, below the Gain field. */
+.snippet-melody {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.snippet-melody-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.snippet-melody-key { color: var(--accent); }
+
+.snippet-melody-status {
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+
+.snippet-melody-actions {
+  display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -3465,6 +3514,12 @@ button {
   background: var(--panel-2);
   border: 2px solid var(--line);
   padding: 6px;
+}
+
+.snippet-waveform.is-seekable {
+  cursor: ew-resize;
+  touch-action: none;
+  user-select: none;
 }
 
 .waveform {

@@ -90,8 +90,8 @@ function readInitialTransport() {
     tunerOpen: false, tunerMonitorMute: false, tunerFrequency: 0, tunerConfidence: 0, tunerReferencePitch: 440, tunerNote: "", tunerCents: 0,
      preRollActive: false, transportPosition: 0,
      takePending: false, takeLength: 0, takePlaying: false, takePosition: 0, takePeaks: [], takes: [], selectedTakeId: -1,
-     melodyAnalysing: false, melodyAnalysed: false, melodyPlaying: false, melodyPosition: 0, melodyLength: 0, melodyKey: "", melodyNotes: [],
-     looperRecording: false, looperPreRoll: false, looperPlaying: false, looperLooping: true, looperOverdub: false, loopPlaybackReverse: false, loopPlaybackHalfSpeed: false, captureStemsEnabled: false, stemsAvailable: false, stemSource: "", looperCountInBeats: 4, looperCropStartBeats: 0, looperCropEndBeats: 0, audioLoopStart: 0, audioLoopPosition: 0, audioLoopLength: 0, audioLoopPeaks: [], chainLevels: [], maxRecordSamples: 0, loopUndoAvailable: false, loopRedoAvailable: false,
+     melodyAnalysing: false, melodyAnalysed: false, melodyPlaying: false, melodyPlayingSource: "", melodyPlayingId: -1, melodyPosition: 0, melodyLength: 0, melodyKey: "", melodyNotes: [],
+     looperRecording: false, looperPreRoll: false, looperPlaying: false, looperLooping: true, looperOverdub: false, loopPlaybackReverse: false, loopPlaybackHalfSpeed: false, captureStemsEnabled: false, stemsAvailable: false, stemSource: "", looperCountInBeats: 4, looperCropStartBeats: 0, looperCropEndBeats: 0, audioLoopStart: 0, audioLoopPosition: 0, audioLoopLength: 0, audioLoopPeaks: [], chainLevels: [], maxRecordSamples: 0, loopUndoAvailable: false, loopRedoAvailable: false, looperSourceName: "",
   };
   return {
     ...raw,
@@ -149,7 +149,7 @@ function readInitialTransport() {
      takePeaks: Array.isArray(raw.takePeaks) ? raw.takePeaks : [],
      takes: Array.isArray(raw.takes) ? raw.takes : [],
      selectedTakeId: Number(raw.selectedTakeId ?? -1),
-     looperRecording: Boolean(raw.looperRecording), looperPreRoll: Boolean(raw.looperPreRoll), looperPlaying: Boolean(raw.looperPlaying), looperLooping: raw.looperLooping !== false, looperOverdub: Boolean(raw.looperOverdub), loopPlaybackReverse: Boolean(raw.loopPlaybackReverse), loopPlaybackHalfSpeed: Boolean(raw.loopPlaybackHalfSpeed), captureStemsEnabled: Boolean(raw.captureStemsEnabled), stemsAvailable: Boolean(raw.stemsAvailable), stemSource: raw.stemSource ?? "", looperCountInBeats: Number(raw.looperCountInBeats ?? 4), looperLengthBars: Number(raw.looperLengthBars ?? 0), looperCropStartBeats: Number(raw.looperCropStartBeats ?? 0), looperCropEndBeats: Number(raw.looperCropEndBeats ?? 0), audioLoopStart: Number(raw.audioLoopStart ?? 0), audioLoopPosition: Number(raw.audioLoopPosition ?? 0), audioLoopLength: Number(raw.audioLoopLength ?? 0), audioLoopPeaks: Array.isArray(raw.audioLoopPeaks) ? raw.audioLoopPeaks : [], chainLevels: Array.isArray(raw.chainLevels) ? raw.chainLevels : [], maxRecordSamples: Number(raw.maxRecordSamples ?? 0), loopUndoAvailable: Boolean(raw.loopUndoAvailable), loopRedoAvailable: Boolean(raw.loopRedoAvailable),
+     looperRecording: Boolean(raw.looperRecording), looperPreRoll: Boolean(raw.looperPreRoll), looperPlaying: Boolean(raw.looperPlaying), looperLooping: raw.looperLooping !== false, looperOverdub: Boolean(raw.looperOverdub), loopPlaybackReverse: Boolean(raw.loopPlaybackReverse), loopPlaybackHalfSpeed: Boolean(raw.loopPlaybackHalfSpeed), captureStemsEnabled: Boolean(raw.captureStemsEnabled), stemsAvailable: Boolean(raw.stemsAvailable), stemSource: raw.stemSource ?? "", looperCountInBeats: Number(raw.looperCountInBeats ?? 4), looperLengthBars: Number(raw.looperLengthBars ?? 0), looperCropStartBeats: Number(raw.looperCropStartBeats ?? 0), looperCropEndBeats: Number(raw.looperCropEndBeats ?? 0), audioLoopStart: Number(raw.audioLoopStart ?? 0), audioLoopPosition: Number(raw.audioLoopPosition ?? 0), audioLoopLength: Number(raw.audioLoopLength ?? 0), audioLoopPeaks: Array.isArray(raw.audioLoopPeaks) ? raw.audioLoopPeaks : [], chainLevels: Array.isArray(raw.chainLevels) ? raw.chainLevels : [], maxRecordSamples: Number(raw.maxRecordSamples ?? 0), loopUndoAvailable: Boolean(raw.loopUndoAvailable), loopRedoAvailable: Boolean(raw.loopRedoAvailable), looperSourceName: typeof raw.looperSourceName === "string" ? raw.looperSourceName : "",
   };
 }
 
@@ -179,6 +179,13 @@ export default function App() {
   const handleRecordingModeChange = (mode) => {
     setRecordingMode(mode);
     localStorage.setItem(RECORDING_MODE_KEY, mode);
+  };
+
+  // Load a library snippet into the looper (0056): switch to the Loop tab so
+  // the result is visible, then ask the backend to seed the loop.
+  const handleLoadIntoLooper = (id) => {
+    handleRecordingModeChange("loop");
+    emit(FRONTEND_EVENTS.loadSnippetIntoLooper, { id });
   };
 
   // WAI-ARIA tabs pattern: Left/Right arrows cycle the tab and move
@@ -421,6 +428,8 @@ export default function App() {
          melodyAnalysing: payload.melodyAnalysing !== undefined ? Boolean(payload.melodyAnalysing) : prev.melodyAnalysing,
          melodyAnalysed: payload.melodyAnalysed !== undefined ? Boolean(payload.melodyAnalysed) : prev.melodyAnalysed,
          melodyPlaying: payload.melodyPlaying !== undefined ? Boolean(payload.melodyPlaying) : prev.melodyPlaying,
+         melodyPlayingSource: typeof payload.melodyPlayingSource === "string" ? payload.melodyPlayingSource : (prev.melodyPlayingSource ?? ""),
+         melodyPlayingId: payload.melodyPlayingId !== undefined ? Number(payload.melodyPlayingId) : (prev.melodyPlayingId ?? -1),
          melodyPosition: Number(payload.melodyPosition ?? prev.melodyPosition ?? 0),
          melodyLength: Number(payload.melodyLength ?? prev.melodyLength ?? 0),
          melodyKey: typeof payload.melodyKey === "string" ? payload.melodyKey : (prev.melodyKey ?? ""),
@@ -446,6 +455,7 @@ export default function App() {
          audioLoopPosition: Number(payload.audioLoopPosition ?? prev.audioLoopPosition ?? 0),
          audioLoopLength: Number(payload.audioLoopLength ?? prev.audioLoopLength ?? 0),
          audioLoopPeaks: Array.isArray(payload.audioLoopPeaks) ? payload.audioLoopPeaks : (prev.audioLoopPeaks ?? []),
+         looperSourceName: typeof payload.looperSourceName === "string" ? payload.looperSourceName : (prev.looperSourceName ?? ""),
          chainLevels: Array.isArray(payload.chainLevels) ? payload.chainLevels : (prev.chainLevels ?? []),
       }));
     });
@@ -978,6 +988,10 @@ export default function App() {
               onSetSetlistOrder={handleSetSetlistOrder}
               playingSnippetId={transport.playingSnippetId}
               playPositionSeconds={playPositionSeconds}
+              melodyPlayingSource={transport.melodyPlayingSource}
+              melodyPlayingId={transport.melodyPlayingId}
+              loopHasLoop={Number(transport.audioLoopLength) > 0}
+              onLoadIntoLooper={handleLoadIntoLooper}
               folder={transport.libraryFolder}
             />
           </ErrorBoundary>

@@ -182,6 +182,10 @@ export function SnippetList({
   onSetSetlistOrder,
   playingSnippetId,
   playPositionSeconds,
+  melodyPlayingSource,
+  melodyPlayingId,
+  loopHasLoop = false,
+  onLoadIntoLooper,
   folder,
 }) {
   const [query, setQuery] = useState("");
@@ -649,6 +653,9 @@ export function SnippetList({
                   : null}
                 isPlaying={s.id === playingSnippetId}
                 playPositionSeconds={playPositionSeconds}
+                isMelodyPlaying={melodyPlayingSource === "snippet" && Number(melodyPlayingId) === s.id}
+                loopHasLoop={loopHasLoop}
+                onLoadIntoLooper={onLoadIntoLooper}
               />
             ))}
           </div>

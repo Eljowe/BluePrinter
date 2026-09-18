@@ -103,6 +103,11 @@ public:
     // Publish a fresh grid-trimmed capture: start 0, length/full = target,
     // crop cleared.
     void    setGridTrimmed (int64_t target);
+    // Publish a loop loaded from a library snippet (0056): the caller has
+    // copied the (resampled) audio into the record buffer. Resets the
+    // descriptor to start 0 / length / full = `length`, clears the crop and
+    // the layer undo/redo history, and stops playback.
+    void    setLoaded (int64_t length);
     // Whole-beat crop against the full loop. Returns false when there is no
     // loop (the caller then skips its notify).
     bool    setCrop (int startBeats, int endBeats, double sampleRate, float bpm,
@@ -133,6 +138,9 @@ private:
     void    applySnapshot (juce::AudioBuffer<float>& buffer,
                            const std::shared_ptr<juce::AudioBuffer<float>>& snapshot);
     void    trimHistoryStacks();
+    // Clears the descriptor + capture/playback flags for a brand-new loop
+    // (fresh capture or a snippet load). Shared by armFresh/setLoaded.
+    void    resetLoopState();
 
     std::atomic<int>     countInBeats    { 4 };
     std::atomic<int>     lengthBars      { 0 };

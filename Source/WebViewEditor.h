@@ -49,8 +49,15 @@ public:
     // { enabled } auditions it with the built-in synth.
     static constexpr const char* frontendAnalyzeTakeMelodyEvent = "frontendAnalyzeTakeMelody";
     static constexpr const char* frontendSetMelodyPlaybackEvent = "frontendSetMelodyPlayback";
+    // Library-snippet melody (0054 follow-up): { id } analyses an existing
+    // snippet's melody; { id, enabled, startSample? } auditions it from the card.
+    static constexpr const char* frontendAnalyzeSnippetMelodyEvent    = "frontendAnalyzeSnippetMelody";
+    static constexpr const char* frontendSetSnippetMelodyPlaybackEvent = "frontendSetSnippetMelodyPlayback";
     static constexpr const char* frontendStartPlaybackEvent    = "frontendStartPlayback";
     static constexpr const char* frontendStopPlaybackEvent     = "frontendStopPlayback";
+    // { position } — jump the currently-playing snippet to a sample offset
+    // (waveform click/drag seek in the library Takes list).
+    static constexpr const char* frontendSetPlaybackPositionEvent = "frontendSetPlaybackPosition";
     static constexpr const char* frontendUpdateSnippetEvent    = "frontendUpdateSnippetMeta";
     static constexpr const char* frontendSetSnippetColorEvent  = "frontendSetSnippetColor";
     // { id, favourite } — toggle the user favourite (star) flag.
@@ -71,6 +78,10 @@ public:
     static constexpr const char* frontendImportAudioEvent      = "frontendImportAudio";
     static constexpr const char* frontendImportAudioDataEvent  = "frontendImportAudioData";
     static constexpr const char* frontendSaveLoopEvent         = "frontendSaveLoop";
+    // { id } — load a library snippet into the looper as the current loop,
+    // resampled to the session rate (0056). Non-destructive; saving the
+    // overdubbed loop makes a new "<source> overdub" snippet.
+    static constexpr const char* frontendLoadSnippetIntoLooperEvent = "frontendLoadSnippetIntoLooper";
     static constexpr const char* frontendRevealSnippetEvent    = "frontendRevealSnippet";
     static constexpr const char* frontendChooseFolderEvent     = "frontendChooseLibraryFolder";
     static constexpr const char* frontendOpenFolderEvent       = "frontendOpenLibraryFolder";

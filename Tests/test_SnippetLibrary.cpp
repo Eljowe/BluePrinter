@@ -84,6 +84,7 @@ BP_TEST (SnippetSidecar_roundTripsMetadataThroughDisk)
     snippet->color = "teal";
     snippet->gainDb = -3.5f;
     snippet->favourite = true;
+    snippet->melody = { { 100, 50, 60, 3.0f }, { 400, 80, 64, -2.0f } };
 
     juce::String path, error;
     BP_CHECK (source.saveSnippetToFolder (*snippet, dir, path, error));
@@ -104,9 +105,48 @@ BP_TEST (SnippetSidecar_roundTripsMetadataThroughDisk)
     BP_CHECK_EQ (roundTripped->color, juce::String ("teal"));
     BP_CHECK_NEAR (roundTripped->gainDb, -3.5, 1e-4);
     BP_CHECK (roundTripped->favourite);
+    BP_CHECK_EQ (static_cast<int> (roundTripped->melody.size()), 2);
+    BP_CHECK_EQ (roundTripped->melody[0].startSample, static_cast<int64_t> (100));
+    BP_CHECK_EQ (roundTripped->melody[0].lengthSamples, static_cast<int64_t> (50));
+    BP_CHECK_EQ (roundTripped->melody[0].midi, 60);
+    BP_CHECK_NEAR (roundTripped->melody[0].cents, 3.0, 1e-4);
+    BP_CHECK_EQ (roundTripped->melody[1].midi, 64);
     BP_CHECK_NEAR (roundTripped->sampleRate, 48000.0, 1e-6);
     BP_CHECK_EQ (roundTripped->numChannels, 1);
     BP_CHECK_EQ (static_cast<int> (roundTripped->numSamples), 2000);
+
+    dir.deleteRecursively();
+}
+
+// 0054 follow-up: analysing a snippet that is already saved rewrites its
+// sidecar (updateMelody + persistMetadata) so the melody survives a reload.
+BP_TEST (SnippetLibrary_updateMelodyPersistsToSidecar)
+{
+    const auto dir = makeTempDir ("melody");
+
+    SnippetLibrary library;
+    auto snippet = library.addSnippet (makeBuffer (1, 1000, 0.3f), 44100.0, "Hum");
+    BP_CHECK (snippet != nullptr);
+
+    juce::String path, error;
+    BP_CHECK (library.saveSnippetToFolder (*snippet, dir, path, error));
+    BP_CHECK (error.isEmpty());
+    BP_CHECK (library.markSaved (snippet->id, path));
+
+    std::vector<Snippet::MelodyNote> notes { { 10, 100, 69, 0.0f }, { 200, 120, 71, 12.5f } };
+    BP_CHECK (library.updateMelody (snippet->id, notes));
+    BP_CHECK (! library.updateMelody (9999, {}));
+    BP_CHECK (library.persistMetadata (snippet->id));
+
+    SnippetLibrary loaded;
+    BP_CHECK (loaded.loadFromFolder (dir, error));
+    BP_CHECK_EQ (loaded.numSnippets(), 1);
+
+    auto roundTripped = loaded.snapshot().front();
+    BP_CHECK_EQ (static_cast<int> (roundTripped->melody.size()), 2);
+    BP_CHECK_EQ (roundTripped->melody[0].midi, 69);
+    BP_CHECK_EQ (roundTripped->melody[1].startSample, static_cast<int64_t> (200));
+    BP_CHECK_NEAR (roundTripped->melody[1].cents, 12.5, 1e-3);
 
     dir.deleteRecursively();
 }
