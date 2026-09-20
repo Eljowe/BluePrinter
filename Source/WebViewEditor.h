@@ -3,6 +3,27 @@
 #include <JuceHeader.h>
 #include "PluginProcessor.h"
 
+// A WebBrowserComponent that reports when a page has finished loading. The
+// editor keeps this component hidden (painting its own branded splash)
+// until the page commits: WebView2 cold start (Edge process spawn + bundle
+// load) otherwise shows a blank window with no sign the app is alive.
+class BluePrinterWebViewComponent : public juce::WebBrowserComponent
+{
+public:
+    using juce::WebBrowserComponent::WebBrowserComponent;
+
+    std::function<void()> onPageFinishedLoading;
+
+private:
+    void pageFinishedLoading (const juce::String& url) override
+    {
+        if (onPageFinishedLoading)
+            onPageFinishedLoading();
+
+        juce::WebBrowserComponent::pageFinishedLoading (url);
+    }
+};
+
 class BluePrinterWebViewEditor : public juce::AudioProcessorEditor
                               , private juce::AudioProcessorValueTreeState::Listener
                               , private BluePrinterAudioProcessor::Listener
@@ -312,8 +333,20 @@ private:
     void pickLibraryFolderThenSave(int pendingSnippetId);
 
     BluePrinterAudioProcessor& audioProcessor;
-    juce::WebBrowserComponent webView;
+    BluePrinterWebViewComponent webView;
     juce::Label fallbackLabel;
+
+    // Native startup splash. The WebView stays hidden until its page has
+    // loaded (or a fallback timeout elapses), so the WebView2 cold-start
+    // gap paints branded paper instead of a blank window. `webViewRequested`
+    // is only set once a navigation has been kicked off — the fallback
+    // label path never shows the splash.
+    void revealWebView();
+    void drawStartupSplash (juce::Graphics&);
+    bool webViewRequested = false;
+    bool webViewRevealed  = false;
+    int64_t webViewRevealDeadline = 0;
+    float splashPhase = 0.0f;
 
     // Per-slot native VST3 editor windows, keyed by chain id and then
     // by slot index. The unique_ptr owns the DialogWindow, which in

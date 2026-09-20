@@ -944,6 +944,7 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
                      .withWinWebView2Options (juce::WebBrowserComponent::Options::WinWebView2{}
                                                   .withUserDataFolder (userDataFolder)
                                                   .withStatusBarDisabled()
+                                                  .withBackgroundColour (juce::Colour (0xfff1eee6))
                                                   .withAdditionalBrowserArguments (juce::String::fromUTF8 ("--allow-no-sandbox-job --disable-gpu")));
    #endif
 
@@ -956,7 +957,17 @@ BluePrinterWebViewEditor::BluePrinterWebViewEditor(BluePrinterAudioProcessor& p)
     , webView(makeWebViewOptions(p, getWebUiDistRoot(), this, makeParameterSnapshot()))
 {
     audioProcessor.restoreSavedPluginChains();
-    addAndMakeVisible(webView);
+
+    // The WebView stays hidden until its page has loaded, so the native
+    // startup splash below covers the WebView2 cold-start gap (Edge
+    // process spawn + bundle load) instead of showing a blank window.
+    addChildComponent (webView);
+    webView.setVisible (false);
+    webView.onPageFinishedLoading = [safe = juce::Component::SafePointer<BluePrinterWebViewEditor> (this)]
+    {
+        if (safe != nullptr)
+            safe->revealWebView();
+    };
 
     // When a chain slot is removed (e.g. user removed the plugin), close
     // any open native editor for it so we don't leak a window with a
@@ -984,7 +995,14 @@ BluePrinterWebViewEditor::BluePrinterWebViewEditor(BluePrinterAudioProcessor& p)
                           juce::dontSendNotification);
     addAndMakeVisible(fallbackLabel);
 
-    if (!juce::WebBrowserComponent::areOptionsSupported(makeWebViewOptions(p, getWebUiDistRoot(), this, makeParameterSnapshot())))
+    // Support probe: a cheap options object (backend only). The full
+    // makeWebViewOptions() builds the initial snapshots, so it must not run
+    // a second time just to answer areOptionsSupported().
+    juce::WebBrowserComponent::Options probeOptions;
+   #if JUCE_WINDOWS
+    probeOptions = probeOptions.withBackend (juce::WebBrowserComponent::Options::Backend::webview2);
+   #endif
+    if (! juce::WebBrowserComponent::areOptionsSupported (probeOptions))
     {
         webView.setVisible(false);
         fallbackLabel.setText("WebView2 backend is not available on this system. Install Microsoft Edge WebView2 Runtime.",
@@ -996,6 +1014,10 @@ BluePrinterWebViewEditor::BluePrinterWebViewEditor(BluePrinterAudioProcessor& p)
     const auto url = resolveWebUiUrl();
     if (url.isNotEmpty())
     {
+        // Arm the native splash: it paints until pageFinishedLoading (or the
+        // timer's fallback deadline) reveals the WebView.
+        webViewRequested = true;
+        webViewRevealDeadline = juce::Time::currentTimeMillis() + 4000;
         webView.goToURL(url);
         fallbackLabel.setVisible(false);
     }
@@ -1056,7 +1078,80 @@ BluePrinterWebViewEditor::~BluePrinterWebViewEditor()
 
 void BluePrinterWebViewEditor::paint(juce::Graphics& g)
 {
+    if (webViewRequested && ! webViewRevealed)
+    {
+        drawStartupSplash (g);
+        return;
+    }
+
     g.fillAll(juce::Colours::black);
+}
+
+void BluePrinterWebViewEditor::revealWebView()
+{
+    if (webViewRevealed || ! webViewRequested)
+        return;
+
+    webViewRevealed = true;
+    webView.setVisible (true);
+
+    // Snapshots emitted while the page was hidden were dropped
+    // (emitEventIfBrowserIsVisible). Flag a fresh chain snapshot so the next
+    // timer tick pushes it now that the WebView is visible — letting the UI
+    // (and the splash's restore gate) proceed even if the frontend's own
+    // request raced the reveal.
+    chainUpdatePending.store (true, std::memory_order_release);
+    repaint();
+}
+
+// Native startup splash, matching the React SplashScreen's "starting" state
+// (paper, ink, a thick bordered progress rule). It paints while the WebView2
+// page is booting — before React can render anything — so the cold-start gap
+// shows a branded, responsive-looking surface instead of a blank window.
+void BluePrinterWebViewEditor::drawStartupSplash (juce::Graphics& g)
+{
+    const auto paper = juce::Colour (0xfff1eee6);
+    const auto panel = juce::Colour (0xfffbfaf6);
+    const auto ink   = juce::Colour (0xff101010);
+    const auto ink3  = juce::Colour (0xff6e6d66);
+
+    const auto bounds = getLocalBounds().toFloat();
+    g.fillAll (paper);
+
+    auto content = bounds.reduced (48.0f);
+
+    // Masthead: wordmark above a thick rule.
+    auto masthead = content.removeFromTop (46.0f);
+    g.setColour (ink);
+    g.setFont (juce::Font (juce::FontOptions (20.0f)));
+    g.drawText ("BluePrinter", masthead.withTrimmedBottom (14.0f),
+                juce::Justification::centredLeft, false);
+    g.fillRect (masthead.getX(), masthead.getBottom() - 3.0f, masthead.getWidth(), 3.0f);
+
+    // Headline + status, echoing the React splash copy.
+    content.removeFromTop (40.0f);
+    g.setColour (ink);
+    g.setFont (juce::Font (juce::FontOptions (34.0f)));
+    g.drawText ("Warming up the signal path", content.removeFromTop (46.0f),
+                juce::Justification::centredLeft, false);
+    g.setColour (ink3);
+    g.setFont (juce::Font (juce::FontOptions (16.0f)));
+    g.drawText ("starting up", content.removeFromTop (26.0f),
+                juce::Justification::centredLeft, false);
+
+    // Progress rule: bordered track with an indeterminate ink sweep.
+    auto rule = bounds.reduced (48.0f).removeFromBottom (16.0f);
+    g.setColour (ink);
+    g.drawRect (rule, 2.0f);
+
+    auto track = rule.reduced (2.0f);
+    g.setColour (panel);
+    g.fillRect (track);
+
+    const float inkWidth = track.getWidth() * 0.4f;
+    const float x = track.getX() + (track.getWidth() + inkWidth) * splashPhase - inkWidth;
+    g.setColour (ink);
+    g.fillRect (juce::Rectangle<float> (x, track.getY(), inkWidth, track.getHeight()));
 }
 
 void BluePrinterWebViewEditor::resized()
@@ -1131,6 +1226,20 @@ void BluePrinterWebViewEditor::handleAsyncUpdate()
 
 void BluePrinterWebViewEditor::timerCallback()
 {
+    // Native startup splash: animate the ink sweep, and reveal the WebView
+    // on the fallback deadline if the page never reported load (so a load
+    // failure can't strand the splash forever).
+    if (webViewRequested && ! webViewRevealed)
+    {
+        splashPhase += 0.04f;
+        if (splashPhase >= 1.0f)
+            splashPhase -= 1.0f;
+        repaint();
+
+        if (juce::Time::currentTimeMillis() >= webViewRevealDeadline)
+            revealWebView();
+    }
+
     // Throttled push: always push transport so the meter / timecode moves.
     emitTransportToFrontend();
 
