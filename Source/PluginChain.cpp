@@ -72,6 +72,20 @@ void PluginChain::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
         slot->plugin->processBlock (buffer, midi);
 }
 
+void PluginChain::attachParameterListeners (juce::AudioProcessor& plugin)
+{
+    for (auto* param : plugin.getParameters())
+        if (param != nullptr)
+            param->addListener (this);
+}
+
+void PluginChain::detachParameterListeners (juce::AudioProcessor& plugin)
+{
+    for (auto* param : plugin.getParameters())
+        if (param != nullptr)
+            param->removeListener (this);
+}
+
 juce::AudioPluginInstance* PluginChain::createInstance (const juce::File& file,
                                                         juce::String& outName,
                                                         juce::String& outError)
@@ -135,6 +149,7 @@ int PluginChain::addPlugin (const juce::File& vst3File, juce::String& outError)
     // owner can persist tweaks (onChanged). Attached here on the
     // message thread; removed before the plugin is destroyed.
     instance->addListener (this);
+    attachParameterListeners (*instance);
 
     // Eager prepare only when the host already knows the real device
     // configuration (isDevicePrepared). Before that the chain's rate /
@@ -192,6 +207,7 @@ int PluginChain::finalizeAsyncLoad (std::unique_ptr<juce::AudioPluginInstance> i
     // owner can persist tweaks (onChanged). Attached here on the
     // message thread; removed before the plugin is destroyed.
     instance->addListener (this);
+    attachParameterListeners (*instance);
 
     // Same eager-prepare gate as addPlugin: before the host's own
     // prepareToPlay the chain's currentSampleRate/currentBlockSize are
@@ -391,6 +407,7 @@ bool PluginChain::removePlugin (int index)
         if (slots[index]->plugin != nullptr)
         {
             slots[index]->plugin->removeListener (this);
+            detachParameterListeners (*slots[index]->plugin);
             slots[index]->plugin->releaseResources();
         }
         slots.erase (slots.begin() + index);
@@ -443,6 +460,7 @@ void PluginChain::clear()
             if (slots[i]->plugin != nullptr)
             {
                 slots[i]->plugin->removeListener (this);
+                detachParameterListeners (*slots[i]->plugin);
                 slots[i]->plugin->releaseResources();
             }
             removedIndices.push_back (static_cast<int> (i));

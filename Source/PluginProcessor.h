@@ -975,7 +975,8 @@ private:
     // Set while applyChainState (or a user-state restore) is running;
     // persistPluginChain skips arming while it is set. Atomic because
     // persistPluginChain can now be called from a hosted plugin's audio
-    // thread (AudioProcessorListener on PluginChain).
+    // thread (AudioProcessorListener / AudioProcessorParameter::Listener on
+    // PluginChain).
     std::atomic<bool> persistingPluginChain { false };
     bool pluginChainsRestored = false;
     // Debounced chain-persist arm. persistPluginChain is callable from

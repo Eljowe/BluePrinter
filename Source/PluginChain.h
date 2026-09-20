@@ -35,7 +35,8 @@ enum ChainInputBits : int
 // The chain does not own its blocklist or its cached scan result — both
 // live in the Vst3Library that is shared with the other chain. The
 // library reference is required: passing nullptr is a programming error.
-class PluginChain : public juce::AudioProcessorListener
+class PluginChain : public juce::AudioProcessorListener,
+                    private juce::AudioProcessorParameter::Listener
 {
 public:
     // The library must outlive the chain. The processor owns both and
@@ -219,12 +220,41 @@ public:
             onChanged();
     }
 
-    void audioProcessorChanged (juce::AudioProcessor*,
-                               const juce::AudioProcessorListener::ChangeDetails&) override
+    void audioProcessorChanged (juce::AudioProcessor* plugin,
+                               const juce::AudioProcessorListener::ChangeDetails& details) override
+    {
+        // parameterInfoChanged means the plugin rebuilt/renamed its
+        // parameter list, so re-bind our direct parameter listeners to
+        // include any new ones. Message-thread only: addListener/
+        // removeListener must not run inside a plugin's audio-thread
+        // callback.
+        if (details.parameterInfoChanged
+            && plugin != nullptr
+            && juce::MessageManager::getInstance()->isThisTheMessageThread())
+        {
+            detachParameterListeners (*plugin);
+            attachParameterListeners (*plugin);
+        }
+        if (onChanged)
+            onChanged();
+    }
+
+    // AudioProcessorParameter::Listener. The AudioProcessorListener callbacks
+    // above do NOT fire for ordinary parameter edits by modern plugins: JUCE's
+    // AudioProcessor::ParameterChangeForwarder is registered only by
+    // LegacyAudioParameter, so an APVTS-based plugin that just calls
+    // setValueNotifyingHost (rather than updateHostDisplay/setDirty) never
+    // arms the owner's debounced persist — its state was silently never
+    // re-saved. Listening to each hosted parameter directly closes that gap.
+    // May fire from the plugin's audio thread; onChanged only arms atomics
+    // (see persistPluginChain), so this stays realtime-safe.
+    void parameterValueChanged (int, float) override
     {
         if (onChanged)
             onChanged();
     }
+
+    void parameterGestureChanged (int, bool) override {}
 
     // Serialise this chain's slots: paths, bypass flags, and each
     // plugin's internal state (base64). Used by getStateInformation.
@@ -312,6 +342,13 @@ private:
     juce::AudioPluginInstance* createInstance (const juce::File& file,
                                                juce::String& outName,
                                                juce::String& outError);
+
+    // Attach/detach this chain as an AudioProcessorParameter::Listener to
+    // every parameter of a hosted plugin, so parameter edits arm the
+    // debounced persist even when the plugin doesn't notify
+    // AudioProcessorListener (see parameterValueChanged).
+    void attachParameterListeners (juce::AudioProcessor& plugin);
+    void detachParameterListeners (juce::AudioProcessor& plugin);
 
     // Queue the slots of a saved/preset state as PendingSlots, skipping
     // blocklisted and same-chain-duplicate files. Shared by setChainState
