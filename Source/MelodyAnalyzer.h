@@ -46,7 +46,13 @@ public:
         bool  detectKey     = true;
     };
 
+    // GCC/Clang reject an in-class default argument of `{}` for this nested
+    // aggregate (its default member initializers aren't usable until the
+    // enclosing class is complete), so the default is an overload instead.
+    static Result analyze (const juce::AudioBuffer<float>& audio,
+                           double sampleRate);
+
     static Result analyze (const juce::AudioBuffer<float>& audio,
                            double sampleRate,
-                           const Settings& settings = {});
+                           const Settings& settings);
 };

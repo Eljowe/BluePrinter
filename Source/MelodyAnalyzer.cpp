@@ -17,6 +17,12 @@ int medianOf (std::vector<int> values)
 } // namespace
 
 MelodyAnalyzer::Result MelodyAnalyzer::analyze (const juce::AudioBuffer<float>& audio,
+                                                double sampleRate)
+{
+    return analyze (audio, sampleRate, Settings {});
+}
+
+MelodyAnalyzer::Result MelodyAnalyzer::analyze (const juce::AudioBuffer<float>& audio,
                                                 double sampleRate,
                                                 const Settings& settings)
 {
