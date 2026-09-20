@@ -3328,7 +3328,11 @@ void BluePrinterAudioProcessor::flushTagNamePersist()
     {
         // Serialize as a flat JSON object {"red": "name", ...} without
         // any var/DynamicObject wrapping — plain string building, so
-        // nothing reference-counted can dangle.
+        // nothing reference-counted can dangle. `JSON::escapeString`
+        // only escapes the characters; the double quotes around each
+        // key/value are ours, because JSONParser requires quoted
+        // property names (an unquoted key makes the whole blob fail to
+        // parse and silently drops every tag name on the next launch).
         juce::String json = "{";
         bool first = true;
         for (const auto& entry : tagNames)
@@ -3336,9 +3340,11 @@ void BluePrinterAudioProcessor::flushTagNamePersist()
             if (! first)
                 json += ",";
             first = false;
+            json += "\"";
             json += juce::JSON::escapeString (entry.first);
-            json += ":";
+            json += "\":\"";
             json += juce::JSON::escapeString (entry.second);
+            json += "\"";
         }
         json += "}";
 
