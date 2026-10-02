@@ -26,8 +26,10 @@ public:
     // number of clicks per beat (0/1 = beats only, 2 = eighths, 3 = triplets,
     // 4 = sixteenths); `accentMask` selects which beats of the bar carry the
     // accent voice, bit (beat index mod beatsPerBar).
+    // newGain is the monitor-only master amplitude for every click voice.
     void setContext (double newSampleRate, double newBpm, int newBeatsPerBar, int newBeatUnit = 4,
-                     int newSubdivision = 0, uint16_t newAccentMask = 0x0001);
+                     int newSubdivision = 0, uint16_t newAccentMask = 0x0001,
+                     float newGain = 1.0f);
 
     // Adds the clicks in [startPos, startPos + numSamples) into `buffer`.
     // `tick` / `accent` / `sub` are the pre-rendered click waveforms (any may
@@ -72,4 +74,5 @@ private:
     int    beatUnit    = 4;
     int    subdivision = 0;
     uint16_t accentMask = 0x0001;
+    float gain = 1.0f; // Scales all voices and ringing tails, not the destination mix.
 };

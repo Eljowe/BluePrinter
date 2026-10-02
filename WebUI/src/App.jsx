@@ -85,11 +85,12 @@ function readInitialTransport() {
     metronomeEnabled: true, bpm: 120, countInBeats: 4, loopLevel: 0, overdubLevel: 0, dryLevel: 0, clickDuringCapture: true,
     timeSignatureNumerator: 4, timeSignatureDenominator: 4,
     clickPitch: 1000, clickAccentPitch: 1500, clickDecay: 90, clickVolume: 0.35, clickAccentVolume: 0.5, clickNoise: 0.1,
-    clickSubdivision: 0, clickAccents: [],
+    clickLevel: 0, clickSubdivision: 0, clickAccents: [],
     midiClockEnabled: false, midiClockOnRecord: false, midiOutputDevice: "", midiOutputDeviceList: [],
     tunerOpen: false, tunerMonitorMute: false, tunerFrequency: 0, tunerConfidence: 0, tunerReferencePitch: 440, tunerNote: "", tunerCents: 0,
      preRollActive: false, transportPosition: 0,
      takePending: false, takeLength: 0, takePlaying: false, takePosition: 0, takePeaks: [], takes: [], selectedTakeId: -1,
+     takeTrimStart: 0, takeTrimEnd: 0, takeUndoAvailable: false,
      melodyAnalysing: false, melodyAnalysed: false, melodyPlaying: false, melodyPlayingSource: "", melodyPlayingId: -1, melodyPosition: 0, melodyLength: 0, melodyKey: "", melodyNotes: [],
      looperRecording: false, looperPreRoll: false, looperPlaying: false, looperLooping: true, looperOverdub: false, loopPlaybackReverse: false, loopPlaybackHalfSpeed: false, captureStemsEnabled: false, stemsAvailable: false, stemSource: "", looperCountInBeats: 4, looperCropStartBeats: 0, looperCropEndBeats: 0, audioLoopStart: 0, audioLoopPosition: 0, audioLoopLength: 0, audioLoopPeaks: [], chainLevels: [], maxRecordSamples: 0, loopUndoAvailable: false, loopRedoAvailable: false, looperSourceName: "",
   };
@@ -129,6 +130,7 @@ function readInitialTransport() {
     dryLevel: Number(raw.dryLevel ?? 0),
     clickDuringCapture: raw.clickDuringCapture !== false,
     clickPitch: Number(raw.clickPitch ?? 1000),
+    clickLevel: Number(raw.clickLevel ?? 0),
     clickAccentPitch: Number(raw.clickAccentPitch ?? 1500),
     clickDecay: Number(raw.clickDecay ?? 90),
     clickVolume: Number(raw.clickVolume ?? 0.35),
@@ -144,6 +146,9 @@ function readInitialTransport() {
      transportPosition: Number(raw.transportPosition ?? 0),
      takePending: Boolean(raw.takePending),
      takeLength: Number(raw.takeLength ?? 0),
+     takeTrimStart: Number(raw.takeTrimStart ?? 0),
+     takeTrimEnd: Number(raw.takeTrimEnd ?? raw.takeLength ?? 0),
+     takeUndoAvailable: Boolean(raw.takeUndoAvailable),
      takePlaying: Boolean(raw.takePlaying),
      takePosition: Number(raw.takePosition ?? 0),
      takePeaks: Array.isArray(raw.takePeaks) ? raw.takePeaks : [],
@@ -211,21 +216,29 @@ export default function App() {
       return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable;
     };
     const isControl = (el) => Boolean(el && el.closest
-      && el.closest("button, a, [role='button'], [role='tab'], [role='switch']"));
+      && el.closest("button, a, [role='button'], [role='tab'], [role='switch'], [role='slider']"));
 
     const onKeyDown = (e) => {
       if (e.defaultPrevented) return;
 
       const editable = isEditable(e.target) || isEditable(document.activeElement);
 
-      // Loop layer undo/redo (0030), Loop tab only: Ctrl/Cmd+Z, Ctrl+Shift+Z
-      // or Ctrl+Y. Skipped while a text field is focused so native undo works.
+      const capturing = transport.recording || transport.preRollActive
+        || transport.looperRecording || transport.looperPreRoll;
+
+      // Keep native text undo; take overdubs have undo only, loops also redo.
       if (!editable && (e.ctrlKey || e.metaKey) && !e.altKey
           && (e.key === "z" || e.key === "Z" || e.key === "y" || e.key === "Y")) {
-        if (recordingMode !== "loop") return;
-        e.preventDefault();
         const redo = e.shiftKey || e.key === "y" || e.key === "Y";
-        emit(redo ? FRONTEND_EVENTS.loopRedo : FRONTEND_EVENTS.loopUndo);
+        if (recordingMode === "loop") {
+          e.preventDefault();
+          emit(redo ? FRONTEND_EVENTS.loopRedo : FRONTEND_EVENTS.loopUndo);
+        } else if (!redo) {
+          e.preventDefault();
+          if (transport.takeUndoAvailable && !capturing && !transport.takePlaying
+              && !transport.melodyPlaying && !transport.looperPlaying
+              && Number(transport.playingSnippetId ?? -1) < 0) emit(FRONTEND_EVENTS.takeUndo);
+        }
         return;
       }
 
@@ -248,7 +261,7 @@ export default function App() {
 
       if (e.key === "Enter") {
         if (isControl(document.activeElement)) return;
-        if (recordingMode === "take" && transport.takePending) {
+        if (recordingMode === "take" && transport.takePending && !capturing && !transport.takePlaying) {
           e.preventDefault();
           emit(FRONTEND_EVENTS.saveTake, { id: transport.selectedTakeId });
         }
@@ -258,9 +271,8 @@ export default function App() {
       // Delete the selected take without confirmation (deliberate, 0037).
       if (e.key === "Delete" || e.key === "Backspace") {
         if (isControl(document.activeElement)) return;
-        const capturing = transport.recording || transport.preRollActive;
         if (recordingMode === "take" && transport.takePending
-            && transport.selectedTakeId >= 0 && !capturing) {
+            && transport.selectedTakeId >= 0 && !capturing && !transport.takePlaying) {
           e.preventDefault();
           emit(FRONTEND_EVENTS.discardTake, { id: transport.selectedTakeId });
         }
@@ -276,7 +288,7 @@ export default function App() {
 
       if (e.key === "Escape") {
         if (Number(transport.playingSnippetId ?? -1) >= 0) emit(FRONTEND_EVENTS.stopPlayback);
-        if (transport.takePlaying) emit(FRONTEND_EVENTS.setTakePlayback, { enabled: false });
+        if (transport.takePlaying && !capturing) emit(FRONTEND_EVENTS.setTakePlayback, { enabled: false });
       }
     };
 
@@ -288,8 +300,11 @@ export default function App() {
     transport.preRollActive,
     transport.looperRecording,
     transport.looperPreRoll,
+    transport.looperPlaying,
     transport.takePending,
     transport.takePlaying,
+    transport.takeUndoAvailable,
+    transport.melodyPlaying,
     transport.selectedTakeId,
     transport.playingSnippetId,
   ]);
@@ -405,6 +420,7 @@ export default function App() {
         overdubLevel:     payload.overdubLevel !== undefined     ? Number(payload.overdubLevel)     : prev.overdubLevel,
         clickDuringCapture: payload.clickDuringCapture !== undefined ? Boolean(payload.clickDuringCapture) : prev.clickDuringCapture,
         clickPitch:        payload.clickPitch        !== undefined ? Number(payload.clickPitch)        : prev.clickPitch,
+        clickLevel:        payload.clickLevel        !== undefined ? Number(payload.clickLevel)        : prev.clickLevel,
         clickAccentPitch:  payload.clickAccentPitch  !== undefined ? Number(payload.clickAccentPitch)  : prev.clickAccentPitch,
         clickDecay:        payload.clickDecay        !== undefined ? Number(payload.clickDecay)        : prev.clickDecay,
         clickVolume:       payload.clickVolume       !== undefined ? Number(payload.clickVolume)       : prev.clickVolume,
@@ -420,6 +436,9 @@ export default function App() {
          transportPosition: Number(payload.transportPosition ?? 0),
          takePending: payload.takePending !== undefined ? Boolean(payload.takePending) : prev.takePending,
          takeLength: payload.takeLength !== undefined ? Number(payload.takeLength) : prev.takeLength,
+         takeTrimStart: payload.takeTrimStart !== undefined ? Number(payload.takeTrimStart) : prev.takeTrimStart,
+         takeTrimEnd: payload.takeTrimEnd !== undefined ? Number(payload.takeTrimEnd) : prev.takeTrimEnd,
+         takeUndoAvailable: payload.takeUndoAvailable !== undefined ? Boolean(payload.takeUndoAvailable) : prev.takeUndoAvailable,
          takePlaying: payload.takePlaying !== undefined ? Boolean(payload.takePlaying) : prev.takePlaying,
          takePosition: Number(payload.takePosition ?? prev.takePosition ?? 0),
          takePeaks: Array.isArray(payload.takePeaks) ? payload.takePeaks : (prev.takePeaks ?? []),
@@ -660,6 +679,11 @@ export default function App() {
     emit(FRONTEND_EVENTS.setClickDuringCapture, { enabled });
   };
 
+  const handleClickLevelChange = (next) => {
+    setTransport((prev) => ({ ...prev, clickLevel: next }));
+    emit(FRONTEND_EVENTS.setClickLevel, { level: next });
+  };
+
   const handleLooperOverdubChange = (enabled) => {
     setTransport((prev) => ({ ...prev, looperOverdub: enabled }));
     emit(FRONTEND_EVENTS.setLooperOverdub, { enabled });
@@ -813,10 +837,14 @@ export default function App() {
             <summary title="Keyboard shortcuts">Keyboard</summary>
             <dl className="shortcut-list">
               <div><dt>Space</dt><dd>Start / stop capture (Take or Loop tab)</dd></div>
-              <div><dt>Enter</dt><dd>Save the selected take</dd></div>
+              <div><dt>Enter</dt><dd>Save the selected take's trimmed region</dd></div>
               <div><dt>Delete</dt><dd>Delete the selected take (no confirmation)</dd></div>
               <div><dt>T</dt><dd>Tap tempo</dd></div>
               <div><dt>Esc</dt><dd>Stop playback</dd></div>
+              <div><dt>Ctrl/Cmd+Z</dt><dd>Undo overdub (active Take / Loop tab, idle)</dd></div>
+              <div><dt>Ctrl/Cmd+Shift+Z / Ctrl+Y</dt><dd>Redo loop overdub</dd></div>
+              <div><dt>Arrows / Page Up / Down</dt><dd>Seek focused take waveform or adjust trim handle</dd></div>
+              <div><dt>Home / End</dt><dd>Move focused waveform / trim handle to its limits</dd></div>
             </dl>
           </details>
         </div>
@@ -887,6 +915,8 @@ export default function App() {
             <SyncControls
               metronomeEnabled={transport.metronomeEnabled !== false}
               onMetronomeChange={handleMetronomeChange}
+              clickLevel={transport.clickLevel}
+              onClickLevelChange={handleClickLevelChange}
               clickDuringCapture={transport.clickDuringCapture !== false}
               onClickDuringCaptureChange={handleClickDuringCaptureChange}
               clickParams={transport}

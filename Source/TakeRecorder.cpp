@@ -1,7 +1,9 @@
 #include "TakeRecorder.h"
 
 #include "CaptureWrite.h"
+#include "CaptureCopy.h"
 #include "LoopPlayback.h"
+#include <algorithm>
 
 namespace
 {
@@ -41,6 +43,16 @@ std::shared_ptr<juce::AudioBuffer<float>> TakeRecorder::getSelectedTakeAudio() c
     if (selectedIndex < 0 || selectedIndex >= static_cast<int> (takes.size()))
         return nullptr;
     return takes[static_cast<size_t> (selectedIndex)].audio;
+}
+
+std::shared_ptr<juce::AudioBuffer<float>> TakeRecorder::getSelectedTrimmedAudio() const
+{
+    auto audio = getSelectedTakeAudio();
+    if (audio == nullptr)
+        return nullptr;
+    if (getTrimStart() == 0 && getTrimEnd() == audio->getNumSamples())
+        return audio;
+    return CaptureCopy::copyRegion (*audio, getTrimStart(), getTrimEnd() - getTrimStart());
 }
 
 //==============================================================================
@@ -120,35 +132,40 @@ void TakeRecorder::write (juce::AudioBuffer<float>& buffer, int maxSamples,
 
 bool TakeRecorder::renderReview (juce::AudioBuffer<float>& dest, int numSamples)
 {
+    const AudioRead reader (*this);
+    if (! reader.allowed)
+        return false;
     if (! reviewPlaying.load (std::memory_order_acquire))
         return false;
 
     const auto audio = selectedAudio;
-    const auto length = selectedLength.load (std::memory_order_acquire);
-    auto readPos = static_cast<int> (reviewPos.load (std::memory_order_acquire));
-
-    if (audio == nullptr || length <= 0 || readPos >= length)
+    const auto start = getTrimStart();
+    const auto end = getTrimEnd();
+    if (audio == nullptr || end <= start)
     {
         stopReview();
         return false;
     }
 
+    const auto seek = pendingReviewSeek.exchange (-1, std::memory_order_acq_rel);
+    auto readPos = static_cast<int> (juce::jlimit (start, end - 1,
+        seek >= 0 ? seek : reviewPos.load (std::memory_order_acquire)));
+
     const int channels = juce::jmin (dest.getNumChannels(), audio->getNumChannels());
-    const int toCopy   = juce::jmin (numSamples, static_cast<int> (length - readPos));
+    const int toCopy   = juce::jmin (numSamples, static_cast<int> (end - readPos));
+
+    // Review replaces the monitor mix, including unmapped channels and the
+    // remainder of a block that reaches the trim end.
+    dest.clear (0, numSamples);
 
     for (int ch = 0; ch < channels; ++ch)
         dest.copyFrom (ch, 0, *audio, ch, readPos, toCopy);
 
-    // Fill the rest of the block with silence if playback ends mid-block.
-    if (toCopy < numSamples)
-        for (int ch = 0; ch < dest.getNumChannels(); ++ch)
-            dest.clear (ch, toCopy, numSamples - toCopy);
-
     readPos += toCopy;
     reviewPos.store (readPos, std::memory_order_release);
 
-    if (readPos >= length)
-        stopReview();
+    if (readPos >= end)
+        reviewPlaying.store (false, std::memory_order_release);
 
     return true;
 }
@@ -156,17 +173,21 @@ bool TakeRecorder::renderReview (juce::AudioBuffer<float>& dest, int numSamples)
 void TakeRecorder::renderOverdubMonitor (juce::AudioBuffer<float>& dest, int numSamples,
                                          int declickSamples)
 {
+    const AudioRead reader (*this);
+    if (! reader.allowed)
+        return;
     if (! overdubCapture.load (std::memory_order_acquire))
         return;
 
     const auto audio = selectedAudio;
-    const auto takeLen = selectedLength.load (std::memory_order_acquire);
+    const auto takeStart = getTrimStart();
+    const auto takeLen = getTrimEnd() - takeStart;
     if (audio == nullptr || takeLen <= 0)
         return;
 
     const int declick = juce::jmin (declickSamples, static_cast<int> (takeLen / 2));
     const auto position = LoopPlayback::render (
-        dest, *audio, 0, takeLen,
+        dest, *audio, takeStart, takeLen,
         overdubPlayPos.load (std::memory_order_acquire),
         true, 1.0f, declick);
 
@@ -195,11 +216,18 @@ size_t TakeRecorder::totalBytes() const
 
 void TakeRecorder::refreshSelectedAtomics()
 {
+    audioChanging.store (true);
+    while (audioReaders.load() != 0)
+        juce::Thread::yield();
+
     if (selectedIndex < 0 || selectedIndex >= static_cast<int> (takes.size()))
     {
         selectedId.store (-1, std::memory_order_release);
         selectedLength.store (0, std::memory_order_release);
         selectedAudio.reset();
+        selectedTrimStart.store (0, std::memory_order_release);
+        selectedTrimEnd.store (0, std::memory_order_release);
+        audioChanging.store (false);
         return;
     }
 
@@ -207,6 +235,11 @@ void TakeRecorder::refreshSelectedAtomics()
     selectedId.store (t.id, std::memory_order_release);
     selectedLength.store (t.length, std::memory_order_release);
     selectedAudio = t.audio;
+    selectedTrimStart.store (t.trimStart, std::memory_order_release);
+    selectedTrimEnd.store (t.trimEnd, std::memory_order_release);
+    reviewPos.store (t.trimStart, std::memory_order_release);
+    pendingReviewSeek.store (-1, std::memory_order_release);
+    audioChanging.store (false);
 }
 
 void TakeRecorder::addTake (std::shared_ptr<juce::AudioBuffer<float>> audio,
@@ -215,9 +248,14 @@ void TakeRecorder::addTake (std::shared_ptr<juce::AudioBuffer<float>> audio,
     if (isMutatingBlocked())
         return;
 
+    if (audio == nullptr || length <= 0 || length > audio->getNumSamples())
+        return;
+    stopReview();
+
     Take take;
     take.id = nextTakeId++;
     take.length = length;
+    take.trimEnd = length;
     take.peaks = std::move (peaks);
     take.audio = std::move (audio);
     takes.push_back (std::move (take));
@@ -233,6 +271,7 @@ void TakeRecorder::addTake (std::shared_ptr<juce::AudioBuffer<float>> audio,
     // Auto-select the new take.
     selectedIndex = static_cast<int> (takes.size()) - 1;
     refreshSelectedAtomics();
+    pruneUndoHistory();
 }
 
 void TakeRecorder::replaceSelectedTake (std::shared_ptr<juce::AudioBuffer<float>> audio,
@@ -246,10 +285,20 @@ void TakeRecorder::replaceSelectedTake (std::shared_ptr<juce::AudioBuffer<float>
         return;
 
     auto& t = takes[static_cast<size_t> (selectedIndex)];
+    if (audio == nullptr || length <= 0 || length > audio->getNumSamples())
+        return;
+    stopReview();
+    const auto snapshotBytes = static_cast<size_t> (t.audio->getNumSamples())
+                             * static_cast<size_t> (t.audio->getNumChannels()) * sizeof (float);
+    if (snapshotBytes <= maxUndoBytes)
+        undoHistory.push_back ({ t.id, t.length, std::move (t.peaks), std::move (t.audio) });
     t.audio = std::move (audio);
     t.length = length;
     t.peaks = std::move (peaks);
+    t.trimStart = juce::jlimit<int64_t> (0, length - 1, t.trimStart);
+    t.trimEnd = juce::jlimit (t.trimStart + 1, length, t.trimEnd);
     refreshSelectedAtomics();
+    pruneUndoHistory();
 }
 
 void TakeRecorder::selectTake (int id)
@@ -269,6 +318,73 @@ void TakeRecorder::selectTake (int id)
         refreshSelectedAtomics();
         return;
     }
+}
+
+void TakeRecorder::pruneUndoHistory()
+{
+    undoHistory.erase (std::remove_if (undoHistory.begin(), undoHistory.end(), [this](const UndoSnapshot& s)
+    {
+        return std::none_of (takes.begin(), takes.end(), [&s](const Take& t) { return t.id == s.takeId; });
+    }), undoHistory.end());
+
+    size_t bytes = 0;
+    for (const auto& snapshot : undoHistory)
+        bytes += static_cast<size_t> (snapshot.audio->getNumSamples())
+               * static_cast<size_t> (snapshot.audio->getNumChannels()) * sizeof (float);
+    while (! undoHistory.empty() && (undoHistory.size() > maxUndoLayers || bytes > maxUndoBytes))
+    {
+        const auto& oldest = undoHistory.front();
+        bytes -= static_cast<size_t> (oldest.audio->getNumSamples())
+               * static_cast<size_t> (oldest.audio->getNumChannels()) * sizeof (float);
+        undoHistory.erase (undoHistory.begin());
+    }
+}
+
+bool TakeRecorder::canUndoOverdub() const
+{
+    return std::any_of (undoHistory.begin(), undoHistory.end(), [this](const UndoSnapshot& s)
+    {
+        return s.takeId == getSelectedTakeId();
+    });
+}
+
+bool TakeRecorder::undoOverdub()
+{
+    if (isMutatingBlocked() || isReviewPlaying() || ! hasSelectedTake())
+        return false;
+    for (size_t i = undoHistory.size(); i > 0; --i)
+    {
+        auto& snapshot = undoHistory[i - 1];
+        if (snapshot.takeId != getSelectedTakeId())
+            continue;
+        auto& t = takes[static_cast<size_t> (selectedIndex)];
+        stopReview();
+        t.audio = std::move (snapshot.audio);
+        t.peaks = std::move (snapshot.peaks);
+        t.length = snapshot.length;
+        t.trimStart = juce::jlimit<int64_t> (0, t.length - 1, t.trimStart);
+        t.trimEnd = juce::jlimit (t.trimStart + 1, t.length, t.trimEnd);
+        undoHistory.erase (undoHistory.begin() + static_cast<std::ptrdiff_t> (i - 1));
+        refreshSelectedAtomics();
+        return true;
+    }
+    return false;
+}
+
+bool TakeRecorder::setTrim (int64_t start, int64_t end)
+{
+    if (isMutatingBlocked() || ! hasSelectedTake())
+        return false;
+    auto& t = takes[static_cast<size_t> (selectedIndex)];
+    start = juce::jlimit<int64_t> (0, t.length - 1, start);
+    end = juce::jlimit (start + 1, t.length, end);
+    if (t.trimStart == start && t.trimEnd == end)
+        return false;
+    stopReview();
+    t.trimStart = start;
+    t.trimEnd = end;
+    refreshSelectedAtomics();
+    return true;
 }
 
 void TakeRecorder::deleteTake (int id)
@@ -303,6 +419,7 @@ void TakeRecorder::deleteTake (int id)
     }
 
     refreshSelectedAtomics();
+    pruneUndoHistory();
 }
 
 void TakeRecorder::clearTakes()
@@ -312,6 +429,7 @@ void TakeRecorder::clearTakes()
 
     stopReview();
     takes.clear();
+    undoHistory.clear();
     selectedIndex = -1;
     droppedCount = 0;
     overdubPending.store (false, std::memory_order_release);
@@ -339,14 +457,28 @@ bool TakeRecorder::canStartReview() const
         && ! overdubCapture.load (std::memory_order_acquire);
 }
 
-void TakeRecorder::startReview()
+void TakeRecorder::startReview (int64_t startSample)
 {
-    reviewPos.store (0, std::memory_order_release);
+    if (! canStartReview())
+        return;
+    stopReview();
+    refreshSelectedAtomics();
+    reviewPos.store (juce::jlimit (getTrimStart(), getTrimEnd() - 1,
+                                 startSample < 0 ? getTrimStart() : startSample), std::memory_order_release);
+    pendingReviewSeek.store (-1, std::memory_order_release);
     reviewPlaying.store (true, std::memory_order_release);
 }
 
 void TakeRecorder::stopReview()
 {
     reviewPlaying.store (false, std::memory_order_release);
-    reviewPos.store (0, std::memory_order_release);
+    pendingReviewSeek.store (-1, std::memory_order_release);
+    reviewPos.store (getTrimStart(), std::memory_order_release);
+}
+
+void TakeRecorder::seekReview (int64_t position)
+{
+    if (canStartReview() && isReviewPlaying())
+        pendingReviewSeek.store (juce::jlimit (getTrimStart(), getTrimEnd() - 1, position),
+                                 std::memory_order_release);
 }

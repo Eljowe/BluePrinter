@@ -59,6 +59,9 @@ public:
     static constexpr const char* frontendStartRecordingEvent   = "frontendStartRecording";
     static constexpr const char* frontendStopRecordingEvent    = "frontendStopRecording";
     static constexpr const char* frontendSetTakePlaybackEvent  = "frontendSetTakePlayback";
+    static constexpr const char* frontendSetTakePlaybackPositionEvent = "frontendSetTakePlaybackPosition";
+    static constexpr const char* frontendSetTakeTrimEvent = "frontendSetTakeTrim";
+    static constexpr const char* frontendTakeUndoEvent = "frontendTakeUndo";
     static constexpr const char* frontendSetTakeOverdubEvent   = "frontendSetTakeOverdub";
     // { id } — save/delete a specific take (falls back to the selected take).
     static constexpr const char* frontendSaveTakeEvent         = "frontendSaveTake";
@@ -152,6 +155,7 @@ public:
     // "output" | "loop" | "all").
     static constexpr const char* frontendResetClipEvent         = "frontendResetClip";
     static constexpr const char* frontendSetClickParamsEvent   = "frontendSetClickParams";
+    static constexpr const char* frontendSetClickLevelEvent    = "frontendSetClickLevel";
     // Click rhythm (0050): { subdivision } (0/2/3/4) and { accents: [bool…] }
     // (one per beat of the current meter) drive the metronome scheduling.
     static constexpr const char* frontendSetClickSubdivisionEvent = "frontendSetClickSubdivision";

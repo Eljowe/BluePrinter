@@ -142,7 +142,13 @@ public:
     const std::vector<float>& getTakePeaks() const { return takeRecorder.getSelectedTakePeaks(); }
     int     getSelectedTakeId() const { return takeRecorder.getSelectedTakeId(); }
     std::vector<TakeRecorder::TakeView> getTakeList() const { return takeRecorder.getTakeList(); }
-    void setTakePlayback (bool enabled);
+    int64_t getTakeTrimStart() const { return takeRecorder.getTrimStart(); }
+    int64_t getTakeTrimEnd() const { return takeRecorder.getTrimEnd(); }
+    bool isTakeUndoAvailable() const { return takeRecorder.canUndoOverdub(); }
+    void setTakePlayback (bool enabled, int64_t startSample = -1);
+    void setTakePlaybackPosition (int64_t position);
+    void setTakeTrim (int64_t startSample, int64_t endSample);
+    void undoTakeOverdub();
     void savePendingTake();
     void discardPendingTake();
     // Id-targeted actions for the per-take UI (id <= 0 = the selected take).
@@ -376,6 +382,11 @@ public:
     // scales the layer before the sum.
     float getOverdubLevel() const { return overdubLevel.load (std::memory_order_acquire); }
     void setOverdubLevel (float levelDb);
+
+    // Master click level (dB, -60..0; minimum mutes). Monitor-only,
+    // independent of the tick/accent balance and persisted in host state.
+    float getClickLevel() const { return clickLevel.load (std::memory_order_acquire); }
+    void setClickLevel (float levelDb);
 
     // Click sound tuning (all message-thread). Stored, re-synthesized
     // immediately, and notified via transportChanged. Persisted in host
@@ -762,6 +773,8 @@ private:
     std::atomic<bool> melodyAnalysing     { false };
     std::atomic<int>  melodyAnalysingTakeId { -1 };
     std::map<int, MelodyAnalyzer::Result> takeMelodies;
+    uint64_t takeMelodyGeneration = 0; // Message-thread request/version guard.
+    void invalidateTakeMelody (int id);
     void refreshMelodyPlayer();
     void stopMelodyPlayback();
 
@@ -886,6 +899,7 @@ private:
     // Click sound parameters (message-thread only). Persisted in host
     // state like the other metronome settings. Tuned via the "Click
     // sound" popup in the transport.
+    std::atomic<float> clickLevel { 0.0f };
     float clickPitch        = 1000.0f;  // normal tick frequency (Hz)
     float clickAccentPitch  = 1500.0f;  // bar-first-beat frequency (Hz)
     float clickDecay        = 90.0f;    // exponential decay rate (/s)

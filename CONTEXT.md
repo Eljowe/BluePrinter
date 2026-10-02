@@ -23,8 +23,17 @@ _Avoid_: Pending take (removed — the stack replaces the single slot), take buf
 Layering a new pass over the **selected** take instead of adding a new one (the
 Take review's Dub toggle, session-only). The selected take is staged into the
 record buffer, the new input is captured after it and wrap-mixed into it on stop,
-so playback and the saved WAV contain every layer.
+so playback and the saved WAV contain every layer. With a trim, only the kept
+region is looped and mixed; audio outside it stays intact. Completed overdubs
+can be undone per take (10 recent versions / 64 MB shared history, session-only).
 _Avoid_: Punch-in, comping, takes-stacking
+
+**Take trim**:
+A non-destructive kept window of the full take, expressed in absolute source
+samples `[start, end)`. Review playback and overdub follow that window; saving
+materialises only it as a snippet (and clips/shifts cached melody notes). The
+full waveform remains available until save/delete; Reset trim restores it.
+_Avoid_: Crop (reserved for the beat-based loop controls), destructive edit
 
 **Loop**:
 A bar-aligned, repeatable capture of the recording mix, optionally cropped to

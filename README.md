@@ -338,6 +338,20 @@ through `withInitialisationData("parameters" | "snippets" | "transport", ...)`.
   **Save to library** (adds a snippet and writes WAV + sidecar when a library
   folder is set; the saved take leaves the stack) or **Delete**. A new take or
   loop capture no longer invalidates the stack.
+- **Take review**: click the waveform to audition from that point, drag to
+  scrub, or focus it and use arrows (0.1 s), Page Up/Down (1 s), Home/End.
+  Drag the two trim handles (also keyboard-operable) to keep a region; the
+  shaded audio remains in the take, and **Reset trim** restores the full source.
+  Audition and take overdubbing follow the kept region. **Save selected** writes
+  only that region, with any cached melody notes clipped and shifted to match;
+  take stem exports use the same trim. Melody analysis/audition still uses the
+  full source until save.
+- **Undo overdub** (or Ctrl/Cmd+Z on the Take tab) restores the selected take's
+  previous completed overdub version without changing its current trim. Undo is
+  available while no capture or playback is active. History is
+  session-only, capped at the 10 most recent versions / 64 MB across all takes;
+  oldest versions are dropped first. A single version above 64 MB cannot be
+  retained for undo. Saving, deleting or evicting a take releases its history.
 - Playback stores the snippet pointer as a `shared_ptr` on the audio
   thread, so deleting a snippet from the library can't dangle an
   in-flight playback.
@@ -360,6 +374,11 @@ produce, so the loop sounds exactly like what you heard while recording:
   field, and the **Clock** / **Clock: on record** MIDI clock toggles — plus
   the global **Click sound** tuning (pitch/snap/volume) in the sync strip
   beside the recording tabs, which the take and the looper share.
+- The **Click** volume knob beside the click toggle is a monitor-only master
+  level (-60..0 dB, default 0 dB; -60 dB mutes). It scales count-ins, ticks,
+  accents and subdivisions together without changing their balance, captured
+  audio, stems or MIDI clock. Its level is saved with the metronome settings;
+  resetting **Click sound** leaves the master level unchanged.
 - On stop, the captured length is trimmed to the nearest whole bar in the
   current **meter** (beat-length fallback). The **Length** selector picks
   **Free** (stop when you stop) or a fixed **1 / 2 / 4 / 8 bars**: in fixed

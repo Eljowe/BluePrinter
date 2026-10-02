@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { IconMetronome, IconX } from "./icons";
 import { emit, FRONTEND_EVENTS } from "../bridge";
+import { Knob } from "./controls";
 
 const CLICK_DEFAULTS = {
   pitch: 1000,
@@ -156,6 +157,8 @@ function ClickSoundPopover({ transport, beats, accents, onAccentsChange, onClose
 export function SyncControls({
   metronomeEnabled,
   onMetronomeChange,
+  clickLevel,
+  onClickLevelChange,
   clickDuringCapture,
   onClickDuringCaptureChange,
   clickParams,
@@ -236,6 +239,19 @@ export function SyncControls({
           <IconMetronome size={13} />
           Click
         </button>
+
+        <Knob
+          label="Click"
+          min={-60}
+          max={0}
+          value={Number(clickLevel ?? 0)}
+          onChange={onClickLevelChange}
+          step="0.5"
+          decimals={1}
+          unit="dB"
+          className="sync-click-knob"
+          title="Master click volume for count-ins, beats, accents and subdivisions. -60 dB mutes; recorded audio is unchanged."
+        />
 
         <button
           type="button"

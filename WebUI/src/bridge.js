@@ -11,9 +11,12 @@ export const FRONTEND_EVENTS = {
   setParameter: "frontendSetParameter",
   startRecording: "frontendStartRecording",
   stopRecording: "frontendStopRecording",
-  // Take review: { enabled } toggles playback of the selected take; each
-  // take can be selected, saved or deleted individually (0037).
+  // Take review: { enabled, startSample? } plays the selected take from an
+  // absolute source sample (absent = trim start).
   setTakePlayback: "frontendSetTakePlayback",
+  setTakePlaybackPosition: "frontendSetTakePlaybackPosition", // { position }
+  setTakeTrim: "frontendSetTakeTrim", // { startSample, endSample }, end exclusive
+  takeUndo: "frontendTakeUndo", // Undo the last completed take overdub.
   // Take-recorder overdub: { enabled } layers the next record over the
   // selected take instead of adding a new one (session-only).
   setTakeOverdub: "frontendSetTakeOverdub",
@@ -122,6 +125,8 @@ export const FRONTEND_EVENTS = {
   // Click sound tuning popup: { pitch, accentPitch, decay, volume,
   // accentVolume, noise } — all values sent on every change.
   setClickParams: "frontendSetClickParams",
+  // Master click level in dB (-60..0; minimum mutes), monitor-only. { level }
+  setClickLevel: "frontendSetClickLevel",
   // Click rhythm (0050): { subdivision } (0 = off, 2/3/4 per beat) and
   // { accents: [bool…] } (one per beat of the current meter).
   setClickSubdivision: "frontendSetClickSubdivision",

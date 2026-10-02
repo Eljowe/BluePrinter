@@ -23,6 +23,7 @@
 #include "Resampler.h"
 
 #include <algorithm>
+#include <cmath>
 #include <set>
 #include <thread>
 
@@ -1232,7 +1233,9 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                                 meter.beatsPerBar,
                                 meter.beatUnit,
                                 clickSubdivision.load (std::memory_order_acquire),
-                                clickAccentMask.load (std::memory_order_acquire));
+                                clickAccentMask.load (std::memory_order_acquire),
+                                juce::Decibels::decibelsToGain (
+                                    clickLevel.load (std::memory_order_acquire), -60.0f));
 
     // Apply the input trim (the record level). This is the post-DSP
     // signal we want to record and the pass-through signal when nothing
@@ -1809,6 +1812,7 @@ void BluePrinterAudioProcessor::startRecording()
     // A capture started while a melody audition was playing: stop it so the
     // synth can never leak into the take (0054).
     stopMelodyPlayback();
+    takeRecorder.stopReview();
 
     if (recordBuffer == nullptr || maxRecordSamples <= 0)
         return;
@@ -2272,7 +2276,8 @@ bool BluePrinterAudioProcessor::exportStems (const juce::String& source,
                                : juce::String (".wav");
     const auto folder = target.getParentDirectory();
     const auto baseName = target.getFileNameWithoutExtension();
-    const auto length = stemCapture.getLength();
+    const auto start = source == "take" ? takeRecorder.getTrimStart() : 0;
+    const auto length = source == "take" ? takeRecorder.getTrimEnd() - start : stemCapture.getLength();
     const double sampleRate = getSampleRate() > 0.0 ? getSampleRate() : 44100.0;
 
     juce::StringArray usedNames;
@@ -2293,7 +2298,7 @@ bool BluePrinterAudioProcessor::exportStems (const juce::String& source,
             uniqueName = safeName + "-" + juce::String (suffix++);
         usedNames.add (uniqueName);
 
-        auto region = CaptureCopy::copyRegion (stem.buffer, 0, length);
+        auto region = CaptureCopy::copyRegion (stem.buffer, start, length);
         if (region == nullptr || region->getNumSamples() <= 0)
         {
             failures.add (uniqueName + ": no audio");
@@ -3104,6 +3109,17 @@ void BluePrinterAudioProcessor::setOverdubLevel (float levelDb)
     if (overdubLevel.load (std::memory_order_acquire) == clamped)
         return;
     overdubLevel.store (clamped, std::memory_order_release);
+    listeners.call ([](Listener& l) { l.transportChanged(); });
+}
+
+void BluePrinterAudioProcessor::setClickLevel (float levelDb)
+{
+    if (! std::isfinite (levelDb))
+        return;
+    const float clamped = juce::jlimit (-60.0f, 0.0f, levelDb);
+    if (clickLevel.load (std::memory_order_acquire) == clamped)
+        return;
+    clickLevel.store (clamped, std::memory_order_release);
     listeners.call ([](Listener& l) { l.transportChanged(); });
 }
 
@@ -3961,7 +3977,9 @@ void BluePrinterAudioProcessor::finalizeRecordingOnMessageThread()
         const auto layerLength = static_cast<int64_t> (layerEnd) - takeLen;
         if (takeLen > 0 && layerLength > 0)
         {
-            mixOverdubLayer (0, takeLen, takeLen, layerLength, recordMeter);
+            const auto trimStart = takeRecorder.getTrimStart();
+            const auto trimLength = takeRecorder.getTrimEnd() - trimStart;
+            mixOverdubLayer (trimStart, trimLength, takeLen, layerLength, recordMeter);
 
             std::shared_ptr<juce::AudioBuffer<float>> mixed;
             {
@@ -3974,6 +3992,7 @@ void BluePrinterAudioProcessor::finalizeRecordingOnMessageThread()
                 // argument order in an unspecified order).
                 auto peaks = SnippetLibrary::computePeaks (*mixed, 256);
                 takeRecorder.replaceSelectedTake (std::move (mixed), takeLen, std::move (peaks));
+                invalidateTakeMelody (takeRecorder.getSelectedTakeId());
             }
         }
 
@@ -4028,8 +4047,7 @@ void BluePrinterAudioProcessor::discardTake (int id)
         return;
     const int takeId = id > 0 ? id : takeRecorder.getSelectedTakeId();
     takeRecorder.deleteTake (takeId);
-    takeMelodies.erase (takeId);
-    refreshMelodyPlayer();
+    invalidateTakeMelody (takeId);
     if (stemCapture.getSource() == "take")
         stemCapture.clear();
     listeners.call ([](Listener& l) { l.transportChanged(); });
@@ -4052,17 +4070,20 @@ void BluePrinterAudioProcessor::discardAllTakes()
         return;
     takeRecorder.clearTakes();
     takeMelodies.clear();
+    ++takeMelodyGeneration;
+    melodyAnalysingTakeId.store (-1);
+    melodyAnalysing.store (false);
     refreshMelodyPlayer();
     if (stemCapture.getSource() == "take")
         stemCapture.clear();
     listeners.call ([](Listener& l) { l.transportChanged(); });
 }
 
-void BluePrinterAudioProcessor::setTakePlayback (bool enabled)
+void BluePrinterAudioProcessor::setTakePlayback (bool enabled, int64_t startSample)
 {
     if (enabled)
     {
-        if (! takeRecorder.canStartReview())
+        if (! takeRecorder.canStartReview() || looper.isActive() || looper.isOverdubCapture())
             return;
 
         // One reviewer at a time: stop snippet playback and the looper
@@ -4072,13 +4093,47 @@ void BluePrinterAudioProcessor::setTakePlayback (bool enabled)
             setLooperPlaying (false);
 
         stopMelodyPlayback();
-        takeRecorder.startReview();
+        if (takeRecorder.isReviewPlaying())
+            takeRecorder.seekReview (startSample < 0 ? takeRecorder.getTrimStart() : startSample);
+        else
+            takeRecorder.startReview (startSample);
     }
     else
     {
         takeRecorder.stopReview();
     }
 
+    listeners.call ([](Listener& l) { l.transportChanged(); });
+}
+
+void BluePrinterAudioProcessor::setTakePlaybackPosition (int64_t position)
+{
+    if (looper.isActive() || looper.isOverdubCapture())
+        return;
+    takeRecorder.seekReview (position);
+}
+
+void BluePrinterAudioProcessor::setTakeTrim (int64_t startSample, int64_t endSample)
+{
+    if (looper.isActive() || looper.isOverdubCapture())
+        return;
+    if (takeRecorder.setTrim (startSample, endSample))
+    {
+        stopMelodyPlayback();
+        listeners.call ([](Listener& l) { l.transportChanged(); });
+    }
+}
+
+void BluePrinterAudioProcessor::undoTakeOverdub()
+{
+    if (looper.isActive() || looper.isOverdubCapture() || looper.isPlaying()
+        || playbackActive.load (std::memory_order_acquire) || melodyPlayer.isPlaying())
+        return;
+    if (! takeRecorder.undoOverdub())
+        return;
+    invalidateTakeMelody (takeRecorder.getSelectedTakeId());
+    if (stemCapture.getSource() == "take")
+        stemCapture.clear();
     listeners.call ([](Listener& l) { l.transportChanged(); });
 }
 
@@ -4110,12 +4165,13 @@ void BluePrinterAudioProcessor::analyzeTakeMelody (int)
     stopMelodyPlayback();
     melodyAnalysing.store (true, std::memory_order_release);
     melodyAnalysingTakeId.store (takeId, std::memory_order_release);
+    const auto generation = ++takeMelodyGeneration;
     listeners.call ([](Listener& l) { l.transportChanged(); });
 
     // The analysis walks the whole take (YIN per frame), so run it on a
     // worker and post the result back, mirroring detectSnippetKeyAndNotes.
     const double sr = getSampleRate();
-    std::thread ([this, takeId, audio, sr]()
+    std::thread ([this, takeId, audio, sr, generation]()
     {
         MelodyAnalyzer::Result result;
         BluePrinterAudioProcessor::setCrashOp ("analyzing take melody (MelodyAnalyzer)");
@@ -4130,10 +4186,11 @@ void BluePrinterAudioProcessor::analyzeTakeMelody (int)
         }
         BluePrinterAudioProcessor::setCrashOp ("no chain operation in progress");
 
-        juce::MessageManager::callAsync ([this, takeId, result]()
+        juce::MessageManager::callAsync ([this, takeId, generation, result]()
         {
             // A newer analysis (or a different take) superseded this one.
-            if (melodyAnalysingTakeId.load (std::memory_order_acquire) != takeId)
+            if (generation != takeMelodyGeneration
+                || melodyAnalysingTakeId.load (std::memory_order_acquire) != takeId)
                 return;
 
             takeMelodies[takeId] = result;
@@ -4339,6 +4396,18 @@ void BluePrinterAudioProcessor::analyzeSnippetMelody (int id)
     }).detach();
 }
 
+void BluePrinterAudioProcessor::invalidateTakeMelody (int id)
+{
+    takeMelodies.erase (id);
+    if (melodyAnalysingTakeId.load (std::memory_order_acquire) == id)
+    {
+        ++takeMelodyGeneration;
+        melodyAnalysingTakeId.store (-1, std::memory_order_release);
+        melodyAnalysing.store (false, std::memory_order_release);
+    }
+    refreshMelodyPlayer();
+}
+
 void BluePrinterAudioProcessor::refreshMelodyPlayer()
 {
     // Reload the player for the newly selected take and stop any audition
@@ -4358,12 +4427,12 @@ void BluePrinterAudioProcessor::savePendingTake()
         return;
 
     // Don't save mid-capture (the Enter shortcut can fire through an overdub).
-    if (takeRecorder.isRecordingRequested()
+    if (takeRecorder.isActive()
         || takeRecorder.isOverdubCapture())
         return;
 
     const auto id = takeRecorder.getSelectedTakeId();
-    auto audio = takeRecorder.getSelectedTakeAudio();
+    auto audio = takeRecorder.getSelectedTrimmedAudio();
     if (audio == nullptr || audio->getNumSamples() <= 0)
     {
         takeRecorder.deleteTake (id);
@@ -4390,11 +4459,16 @@ void BluePrinterAudioProcessor::savePendingTake()
             std::vector<Snippet::MelodyNote> notes;
             notes.reserve (melodyIt->second.notes.size());
             for (const auto& n : melodyIt->second.notes)
-                notes.push_back ({ n.startSample, n.lengthSamples, n.midi, n.cents });
+            {
+                const auto start = juce::jmax (n.startSample, takeRecorder.getTrimStart());
+                const auto end = juce::jmin (n.startSample + n.lengthSamples, takeRecorder.getTrimEnd());
+                if (end > start)
+                    notes.push_back ({ start - takeRecorder.getTrimStart(), end - start, n.midi, n.cents });
+            }
             snippet->melody = std::move (notes);
         }
     }
-    takeMelodies.erase (id);
+    invalidateTakeMelody (id);
 
     // The saved take leaves the stack — it is a library snippet now.
     takeRecorder.deleteTake (id);
@@ -4484,6 +4558,7 @@ void BluePrinterAudioProcessor::getStateInformation (juce::MemoryBlock& destData
     state.setProperty ("clickDuringCapture", clickDuringCapture.load(), nullptr);
     state.setProperty ("midiDeviceName",   midiClockOutput.getDeviceName(),    nullptr);
     // Click sound tuning.
+    state.setProperty ("clickLevel",        clickLevel.load(), nullptr);
     state.setProperty ("clickPitch",        clickPitch,        nullptr);
     state.setProperty ("clickAccentPitch",  clickAccentPitch,  nullptr);
     state.setProperty ("clickDecay",        clickDecay,        nullptr);
@@ -4554,6 +4629,10 @@ void BluePrinterAudioProcessor::setStateInformation (const void* data, int sizeI
             midiClockOutput.setDeviceName (state.getProperty ("midiDeviceName", juce::String()).toString(), false);
 
             // Click sound tuning (defaults match resynthesizeClicks).
+            const float savedClickLevel = static_cast<float> (state.getProperty ("clickLevel", 0.0f));
+            clickLevel.store (std::isfinite (savedClickLevel)
+                                  ? juce::jlimit (-60.0f, 0.0f, savedClickLevel) : 0.0f,
+                              std::memory_order_release);
             clickPitch        = static_cast<float> (state.getProperty ("clickPitch",        1000.0f));
             clickAccentPitch  = static_cast<float> (state.getProperty ("clickAccentPitch",  1500.0f));
             clickDecay        = static_cast<float> (state.getProperty ("clickDecay",         90.0f));

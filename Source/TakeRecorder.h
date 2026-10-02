@@ -21,9 +21,9 @@
 // thread and never allocate. The stack (add/replace/select/delete/clear) and
 // the review transitions are message-thread only. The audio thread reads the
 // selected take through atomics (id / length / playing / position) and an
-// atomic raw audio pointer; selection changes, deletions and clears stop
-// review playback first, and every take buffer stays alive in `takes` until
-// then. Verified by Tests/test_TakeRecorder.cpp.
+// a shared audio pointer protected by a non-blocking reader guard; selection
+// changes, deletions and clears stop review playback before publication.
+// Verified by Tests/test_TakeRecorder.cpp.
 class TakeRecorder
 {
 public:
@@ -41,6 +41,8 @@ public:
 
     static constexpr int    maxTakes     = 8;
     static constexpr size_t maxTakeBytes = 256u * 1024u * 1024u;
+    static constexpr size_t maxUndoBytes = 64u * 1024u * 1024u;
+    static constexpr size_t maxUndoLayers = 10;
 
     //==========================================================================
     // Queries (safe on any thread unless noted).
@@ -62,12 +64,16 @@ public:
     std::vector<TakeView> getTakeList() const;
     const std::vector<float>& getSelectedTakePeaks() const;
     std::shared_ptr<juce::AudioBuffer<float>> getSelectedTakeAudio() const;
+    std::shared_ptr<juce::AudioBuffer<float>> getSelectedTrimmedAudio() const;
     bool    hasSelectedTake() const { return selectedIndex >= 0; }
 
     int     getSelectedTakeId()     const { return selectedId.load (std::memory_order_acquire); }
     int64_t getSelectedTakeLength() const { return selectedLength.load (std::memory_order_acquire); }
     bool    isReviewPlaying()       const { return reviewPlaying.load (std::memory_order_acquire); }
     int64_t getReviewPos()          const { return reviewPos.load (std::memory_order_acquire); }
+    int64_t getTrimStart()          const { return selectedTrimStart.load (std::memory_order_acquire); }
+    int64_t getTrimEnd()            const { return selectedTrimEnd.load (std::memory_order_acquire); }
+    bool    canUndoOverdub() const; // Message thread.
 
     //==========================================================================
     // Arming (message thread, except beginFresh/beginOverdub which the
@@ -89,7 +95,8 @@ public:
     void    write (juce::AudioBuffer<float>& buffer, int maxSamples,
                    const juce::AudioBuffer<float>& source, int numSamples);
 
-    // Overwrites `dest` with the selected take, one-shot (review playback).
+    // Overwrites `dest` with the kept region, one-shot. Position and queued
+    // seeks use absolute source samples; the trim end is exclusive.
     bool    renderReview (juce::AudioBuffer<float>& dest, int numSamples);
 
     // Adds the selected take (looping) to `dest` while a layer is captured, so
@@ -114,19 +121,23 @@ public:
     // Publish a freshly captured take; auto-selects it and enforces the bounds.
     void    addTake (std::shared_ptr<juce::AudioBuffer<float>> audio,
                      int64_t length, std::vector<float> peaks);
-    // Replace the selected take's audio in place (overdub finalize).
+    // Replace the selected take's audio in place (overdub finalize), retaining
+    // the old version for undo (10 snapshots / 64 MB across the take stack).
     void    replaceSelectedTake (std::shared_ptr<juce::AudioBuffer<float>> audio,
                                  int64_t length, std::vector<float> peaks);
     void    selectTake (int id);
     void    deleteTake (int id);
     void    clearTakes();
+    bool    setTrim (int64_t start, int64_t end);
+    bool    undoOverdub();
     // Takes evicted by the bounds since the last call.
     int     consumeDroppedCount();
 
     //==========================================================================
     // Review playback.
     bool    canStartReview() const;
-    void    startReview();
+    void    startReview (int64_t startSample = -1);
+    void    seekReview (int64_t position);
     void    stopReview();
 
     void    setOverdub (bool enabled) { overdub.store (enabled, std::memory_order_release); }
@@ -141,13 +152,39 @@ private:
         int64_t length = 0;
         std::vector<float> peaks;
         std::shared_ptr<juce::AudioBuffer<float>> audio;
+        int64_t trimStart = 0;
+        int64_t trimEnd = 0;
+    };
+
+    struct UndoSnapshot
+    {
+        int takeId = -1;
+        int64_t length = 0;
+        std::vector<float> peaks;
+        std::shared_ptr<juce::AudioBuffer<float>> audio;
+    };
+
+    // Readers never wait. Publication waits on the message thread before
+    // replacing the selected shared_ptr, avoiding copy-vs-assignment races.
+    struct AudioRead
+    {
+        explicit AudioRead (TakeRecorder& owner) : recorder (owner)
+        {
+            recorder.audioReaders.fetch_add (1);
+            allowed = ! recorder.audioChanging.load();
+        }
+        ~AudioRead() { recorder.audioReaders.fetch_sub (1); }
+        TakeRecorder& recorder;
+        bool allowed;
     };
 
     bool   isMutatingBlocked() const { return isActive() || isOverdubCapture(); }
     size_t totalBytes() const;
     void   refreshSelectedAtomics();
+    void   pruneUndoHistory();
 
     std::vector<Take> takes;
+    std::vector<UndoSnapshot> undoHistory;
     int selectedIndex = -1;   // message thread
     int nextTakeId = 1;       // ids are >= 1 so 0 can mean "the selected take"
     int droppedCount = 0;
@@ -160,16 +197,14 @@ private:
 
     std::atomic<int>     selectedId          { -1 };
     std::atomic<int64_t> selectedLength      { 0 };
-    // The selected take's audio, shared with the `takes` entry that owns it.
-    // The message thread replaces it only while review/overdub playback is
-    // stopped; the audio thread takes a local shared_ptr copy at the top of a
-    // render so the buffer cannot be freed mid-block. This mirrors the
-    // processor's `playbackSnippet` hand-off (a plain shared_ptr, not an
-    // atomic): a narrow copy-vs-assign race is the same deal that hand-off
-    // already accepts, and the "stop first" rule keeps the window tiny.
+    std::atomic<int64_t> selectedTrimStart   { 0 };
+    std::atomic<int64_t> selectedTrimEnd     { 0 };
+    std::atomic<int>     audioReaders        { 0 };
+    std::atomic<bool>    audioChanging       { false };
     std::shared_ptr<juce::AudioBuffer<float>> selectedAudio;
     std::atomic<bool>    reviewPlaying       { false };
     std::atomic<int64_t> reviewPos           { 0 };
+    std::atomic<int64_t> pendingReviewSeek   { -1 };
 
     std::atomic<bool>    overdub             { false };
     std::atomic<bool>    overdubPending      { false };

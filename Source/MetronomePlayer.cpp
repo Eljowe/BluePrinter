@@ -13,7 +13,7 @@ MetronomePlayer::MetronomePlayer()
 }
 
 void MetronomePlayer::setContext (double newSampleRate, double newBpm, int newBeatsPerBar, int newBeatUnit,
-                                  int newSubdivision, uint16_t newAccentMask)
+                                  int newSubdivision, uint16_t newAccentMask, float newGain)
 {
     sampleRate  = newSampleRate;
     bpm         = newBpm;
@@ -22,6 +22,7 @@ void MetronomePlayer::setContext (double newSampleRate, double newBpm, int newBe
     // 0/1 = beats only; 2/3/4 subdivisions per beat.
     subdivision = juce::jmax (1, normaliseSubdivision (newSubdivision));
     accentMask  = newAccentMask;
+    gain        = newGain;
 }
 
 void MetronomePlayer::reset()
@@ -66,7 +67,7 @@ void MetronomePlayer::renderTail (juce::AudioBuffer<float>& buffer,
     const int count    = static_cast<int> (inBlockEnd - head);
     for (int j = 0; j < count; ++j)
     {
-        const float sample = (*ac.buffer)[static_cast<size_t> (ac.readPos + j)];
+        const float sample = (*ac.buffer)[static_cast<size_t> (ac.readPos + j)] * gain;
         for (int ch = 0; ch < numChannels; ++ch)
             buffer.addSample (ch, blockOff + j, sample);
     }

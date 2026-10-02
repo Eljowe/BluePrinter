@@ -231,3 +231,55 @@ BP_TEST (MetronomePlayer_rhythmHelpersNormaliseAndFit)
     BP_CHECK_EQ (MetronomePlayer::fitAccentMaskToBeats (0x0005, 1), 0x0001); // bit 2 dropped
     BP_CHECK_EQ (MetronomePlayer::fitAccentMaskToBeats (0x0000, 4), 0x0000); // all-off is allowed
 }
+
+BP_TEST (MetronomePlayer_masterGainScalesAllVoicesWithoutChangingLiveMix)
+{
+    auto tick   = makeClickBuffer (10, 1.0f);
+    auto accent = makeClickBuffer (10, 2.0f);
+    auto sub    = makeClickBuffer (10, 0.5f);
+
+    for (const float gain : { 0.0f, 0.25f, 1.0f })
+    {
+        MetronomePlayer player;
+        player.setContext (48000.0, 120.0, 4, 4, 2, 0x0001, gain);
+        juce::AudioBuffer<float> block (2, 36000);
+        for (int ch = 0; ch < block.getNumChannels(); ++ch)
+            juce::FloatVectorOperations::fill (block.getWritePointer (ch), 0.1f, block.getNumSamples());
+
+        player.render (block, 0, block.getNumSamples(), tick, accent, sub);
+
+        for (int ch = 0; ch < block.getNumChannels(); ++ch)
+        {
+            BP_CHECK_NEAR (block.getSample (ch, 0),     0.1f + 2.0f * gain, 0.0001f);
+            BP_CHECK_NEAR (block.getSample (ch, 12000), 0.1f + 0.5f * gain, 0.0001f);
+            BP_CHECK_NEAR (block.getSample (ch, 24000), 0.1f + 1.0f * gain, 0.0001f);
+            BP_CHECK_NEAR (block.getSample (ch, 100),   0.1f, 0.0001f);
+        }
+    }
+}
+
+BP_TEST (MetronomePlayer_masterGainChangesAlsoApplyToRingingTails)
+{
+    auto click = makeClickBuffer (256, 1.0f);
+    MetronomePlayer player;
+    player.setContext (48000.0, 120.0, 4);
+    juce::AudioBuffer<float> block (1, 64);
+    block.clear();
+    player.render (block, 0, 64, click, click);
+    BP_CHECK_NEAR (sumAbs (block), 64.0f, 0.0001f);
+
+    player.setContext (48000.0, 120.0, 4, 4, 0, 0x0001, 0.25f);
+    block.clear();
+    player.render (block, 64, 64, click, click);
+    BP_CHECK_NEAR (sumAbs (block), 16.0f, 0.0001f);
+
+    player.setContext (48000.0, 120.0, 4, 4, 0, 0x0001, 0.0f);
+    block.clear();
+    player.render (block, 128, 64, click, click);
+    BP_CHECK_NEAR (sumAbs (block), 0.0f, 0.0001f);
+
+    player.setContext (48000.0, 120.0, 4);
+    block.clear();
+    player.render (block, 192, 64, click, click);
+    BP_CHECK_NEAR (sumAbs (block), 64.0f, 0.0001f);
+}

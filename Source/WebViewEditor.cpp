@@ -237,7 +237,24 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
         {
             const bool enabled = data.getDynamicObject() != nullptr
                 && (bool) data.getDynamicObject()->getProperty("enabled");
-            processor.setTakePlayback (enabled);
+            const auto start = data.hasProperty ("startSample")
+                ? static_cast<juce::int64> (data["startSample"]) : -1;
+            processor.setTakePlayback (enabled, start);
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetTakePlaybackPositionEvent, [&processor](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+                processor.setTakePlaybackPosition (static_cast<juce::int64> (obj->getProperty ("position")));
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetTakeTrimEvent, [&processor](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+                processor.setTakeTrim (static_cast<juce::int64> (obj->getProperty ("startSample")),
+                                       static_cast<juce::int64> (obj->getProperty ("endSample")));
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendTakeUndoEvent, [&processor](juce::var)
+        {
+            processor.undoTakeOverdub();
         })
         .withEventListener(BluePrinterWebViewEditor::frontendSetTakeOverdubEvent, [&processor](juce::var data)
         {
@@ -622,6 +639,11 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
         {
             if (auto* obj = data.getDynamicObject())
                 processor.setOverdubLevel (static_cast<float> (obj->getProperty ("level")));
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetClickLevelEvent, [&processor](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+                processor.setClickLevel (static_cast<float> (obj->getProperty ("level")));
         })
         .withEventListener(BluePrinterWebViewEditor::frontendSetClickParamsEvent, [&processor](juce::var data)
         {
@@ -1394,6 +1416,7 @@ juce::var BluePrinterWebViewEditor::makeTransportSnapshot() const
     obj->setProperty ("dryLevel",         audioProcessor.getDryLevel());
     obj->setProperty ("overdubLevel",     audioProcessor.getOverdubLevel());
     obj->setProperty ("clickPitch",        audioProcessor.getClickPitch());
+    obj->setProperty ("clickLevel",        audioProcessor.getClickLevel());
     obj->setProperty ("clickAccentPitch",  audioProcessor.getClickAccentPitch());
     obj->setProperty ("clickDecay",        audioProcessor.getClickDecay());
     obj->setProperty ("clickVolume",       audioProcessor.getClickVolume());
@@ -1425,6 +1448,9 @@ juce::var BluePrinterWebViewEditor::makeTransportSnapshot() const
     obj->setProperty ("takeLength",   static_cast<double> (audioProcessor.getTakeLength()));
     obj->setProperty ("takePlaying",  audioProcessor.isTakePlaying());
     obj->setProperty ("takePosition", static_cast<double> (audioProcessor.getTakePlaybackPos()));
+    obj->setProperty ("takeTrimStart", static_cast<double> (audioProcessor.getTakeTrimStart()));
+    obj->setProperty ("takeTrimEnd", static_cast<double> (audioProcessor.getTakeTrimEnd()));
+    obj->setProperty ("takeUndoAvailable", audioProcessor.isTakeUndoAvailable());
     {
         const auto& peaks = audioProcessor.getTakePeaks();
         juce::Array<juce::var> peakArray;
