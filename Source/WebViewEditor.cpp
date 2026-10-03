@@ -1550,12 +1550,23 @@ juce::var BluePrinterWebViewEditor::makeTransportSnapshot() const
         // Per-chain output meters (post-volume, muted chains read 0).
         // Pushed at 30 Hz alongside the rest of the transport state.
         juce::Array<juce::var> chainLevels;
+        const double chainSampleRate = audioProcessor.getSampleRate();
         for (auto& chain : audioProcessor.getChains())
         {
             auto* o = new juce::DynamicObject();
             o->setProperty ("chain", chain->getChainId());
             o->setProperty ("level", juce::jlimit (0.0f, 1.0f, chain->getOutputLevel()));
             o->setProperty ("peak",  juce::jlimit (0.0f, 1.0f, chain->getOutputPeak()));
+
+            // Per-chain cost readout (0047): the smoothed CPU fraction and
+            // the sum of active slots' reported latency. Re-read each
+            // snapshot so a plugin that changes its latency is picked up.
+            const int latencySamples = chain->getActiveLatencySamples();
+            o->setProperty ("cpu", juce::jmax (0.0f, chain->getCpuFraction()));
+            o->setProperty ("latencySamples", latencySamples);
+            o->setProperty ("latencyMs", chainSampleRate > 0.0
+                ? static_cast<double> (latencySamples) * 1000.0 / chainSampleRate
+                : 0.0);
             chainLevels.add (juce::var (o));
         }
         obj->setProperty ("chainLevels", chainLevels);

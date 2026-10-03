@@ -16,6 +16,7 @@
 #include "MeterMath.h"
 #include "LoopPlayback.h"
 #include "ChainRouting.h"
+#include "ChainCpuMath.h"
 #include "CaptureCopy.h"
 #include "PreRollMath.h"
 #include "Tuner.h"
@@ -1337,6 +1338,9 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         {
             chain->outputLevel.store (0.0f, std::memory_order_release);
             chain->outputPeak.store  (0.0f, std::memory_order_release);
+            // No stale cost readout: an emptied or fully bypassed chain
+            // reports 0% and no latency until it does work again.
+            chain->cpuFraction.store (0.0f, std::memory_order_release);
             continue;
         }
 
@@ -1363,7 +1367,26 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             }
             midiForChain = &chainMidiFiltered;
         }
+        const auto chainStartTicks = juce::Time::getHighResolutionTicks();
         chain->processBlock (chainScratchBuffer, *midiForChain);
+
+        // Per-chain CPU (0047): time this chain's own processBlock with a
+        // monotonic clock, express it as a fraction of the block budget
+        // (numSamples / sampleRate) and fold it into the smoothed value the
+        // 30 Hz snapshot ships. Cheap clock reads only — no locks or
+        // allocations — and the read-modify-write is safe because the audio
+        // thread is the only writer.
+        {
+            const auto chainEndTicks = juce::Time::getHighResolutionTicks();
+            const double elapsedSeconds = juce::Time::highResolutionTicksToSeconds (
+                chainEndTicks - chainStartTicks);
+            const double blockSeconds = currentSampleRate > 0.0
+                ? static_cast<double> (numSamples) / currentSampleRate : 0.0;
+            const float load = ChainCpuMath::blockFraction (elapsedSeconds, blockSeconds);
+            chain->cpuFraction.store (
+                ChainCpuMath::smooth (chain->cpuFraction.load (std::memory_order_relaxed), load),
+                std::memory_order_release);
+        }
 
         // Output volume + hard mute. Muted chains still run (their
         // plugins keep internal state consistent) but contribute nothing

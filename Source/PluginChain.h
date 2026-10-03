@@ -189,6 +189,13 @@ public:
         return false;
     }
 
+    // The chain's reported processing delay: the sum of getLatencySamples()
+    // over loaded, non-bypassed slots (0047; the same definition 0046 uses).
+    // A chain with no active plugins reports 0. Re-read on every snapshot,
+    // so a plugin that changes its reported latency at runtime is picked up.
+    // Message-thread only (takes the slot lock).
+    int getActiveLatencySamples() const;
+
     int getNumPlugins() const;
     juce::AudioPluginInstance* getPlugin (int index) const;
     juce::String getSlotName (int index) const;
@@ -309,6 +316,14 @@ public:
     // and the message thread reads them for the 30 Hz transport push.
     std::atomic<float> outputLevel { 0.0f };
     std::atomic<float> outputPeak  { 0.0f };
+
+    // Smoothed per-chain CPU load as a fraction of the block budget
+    // (elapsed / (numSamples / sampleRate)), written by the audio thread
+    // in the processor's chain loop via ChainCpuMath and read by the
+    // message thread for the 30 Hz transport push. Public for the same
+    // reason as the output meters.
+    std::atomic<float> cpuFraction { 0.0f };
+    float getCpuFraction() const { return cpuFraction.load (std::memory_order_acquire); }
 
 private:
     Vst3Library& library;

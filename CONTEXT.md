@@ -163,6 +163,14 @@ The single `transform: scale()` factor applied to the whole UI from the measured
 scroll viewport. Never CSS `zoom`.
 _Avoid_: Zoom
 
+**Practice scale**:
+The scale shown in the header **Scales** popover on a standard-tuning fretboard.
+The theory is pure JS (`WebUI/src/utils.js`): a root + scale id yields note
+names/degrees with key-signature accidentals (a minor scale borrows its
+relative major's spelling). It reuses the tuner's live analysis but is a
+separate, mutually exclusive tool.
+_Avoid_: Key (that is the detected snippet key), mode
+
 **Bridge event**:
 A named frontend↔backend message, declared once in `WebViewEditor.h` and mirrored
 in `bridge.js`.
@@ -194,6 +202,7 @@ _Avoid_: Message, IPC event
 | Count-in completion test | `Source/PreRollMath.h` |
 | MIDI output device + direct sends | `Source/MidiClockOutput.h/.cpp` |
 | Metering math | `Source/MeterMath.h` |
+| Per-chain CPU math (0047) | `Source/ChainCpuMath.h` |
 | Per-meter level/peak/clip state | `Source/Meter.h` |
 | Take stack + review/overdub state machine | `Source/TakeRecorder.h/.cpp` |
 | Per-chain capture stems (0038) | `Source/StemCapture.h/.cpp` |

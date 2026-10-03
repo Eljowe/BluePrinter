@@ -4,6 +4,7 @@ import { Transport } from "./components/Transport";
 import { HeaderControls } from "./components/HeaderControls";
 import { SyncControls } from "./components/SyncControls";
 import { Tuner } from "./components/Tuner";
+import { PracticeScales } from "./components/PracticeScales";
 import { TakeReview } from "./components/TakeReview";
 import { LibraryFolderRow } from "./components/LibraryFolderRow";
 import { SnippetList } from "./components/SnippetList";
@@ -14,6 +15,7 @@ import { Looper } from "./components/Looper";
 import { SplashScreen } from "./components/SplashScreen";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { BACKEND_EVENTS, FRONTEND_EVENTS, emit, getInitialData, subscribe } from "./bridge";
+import { SCALE_IDS, reconcileActiveTool } from "./utils";
 import iconUrl from "./icon.svg";
 import { IconArrowDown } from "./components/icons";
 
@@ -41,6 +43,32 @@ const RECORDING_MODE_KEY = "bp:recordingMode";
 
 function readInitialRecordingMode() {
   return localStorage.getItem(RECORDING_MODE_KEY) === "loop" ? "loop" : "take";
+}
+
+// Practice-scale choice (0053), persisted like the recording tab. Validated
+// and exception-safe: a corrupt or unavailable localStorage falls back to
+// C major rather than throwing during render.
+const PRACTICE_SCALE_KEY = "bp:practiceScale";
+
+function readInitialPractice() {
+  try {
+    const raw = localStorage.getItem(PRACTICE_SCALE_KEY);
+    if (!raw) return { root: 0, scale: "major" };
+    const parsed = JSON.parse(raw);
+    const root = Number.isInteger(parsed?.root) && parsed.root >= 0 && parsed.root < 12 ? parsed.root : 0;
+    const scale = SCALE_IDS.includes(parsed?.scale) ? parsed.scale : "major";
+    return { root, scale };
+  } catch {
+    return { root: 0, scale: "major" };
+  }
+}
+
+function persistPractice(root, scale) {
+  try {
+    localStorage.setItem(PRACTICE_SCALE_KEY, JSON.stringify({ root, scale }));
+  } catch {
+    /* storage unavailable — keep the in-memory choice only */
+  }
 }
 
 function readInitialParameters() {
@@ -180,6 +208,33 @@ export default function App() {
   });
   const [scanState, setScanState] = useState({ active: false, current: 0, total: 0, currentFile: "", folder: "" });
   const [recordingMode, setRecordingMode] = useState(readInitialRecordingMode);
+  const [practice, setPractice] = useState(readInitialPractice);
+
+  // Which header tool popover owns the live pitch analysis. The backend's
+  // persisted `tunerOpen` flag is a single shared "analysis running" bit;
+  // keeping one frontend owner (seeded from it on init and reconciled below
+  // when a late host-state restore changes it) stops the Tuner and Scales
+  // popovers from both claiming it. Only ever one of "tuner" / "scales" /
+  // null.
+  const [activeTool, setActiveTool] = useState(() => (transport.tunerOpen ? "tuner" : null));
+  const tunerButtonRef = useRef(null);
+  const scalesButtonRef = useRef(null);
+
+  // Follow the authoritative backend analysis flag. A late host-state restore
+  // can flip `tunerOpen` after the editor mounted: adopt an open analysis
+  // (keeping whichever tool the user has showing, else defaulting to the Tuner
+  // so the running worker has a visible owner) and drop a closed one. The pure
+  // step returns the previous owner unchanged when nothing moves, so this
+  // never re-emits and never loops on the 30 Hz transport pushes; it emits no
+  // event and leaves `tunerMonitorMute` alone.
+  useEffect(() => {
+    setActiveTool((prev) => reconcileActiveTool(prev, transport.tunerOpen));
+  }, [transport.tunerOpen]);
+
+  const handlePersistPractice = (root, scale) => {
+    setPractice({ root, scale });
+    persistPractice(root, scale);
+  };
 
   const handleRecordingModeChange = (mode) => {
     setRecordingMode(mode);
@@ -624,10 +679,44 @@ export default function App() {
     emit(FRONTEND_EVENTS.setClickAccents, { accents });
   };
 
-  const handleTunerOpenChange = (open) => {
+  // Tuner / Scales share one backend analysis. Selecting a tool while the
+  // other is open just switches the popover (the analysis stays running);
+  // selecting the active tool again closes it and stops the analysis.
+  const applyToolOpen = (open) => {
     setTransport((prev) => ({ ...prev, tunerOpen: open }));
     emit(FRONTEND_EVENTS.setTunerOpen, { enabled: open });
   };
+
+  const handleToolToggle = (tool) => {
+    const next = activeTool === tool ? null : tool;
+    setActiveTool(next);
+    applyToolOpen(next !== null);
+  };
+
+  const handleToolClose = () => {
+    const returnRef = activeTool === "tuner" ? tunerButtonRef : scalesButtonRef;
+    setActiveTool(null);
+    applyToolOpen(false);
+    requestAnimationFrame(() => returnRef.current?.focus());
+  };
+
+  // Dismiss the active tool popover on an outside pointer press (the ticket
+  // asks for Escape/outside). Clicks on either tool button are left to the
+  // button's own toggle so the two don't fight.
+  useEffect(() => {
+    if (!activeTool) return undefined;
+    const onPointerDown = (event) => {
+      const target = event.target;
+      if (tunerButtonRef.current?.contains(target) || scalesButtonRef.current?.contains(target))
+        return;
+      if (target instanceof Element && target.closest(".tuner-popover, .scales-popover"))
+        return;
+      handleToolClose();
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => document.removeEventListener("pointerdown", onPointerDown, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTool]);
 
   const handleTunerReferenceChange = (pitch) => {
     setTransport((prev) => ({ ...prev, tunerReferencePitch: pitch }));
@@ -816,19 +905,44 @@ export default function App() {
           <div className="tuner-help">
             <button
               type="button"
-              className={`header-tool ${transport.tunerOpen ? "is-open" : ""}`}
-              onClick={() => handleTunerOpenChange(!transport.tunerOpen)}
-              aria-expanded={Boolean(transport.tunerOpen)}
+              ref={tunerButtonRef}
+              className={`header-tool ${activeTool === "tuner" ? "is-open" : ""}`}
+              onClick={() => handleToolToggle("tuner")}
+              aria-expanded={activeTool === "tuner"}
               title="Built-in tuner — feed it the clean input"
             >
               Tuner
             </button>
-            {transport.tunerOpen ? (
+            {activeTool === "tuner" ? (
               <Tuner
                 transport={transport}
                 onReferenceChange={handleTunerReferenceChange}
                 onMonitorMuteChange={handleTunerMonitorMuteChange}
-                onClose={() => handleTunerOpenChange(false)}
+                onClose={handleToolClose}
+              />
+            ) : null}
+          </div>
+
+          <div className="scales-help">
+            <button
+              type="button"
+              ref={scalesButtonRef}
+              className={`header-tool ${activeTool === "scales" ? "is-open" : ""}`}
+              onClick={() => handleToolToggle("scales")}
+              aria-expanded={activeTool === "scales"}
+              title="Practice scales — scale tones on a standard-tuning fretboard"
+            >
+              Scales
+            </button>
+            {activeTool === "scales" ? (
+              <PracticeScales
+                transport={transport}
+                playingKey={playingSnippet?.key ?? ""}
+                playingSourceId={transport.playingSnippetId}
+                initialRoot={practice.root}
+                initialScale={practice.scale}
+                onPersist={handlePersistPractice}
+                onClose={handleToolClose}
               />
             ) : null}
           </div>

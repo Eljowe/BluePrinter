@@ -447,6 +447,14 @@ function ChainPanel({
     ? `${totalPlugins} plugin${totalPlugins === 1 ? "" : "s"} restoring…`
     : slots.length === 0 ? "no plugins"
     : `${slots.length} plugin${slots.length === 1 ? "" : "s"}`;
+
+  // Per-chain cost readout (0047). Only meaningful while at least one
+  // non-bypassed plugin is loaded; a chain with no active plugins shows a
+  // dash so the card never reports stale stats.
+  const hasActivePlugins = slots.some((slot) => !slot.bypassed);
+  const cpuFraction = Number(levels?.cpu);
+  const latencyMs = Number(levels?.latencyMs);
+  const latencySamples = Number(levels?.latencySamples);
   return (
     <div className="fx-chain-panel" data-chain={chain}>
       <header className="fx-chain-header">
@@ -596,6 +604,35 @@ function ChainPanel({
         <div className="fx-chain-meter">
           <LevelMeter level={levels?.level ?? 0} peak={levels?.peak ?? 0} />
         </div>
+      </div>
+
+      <div className="fx-chain-cost" aria-label="Chain processing cost">
+        {hasActivePlugins ? (
+          <>
+            <span
+              className="fx-chain-cost-item"
+              title="This chain's own processing time as a share of the audio block budget, smoothed"
+            >
+              <span className="fx-chain-cost-label">CPU</span>
+              <span className="fx-chain-cost-value">
+                {Number.isFinite(cpuFraction) ? `${Math.round(cpuFraction * 100)}%` : "—"}
+              </span>
+            </span>
+            <span
+              className="fx-chain-cost-item"
+              title={`Reported latency: ${Number.isFinite(latencySamples) ? latencySamples : 0} sample${
+                latencySamples === 1 ? "" : "s"
+              }`}
+            >
+              <span className="fx-chain-cost-label">Latency</span>
+              <span className="fx-chain-cost-value">
+                {Number.isFinite(latencyMs) ? `${latencyMs.toFixed(latencyMs >= 10 ? 1 : 2)} ms` : "—"}
+              </span>
+            </span>
+          </>
+        ) : (
+          <span className="fx-chain-cost-idle" title="No active plugins — nothing is processed">—</span>
+        )}
       </div>
 
       <p className="fx-chain-subtitle">

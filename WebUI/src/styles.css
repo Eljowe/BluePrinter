@@ -2569,6 +2569,41 @@ button {
   min-width: 90px;
 }
 
+/* Per-chain CPU / latency readout (0047). A compact labelled row under the
+   controls; a chain with no active plugins shows a single dash. */
+.fx-chain-cost {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 15px;
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  color: var(--ink-3);
+}
+
+.fx-chain-cost-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.fx-chain-cost-label {
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 0.54rem;
+  color: var(--ink-3);
+}
+
+.fx-chain-cost-value {
+  color: var(--ink);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.fx-chain-cost-idle {
+  color: var(--ink-3);
+}
+
 /* MIDI channel picker (the "Ch" chip's panel). */
 .fx-midi-channels {
   display: flex;
@@ -4311,6 +4346,152 @@ html:has(.bp-splash) {
 }
 
 .tuner-hint {
+  margin: 0;
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  color: var(--ink-3);
+}
+
+/* Header Scales popover (0053): root/scale selectors over a standard-tuning
+   fretboard. Sits beside the Tuner; the two are mutually exclusive. */
+.scales-help {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.scales-popover {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 40;
+  width: 380px;
+  padding: 14px;
+  background: var(--panel);
+  border: 2px solid var(--line);
+  box-shadow: var(--shadow-hard-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.scales-popover-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.scales-popover-title {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink);
+  margin-right: auto;
+}
+
+.scales-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--mono);
+  font-size: 0.56rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ink-3);
+}
+
+.scales-select {
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  background: var(--panel);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  padding: 2px 4px;
+}
+
+.scales-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.scales-notes-title {
+  font-family: var(--font-display);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  color: var(--ink);
+}
+
+.scales-notes-list {
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.04em;
+  color: var(--ink-2);
+}
+
+.scales-fretboard {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 0;
+  border-top: 1px solid var(--line-soft);
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.scales-fret-numbers,
+.scales-string {
+  display: grid;
+  grid-template-columns: 22px repeat(13, 1fr);
+  align-items: center;
+  gap: 2px;
+}
+
+.scales-fret-number {
+  font-family: var(--mono);
+  font-size: 0.48rem;
+  color: var(--ink-3);
+  text-align: center;
+}
+
+.scales-string-name {
+  font-family: var(--mono);
+  font-size: 0.56rem;
+  font-weight: 700;
+  color: var(--ink-3);
+  text-align: center;
+}
+
+.scales-fret {
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--mono);
+  font-size: 0.5rem;
+  font-weight: 700;
+  color: transparent;
+  background: var(--panel-2);
+  border-radius: 2px;
+}
+
+.scales-fret.is-in-scale {
+  color: var(--ink);
+  background: var(--line-soft);
+}
+
+.scales-fret.is-root {
+  color: var(--on-ink);
+  background: var(--accent);
+}
+
+.scales-fret.is-live {
+  outline: 2px solid var(--warn);
+  outline-offset: -2px;
+}
+
+.scales-hint {
   margin: 0;
   text-align: center;
   font-family: var(--mono);

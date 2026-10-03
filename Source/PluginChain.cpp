@@ -43,6 +43,16 @@ void PluginChain::releaseResources()
     }
 }
 
+int PluginChain::getActiveLatencySamples() const
+{
+    const juce::ScopedLock sl (lock);
+    int total = 0;
+    for (auto& slot : slots)
+        if (slot->plugin != nullptr && ! slot->bypassed)
+            total += juce::jmax (0, slot->plugin->getLatencySamples());
+    return total;
+}
+
 void PluginChain::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
 {
     // The chain runs plugins in order, in place. We use a snapshot of the

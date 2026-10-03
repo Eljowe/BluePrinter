@@ -1,7 +1,7 @@
 ---
 id: "0053"
 title: "Practice helper: scale/chord overlay from the detected key"
-status: ready-for-agent
+status: done
 blocked_by: []
 ---
 
@@ -122,21 +122,21 @@ no theory code.
 
 **Acceptance criteria:**
 
-- [ ] A header **Scales** popover with root + scale selectors and a standard-tuning
+- [x] A header **Scales** popover with root + scale selectors and a standard-tuning
       fretboard; opens from the header tools, closes on Escape/outside.
-- [ ] The fretboard marks the scale tones, highlights the root, and highlights the live
+- [x] The fretboard marks the scale tones, highlights the root, and highlights the live
       note when the analysis is running.
-- [ ] Opening the popover starts the pitch analysis (via the existing tuner-open event)
+- [x] Opening the popover starts the pitch analysis (via the existing tuner-open event)
       without changing the tuner monitor mute; closing stops it; the two tool popovers
       are mutually exclusive.
-- [ ] The key prefills from the playing snippet's detected key when available, else the
+- [x] The key prefills from the playing snippet's detected key when available, else the
       persisted last choice, else C major.
-- [ ] The chosen root + scale persist in `localStorage` across restarts.
-- [ ] Accidental spelling follows the key (sharps vs flats).
-- [ ] Theory helpers are pure JS in `utils.js`; the fretboard is a component.
-- [ ] Keyboard-operable and labelled; **no new bridge event** (parity test unchanged);
+- [x] The chosen root + scale persist in `localStorage` across restarts.
+- [x] Accidental spelling follows the key (sharps vs flats).
+- [x] Theory helpers are pure JS in `utils.js`; the fretboard is a component.
+- [x] Keyboard-operable and labelled; **no new bridge event** (parity test unchanged);
       the WebUI build stays green.
-- [ ] The five scales (major, natural minor, major/minor pentatonic, blues) render
+- [x] The five scales (major, natural minor, major/minor pentatonic, blues) render
       correctly for all 12 roots.
 
 **Out of scope:**
@@ -148,6 +148,44 @@ no theory code.
 
 **Docs:** the `webui-bridge` skill (new component + popover pattern); `AGENTS.md` header
 tools note if useful.
+
+## Results
+
+Implemented. `WebUI/src/utils.js` gained the pure theory: `SCALES` (major, natural
+minor, major/minor pentatonic, blues), `scaleNotes`/`scalePitchClasses`,
+`rootName`/`rootNames`, `prefersFlats`, `spellPitchClass`, `parseDetectedKey`,
+`parseNoteName` and `STANDARD_TUNING`. Spelling assigns each degree its
+conventional letter, so minor keys read with their relative major's signature and
+the blues flat-five reads `Eb` in A. `PracticeScales.jsx` renders the popover
+(root/scale selects + 12-fret standard-tuning fretboard, root and live note
+highlighted); `App.jsx` owns a single `activeTool` state so Tuner/Scales are
+mutually exclusive over the shared `frontendSetTunerOpen` analysis, persists
+`bp:practiceScale` to `localStorage` (validated, exception-safe) and returns focus
+to the tool button on close. `styles.css` adds `.scales-*`. No new bridge event.
+
+**Ownership + late key (review fixes).** The playing id can arrive a push before
+the snippet payload that carries its detected key, so the prefill is a small pure
+state machine (`scalePrefillStep`/`lockScalePrefill` in `utils.js`): a keyless
+source stays unlocked and is retried until a valid key arrives; a manual selector
+change locks the source so a late (or re-detected) key never overwrites it; a new
+playing source resets the lock. "Manual choice sticks" is per open/source only —
+reopening the popover prefills again from the currently playing key, as the
+ticket asks. `App.jsx` also reconciles the frontend tool owner with the
+authoritative backend `tunerOpen` (`reconcileActiveTool`): a late host-state
+restore that flips the flag open keeps the current Tuner/Scales owner or defaults
+to the Tuner when none (so a running worker always has a visible owner), and a
+flip closed clears the owner. The reconcile is pure and returns the previous
+owner unchanged when nothing moves, so the effect keyed on `tunerOpen` neither
+re-emits nor loops on the 30 Hz transport pushes, and it never emits an event or
+touches `tunerMonitorMute`.
+
+`Tests/check-scale-theory.mjs` (`ScaleTheory` CTest) asserts the conventional
+spellings, all five scales for all 12 roots, the key/note parsers, the prefill
+state machine (late key, manual override before a late key, same-source manual
+edits preserved, new-source prefill, stop reset) and the tool-owner reconcile.
+All CTests, the WebUI build and the Debug standalone build are green. The
+interactive fretboard/live-note behaviour was not exercised in a real WebView2
+session here.
 
 ## Comments
 

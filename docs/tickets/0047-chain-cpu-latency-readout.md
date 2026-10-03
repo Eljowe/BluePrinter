@@ -1,7 +1,7 @@
 ---
 id: "0047"
 title: "Per-chain CPU and reported latency readout"
-status: ready-for-agent
+status: done
 blocked_by: []
 ---
 
@@ -118,19 +118,20 @@ nothing reads `getLatencySamples()`. There is no per-chain cost or latency visib
 
 **Acceptance criteria:**
 
-- [ ] `chainLevels` entries carry `cpu` (a 0..1+ fraction) and `latencyMs` (number).
-- [ ] CPU is the chain's own processing time as a fraction of the block duration,
+- [x] `chainLevels` entries carry `cpu` (a 0..1+ fraction) and `latencyMs` (number).
+- [x] CPU is the chain's own processing time as a fraction of the block duration,
       smoothed; the pure smoothing helper is unit-tested, and a chain doing more work
       reads a higher CPU than a lighter one.
-- [ ] Latency equals the sum of active (non-bypassed) slot latencies, shown in ms, and
+- [x] Latency equals the sum of active (non-bypassed) slot latencies, shown in ms, and
       is 0/hidden for a chain with no active plugins.
-- [ ] The card shows the readout and updates at 30 Hz; empty chains show a dash/hide it.
-- [ ] No allocation or locks are added to the audio thread; only cheap clock reads.
-- [ ] No new bridge event is added; the parity test is unchanged and stays green; the
+- [x] The card shows the readout and updates at 30 Hz; empty chains show a dash/hide it.
+- [x] No allocation or locks are added to the audio thread; only cheap clock reads.
+- [x] No new bridge event is added; the parity test is unchanged and stays green; the
       CTest suite and WebUI build stay green.
 - [ ] Manual smoke test: a heavy chain reads higher CPU than a light one; a
       latency-reporting plugin shows its reported ms. (The latency accessor should also
       be usable by 0046.)
+      — **not run**: no real VST3/WebView2 session was available in this environment.
 
 **Out of scope:**
 
@@ -139,6 +140,35 @@ nothing reads `getLatencySamples()`. There is no per-chain cost or latency visib
 - Peak-hold CPU markers, historical graphs, or logging.
 
 **Docs:** `AGENTS.md` (chain snapshot / `chainLevels`) and the `webui-bridge` skill.
+
+## Results
+
+Implemented. `Source/ChainCpuMath.h` (new) holds the pure `blockFraction` +
+`smooth` helpers; `Tests/test_ChainCpuMath.cpp` unit-tests them. `PluginChain`
+gained a public `cpuFraction` atomic (written by the audio thread) and
+`getActiveLatencySamples()` (sum over loaded, non-bypassed slots; reusable by
+0046). `PluginProcessor::processBlock` wraps each `chain->processBlock` in a
+`juce::Time::getHighResolutionTicks()` pair, converts to a block-budget fraction
+and folds it into the EMA; an inactive chain resets `cpuFraction` to 0.
+`WebViewEditor`'s 30 Hz `chainLevels` now also ships `cpu`, `latencyMs` and
+`latencySamples`. `PluginChain.jsx` shows a compact **CPU % / Latency** row and
+dashes it when no plugin is active; `styles.css` adds `.fx-chain-cost`. No new
+event.
+
+**Active-slot accounting (review verification).** The latency/CPU "active" test
+never counts a pending or failed restore slot: `PluginChain` only ever pushes to
+`slots` once a non-null instance is in hand (`addPlugin` and `finalizeAsyncLoad`
+both assign `slot->plugin` before `slots.push_back`), while deferred and failed
+loads live in the separate `pendingSlots` vector (a plain `PendingSlot`, no
+plugin pointer). `hasActivePlugins()` and `getActiveLatencySamples()` iterate
+only `slots` and require `slot->plugin != nullptr && ! slot->bypassed`, so a
+pending/failed slot is invisible to both. No extra "active" field or backend
+change is needed.
+
+Verified: `BluePrinterTests` (incl. the new `ChainCpuMath` cases), `BridgeEventParity`
+and the new `ScaleTheory` CTest all pass (`ctest --test-dir build -C Debug`), the
+Debug `BluePrinter_Standalone` builds, and `vite build` is green. The manual
+real-plugin CPU/latency smoke test was not performed here.
 
 ## Comments
 

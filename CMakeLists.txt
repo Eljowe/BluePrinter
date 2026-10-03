@@ -257,6 +257,7 @@ if(BUILD_TESTING)
         Tests/test_MetronomePlayer.cpp
         Tests/test_MidiClockMath.cpp
         Tests/test_MeterMath.cpp
+        Tests/test_ChainCpuMath.cpp
         Tests/test_Meter.cpp
         Tests/test_LoopPlayback.cpp
         Tests/test_ChainRouting.cpp
@@ -315,6 +316,12 @@ if(BUILD_TESTING)
         add_test(NAME BridgeEventParity
                  COMMAND ${BLUEPRINTER_NODE_EXECUTABLE}
                          ${CMAKE_CURRENT_SOURCE_DIR}/Tests/check-bridge-events.mjs)
+
+        # Practice-scale theory (0053): the helpers are pure JS in
+        # WebUI/src/utils.js, so the regression check imports them directly.
+        add_test(NAME ScaleTheory
+                 COMMAND ${BLUEPRINTER_NODE_EXECUTABLE}
+                         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/check-scale-theory.mjs)
     else()
         message(STATUS "node not found: BridgeEventParity test disabled")
     endif()
