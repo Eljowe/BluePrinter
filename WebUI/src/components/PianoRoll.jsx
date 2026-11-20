@@ -104,6 +104,8 @@ export function PianoRoll({
     if (!el) return undefined;
 
     const handler = (event) => {
+      // Ctrl/Cmd + wheel is the interface zoom (0060); leave it to UiScale.
+      if (event.ctrlKey || event.metaKey) return;
       event.preventDefault();
       if (event.shiftKey) {
         const dir = event.deltaY > 0 ? 1 : -1;

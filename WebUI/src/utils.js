@@ -82,12 +82,12 @@ const MINOR_ROOT_NAMES = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "G#", "A", 
 
 const LETTERS = ["C", "D", "E", "F", "G", "A", "B"];
 const NATURAL_PC = [0, 2, 4, 5, 7, 9, 11];
-const LETTER_INDEX = { C: 0, D: 1, E: 2, F: 3, G: 4, A: 5, B: 6 };
+export const LETTER_INDEX = { C: 0, D: 1, E: 2, F: 3, G: 4, A: 5, B: 6 };
 
 // Major keys conventionally written with flats.
 const FLAT_MAJOR_PCS = new Set([1, 3, 5, 8, 10]);
 
-function mod12(value) {
+export function mod12(value) {
   const n = Math.round(Number(value));
   return ((Number.isFinite(n) ? n : 0) % 12 + 12) % 12;
 }
@@ -116,7 +116,7 @@ export function prefersFlats(rootPc, scaleId) {
   return FLAT_MAJOR_PCS.has(spellingMajorPc(rootPc, scaleId));
 }
 
-function spellLetter(letterIndex, pc) {
+export function spellLetter(letterIndex, pc) {
   const natural = NATURAL_PC[letterIndex];
   const diff = ((pc - natural) % 12 + 12) % 12;
   const accidental = diff === 0 ? "" : diff === 1 ? "#" : diff === 11 ? "b" : diff === 2 ? "##" : diff === 10 ? "bb" : "";
@@ -217,12 +217,17 @@ export function lockScalePrefill(state) {
 }
 
 // Reconcile the frontend tool owner with the authoritative backend
-// `tunerOpen` flag (0053): true keeps the current Tuner/Scales owner (or
-// defaults to the Tuner when none), false clears it. Returning `prev`
-// unchanged when nothing needs to move lets the App effect key off
+// `tunerOpen` flag (0053/0058): true keeps a current Tuner/Scales owner or
+// defaults to the Tuner when none. A non-analysis tool (Chords) yields to a
+// late restore that opens the analysis, so the running worker always has a
+// visible owner. False clears Tuner/Scales but preserves Chords. Returning
+// `prev` unchanged when nothing needs to move lets the App effect key off
 // `tunerOpen` alone without re-emitting or looping at the 30 Hz transport
-// cadence. Only ever returns "tuner" / "scales" / null.
+// cadence. Only ever returns "tuner" / "scales" / "chords" / null.
 export function reconcileActiveTool(prev, tunerOpen) {
-  if (tunerOpen) return prev ?? "tuner";
-  return prev === null ? prev : null;
+  if (tunerOpen) {
+    if (prev === "scales") return "scales";
+    return "tuner";
+  }
+  return prev === "tuner" || prev === "scales" ? null : prev;
 }

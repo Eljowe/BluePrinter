@@ -3,5 +3,21 @@
   "instructions": ["AGENTS.md"],
   "skills": {
     "paths": [".opencode/skills"]
+  },
+  "agents": {
+    "builder": {
+      "description": "Implements work delegated by the orchestrator",
+      "model": "opencode/deepseek-v4.1-flash",
+      "mode": "subagent"
+    },
+    "orchestrator": {
+      "mode": "primary",
+      "model": "opencode/gpt-6.1-sol",
+      "system": "You plan and you review. Hand implementation to the builder subagent as one coherent bundle, then judge its returned patch and evidence. Do not do volume implementation yourself.",
+      "permissions": [
+        { "action": "subagent", "resource": "*", "effect": "deny" },
+        { "action": "subagent", "resource": "builder", "effect": "allow" }
+      ]
+    }
   }
 }

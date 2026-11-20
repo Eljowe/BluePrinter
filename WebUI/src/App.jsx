@@ -3,8 +3,9 @@ import { createPortal } from "react-dom";
 import { Transport } from "./components/Transport";
 import { HeaderControls } from "./components/HeaderControls";
 import { SyncControls } from "./components/SyncControls";
-import { Tuner } from "./components/Tuner";
-import { PracticeScales } from "./components/PracticeScales";
+import { PracticeTools } from "./components/PracticeTools";
+import { QuickBar } from "./components/QuickBar";
+import { useUiScale } from "./components/UiScale";
 import { TakeReview } from "./components/TakeReview";
 import { LibraryFolderRow } from "./components/LibraryFolderRow";
 import { SnippetList } from "./components/SnippetList";
@@ -115,6 +116,7 @@ function readInitialTransport() {
     clickPitch: 1000, clickAccentPitch: 1500, clickDecay: 90, clickVolume: 0.35, clickAccentVolume: 0.5, clickNoise: 0.1,
     clickLevel: 0, clickSubdivision: 0, clickAccents: [],
     midiClockEnabled: false, midiClockOnRecord: false, midiOutputDevice: "", midiOutputDeviceList: [],
+    standalone: false, maximised: false,
     tunerOpen: false, tunerMonitorMute: false, tunerFrequency: 0, tunerConfidence: 0, tunerReferencePitch: 440, tunerNote: "", tunerCents: 0,
      preRollActive: false, transportPosition: 0,
      takePending: false, takeLength: 0, takePlaying: false, takePosition: 0, takePeaks: [], takes: [], selectedTakeId: -1,
@@ -170,6 +172,8 @@ function readInitialTransport() {
     midiClockOnRecord: Boolean(raw.midiClockOnRecord),
     midiOutputDevice: typeof raw.midiOutputDevice === "string" ? raw.midiOutputDevice : "",
     midiOutputDeviceList: Array.isArray(raw.midiOutputDeviceList) ? raw.midiOutputDeviceList : [],
+    standalone: Boolean(raw.standalone),
+    maximised: Boolean(raw.maximised),
      preRollActive: Boolean(raw.preRollActive),
      transportPosition: Number(raw.transportPosition ?? 0),
      takePending: Boolean(raw.takePending),
@@ -209,31 +213,104 @@ export default function App() {
   const [scanState, setScanState] = useState({ active: false, current: 0, total: 0, currentFile: "", folder: "" });
   const [recordingMode, setRecordingMode] = useState(readInitialRecordingMode);
   const [practice, setPractice] = useState(readInitialPractice);
+  // Session-only chord scratchpad (0058). Nothing is written to localStorage
+  // or host state; the idea survives while the app is open.
+  const [chords, setChords] = useState({
+    root: 0,
+    scale: "major",
+    sevenths: false,
+    selectedPcs: [],
+    view: "chords",
+    previewScale: null,
+    chordSet: [],
+  });
 
   // Which header tool popover owns the live pitch analysis. The backend's
   // persisted `tunerOpen` flag is a single shared "analysis running" bit;
   // keeping one frontend owner (seeded from it on init and reconciled below
   // when a late host-state restore changes it) stops the Tuner and Scales
-  // popovers from both claiming it. Only ever one of "tuner" / "scales" /
-  // null.
+  // popovers from both claiming it. Chords is a non-analysis tool in the
+  // same owner slot, so it still closes the others without starting the
+  // worker. Only ever one of "tuner" / "scales" / "chords" / null.
   const [activeTool, setActiveTool] = useState(() => (transport.tunerOpen ? "tuner" : null));
-  const tunerButtonRef = useRef(null);
-  const scalesButtonRef = useRef(null);
+  // Which cluster (header or the sticky quick bar) hosts the open popover.
+  // Visual only: the same tool state drives both clusters.
+  const [toolHost, setToolHost] = useState("header");
+  const [barVisible, setBarVisible] = useState(false);
+  const monitorSectionRef = useRef(null);
+  const { scale = 1, overlayNode } = useUiScale() ?? {};
 
   // Follow the authoritative backend analysis flag. A late host-state restore
   // can flip `tunerOpen` after the editor mounted: adopt an open analysis
-  // (keeping whichever tool the user has showing, else defaulting to the Tuner
-  // so the running worker has a visible owner) and drop a closed one. The pure
-  // step returns the previous owner unchanged when nothing moves, so this
-  // never re-emits and never loops on the 30 Hz transport pushes; it emits no
-  // event and leaves `tunerMonitorMute` alone.
+  // (keep Tuner/Scales, else default to the Tuner so the running worker has a
+  // visible owner; a Chords popover yields to it) and drop a closed one while
+  // preserving Chords. The pure step returns the previous owner unchanged when
+  // nothing moves, so this never re-emits and never loops on the 30 Hz
+  // transport pushes; it emits no event and leaves `tunerMonitorMute` alone.
   useEffect(() => {
     setActiveTool((prev) => reconcileActiveTool(prev, transport.tunerOpen));
   }, [transport.tunerOpen]);
 
+  // Sticky quick-monitor bar (0059): show it once the Monitor section has
+  // scrolled fully above the viewport, and hide it once the section's top is
+  // back at/below the top edge. The two thresholds are the section's bottom
+  // and its top, so the dead band is as tall as the section and the boundary
+  // can never flicker. Measuring the rect in screen space also keeps this
+  // correct under the UI scale and window resize.
+  useEffect(() => {
+    const section = monitorSectionRef.current;
+    const scroller = document.querySelector(".ui-scroll");
+    if (!section || !scroller) return undefined;
+
+    let frame = 0;
+    const update = () => {
+      frame = 0;
+      const rect = section.getBoundingClientRect();
+      setBarVisible((prev) => {
+        if (rect.bottom <= 0) return true;
+        if (rect.top >= 0) return false;
+        return prev;
+      });
+    };
+    const schedule = () => {
+      if (!frame) frame = requestAnimationFrame(update);
+    };
+
+    update();
+    scroller.addEventListener("scroll", schedule, { passive: true });
+    window.addEventListener("resize", schedule);
+    return () => {
+      if (frame) cancelAnimationFrame(frame);
+      scroller.removeEventListener("scroll", schedule);
+      window.removeEventListener("resize", schedule);
+    };
+  }, []);
+
+  // Keep the popover on the visible cluster. Crossing the threshold while the
+  // tuner is open must neither strand the popover off-screen nor kill the
+  // analysis: it re-renders under the bar and keeps running.
+  useEffect(() => {
+    setToolHost((prev) => {
+      const desired = barVisible ? "bar" : "header";
+      return prev === desired ? prev : desired;
+    });
+  }, [barVisible]);
+
+  // Keyboard focus must never land underneath the overlay bar.
+  useEffect(() => {
+    const scroller = document.querySelector(".ui-scroll");
+    if (!scroller) return undefined;
+    scroller.style.scrollPaddingTop = barVisible ? `${Math.round(62 * scale)}px` : "";
+    return () => { scroller.style.scrollPaddingTop = ""; };
+  }, [barVisible, scale]);
+
   const handlePersistPractice = (root, scale) => {
     setPractice({ root, scale });
     persistPractice(root, scale);
+  };
+
+  const handleChordsChange = (patch) => {
+    setChords((prev) => ({ ...prev, ...patch }));
   };
 
   const handleRecordingModeChange = (mode) => {
@@ -487,6 +564,8 @@ export default function App() {
         midiClockOnRecord: payload.midiClockOnRecord !== undefined ? Boolean(payload.midiClockOnRecord) : prev.midiClockOnRecord,
         midiOutputDevice: typeof payload.midiOutputDevice === "string" ? payload.midiOutputDevice : prev.midiOutputDevice,
         midiOutputDeviceList: Array.isArray(payload.midiOutputDeviceList) ? payload.midiOutputDeviceList : prev.midiOutputDeviceList,
+        standalone: payload.standalone !== undefined ? Boolean(payload.standalone) : prev.standalone,
+        maximised: payload.maximised !== undefined ? Boolean(payload.maximised) : prev.maximised,
         preRollActive:    Boolean(payload.preRollActive),
          transportPosition: Number(payload.transportPosition ?? 0),
          takePending: payload.takePending !== undefined ? Boolean(payload.takePending) : prev.takePending,
@@ -682,34 +761,44 @@ export default function App() {
   // Tuner / Scales share one backend analysis. Selecting a tool while the
   // other is open just switches the popover (the analysis stays running);
   // selecting the active tool again closes it and stops the analysis.
+  // Chords never starts the analysis.
+  const isAnalysisTool = (tool) => tool === "tuner" || tool === "scales";
+
   const applyToolOpen = (open) => {
     setTransport((prev) => ({ ...prev, tunerOpen: open }));
     emit(FRONTEND_EVENTS.setTunerOpen, { enabled: open });
   };
 
-  const handleToolToggle = (tool) => {
+  const handleToolToggle = (tool, host = "header") => {
     const next = activeTool === tool ? null : tool;
     setActiveTool(next);
-    applyToolOpen(next !== null);
+    if (next) setToolHost(host);
+    applyToolOpen(isAnalysisTool(next));
   };
 
   const handleToolClose = () => {
-    const returnRef = activeTool === "tuner" ? tunerButtonRef : scalesButtonRef;
+    const tool = activeTool;
     setActiveTool(null);
     applyToolOpen(false);
-    requestAnimationFrame(() => returnRef.current?.focus());
+    // Return focus to the trigger in whichever cluster is on screen. The other
+    // copy is scrolled away or translated off, and focusing it would scroll
+    // the page.
+    const cluster = barVisible ? ".quick-bar" : ".app-header";
+    requestAnimationFrame(() => {
+      document.querySelector(`${cluster} [data-tool="${tool}"]`)?.focus();
+    });
   };
 
   // Dismiss the active tool popover on an outside pointer press (the ticket
-  // asks for Escape/outside). Clicks on either tool button are left to the
-  // button's own toggle so the two don't fight.
+  // asks for Escape/outside). Clicks on a tool button are left to that
+  // button's own toggle so they don't fight.
   useEffect(() => {
     if (!activeTool) return undefined;
     const onPointerDown = (event) => {
       const target = event.target;
-      if (tunerButtonRef.current?.contains(target) || scalesButtonRef.current?.contains(target))
-        return;
-      if (target instanceof Element && target.closest(".tuner-popover, .scales-popover"))
+      if (target instanceof Element && target.closest(
+        ".tuner-help, .scales-help, .chords-help, .tuner-popover, .scales-popover, .chords-popover",
+      ))
         return;
       handleToolClose();
     };
@@ -901,70 +990,25 @@ export default function App() {
             <p>Record a take, name it, note what to work on.</p>
           </div>
         </div>
-        <div className="header-tools">
-          <div className="tuner-help">
-            <button
-              type="button"
-              ref={tunerButtonRef}
-              className={`header-tool ${activeTool === "tuner" ? "is-open" : ""}`}
-              onClick={() => handleToolToggle("tuner")}
-              aria-expanded={activeTool === "tuner"}
-              title="Built-in tuner — feed it the clean input"
-            >
-              Tuner
-            </button>
-            {activeTool === "tuner" ? (
-              <Tuner
-                transport={transport}
-                onReferenceChange={handleTunerReferenceChange}
-                onMonitorMuteChange={handleTunerMonitorMuteChange}
-                onClose={handleToolClose}
-              />
-            ) : null}
-          </div>
-
-          <div className="scales-help">
-            <button
-              type="button"
-              ref={scalesButtonRef}
-              className={`header-tool ${activeTool === "scales" ? "is-open" : ""}`}
-              onClick={() => handleToolToggle("scales")}
-              aria-expanded={activeTool === "scales"}
-              title="Practice scales — scale tones on a standard-tuning fretboard"
-            >
-              Scales
-            </button>
-            {activeTool === "scales" ? (
-              <PracticeScales
-                transport={transport}
-                playingKey={playingSnippet?.key ?? ""}
-                playingSourceId={transport.playingSnippetId}
-                initialRoot={practice.root}
-                initialScale={practice.scale}
-                onPersist={handlePersistPractice}
-                onClose={handleToolClose}
-              />
-            ) : null}
-          </div>
-
-          <details className="shortcut-help">
-            <summary title="Keyboard shortcuts">Keyboard</summary>
-            <dl className="shortcut-list">
-              <div><dt>Space</dt><dd>Start / stop capture (Take or Loop tab)</dd></div>
-              <div><dt>Enter</dt><dd>Save the selected take's trimmed region</dd></div>
-              <div><dt>Delete</dt><dd>Delete the selected take (no confirmation)</dd></div>
-              <div><dt>T</dt><dd>Tap tempo</dd></div>
-              <div><dt>Esc</dt><dd>Stop playback</dd></div>
-              <div><dt>Ctrl/Cmd+Z</dt><dd>Undo overdub (active Take / Loop tab, idle)</dd></div>
-              <div><dt>Ctrl/Cmd+Shift+Z / Ctrl+Y</dt><dd>Redo loop overdub</dd></div>
-              <div><dt>Arrows / Page Up / Down</dt><dd>Seek focused take waveform or adjust trim handle</dd></div>
-              <div><dt>Home / End</dt><dd>Move focused waveform / trim handle to its limits</dd></div>
-            </dl>
-          </details>
-        </div>
+        <PracticeTools
+          host="header"
+          className="header-tools"
+          activeTool={activeTool}
+          toolHost={toolHost}
+          onToggle={handleToolToggle}
+          onClose={handleToolClose}
+          transport={transport}
+          playingSnippet={playingSnippet}
+          practice={practice}
+          onPersistPractice={handlePersistPractice}
+          chords={chords}
+          onChordsChange={handleChordsChange}
+          onTunerReferenceChange={handleTunerReferenceChange}
+          onTunerMonitorMuteChange={handleTunerMonitorMuteChange}
+        />
       </header>
 
-      <section className="bp-section control-deck" aria-label="Monitoring controls">
+      <section ref={monitorSectionRef} className="bp-section control-deck" aria-label="Monitoring controls">
         <div className="bp-section-head">
           <span className="section-index" aria-hidden="true">01</span>
           <h2 className="bp-section-title">Monitor</h2>
@@ -1141,6 +1185,32 @@ export default function App() {
           </ErrorBoundary>
         </div>
       </section>
+
+      {overlayNode ? createPortal(
+        <QuickBar
+          visible={barVisible}
+          input={input}
+          onInputChange={handleInputChange}
+          output={output}
+          onOutputChange={handleOutputChange}
+          dryLevel={transport.dryLevel}
+          onDryLevelChange={handleDryLevelChange}
+          transport={transport}
+          onResetClip={handleResetClip}
+          activeTool={activeTool}
+          toolHost={toolHost}
+          onToggle={handleToolToggle}
+          onClose={handleToolClose}
+          playingSnippet={playingSnippet}
+          practice={practice}
+          onPersistPractice={handlePersistPractice}
+          chords={chords}
+          onChordsChange={handleChordsChange}
+          onTunerReferenceChange={handleTunerReferenceChange}
+          onTunerMonitorMuteChange={handleTunerMonitorMuteChange}
+        />,
+        overlayNode,
+      ) : null}
 
       {createPortal(
         <Notification

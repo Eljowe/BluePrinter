@@ -210,6 +210,10 @@ export const FRONTEND_EVENTS = {
   deleteChainPreset: "frontendDeleteChainPreset",
   // { dWidth } — device-pixel width delta from the corner resize grip.
   resizeEditor: "frontendResizeEditor",
+  // { enabled } — standalone-only maximise/restore (0060). Grows the
+  // top-level window to the largest aspect-correct size that fits the
+  // display work area (the OS title bar stays). Hidden in DAW hosts.
+  setMaximised: "frontendSetMaximised",
 };
 
 export const BACKEND_EVENTS = {

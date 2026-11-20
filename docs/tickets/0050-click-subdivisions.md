@@ -1,7 +1,7 @@
 ---
 id: "0050"
 title: "Click subdivisions and accents"
-status: ready-for-agent
+status: done
 blocked_by: []
 ---
 
@@ -186,3 +186,11 @@ skill; add the new terms to `CONTEXT.md` if useful.
 
 2026-09-14 — Triaged and moved to `ready-for-agent`; open questions resolved as
 decisions 1–7 in the Agent Brief above.
+
+2026-10-03 — Reviewed against the code: implemented in `8119903`.
+`MetronomePlayer` schedules the subdivision grid (0/2/3/4, sub-clicks never
+accented) and selects tick/accent per beat from the mask;
+`ClickSynth::subdivisionVoice` adds the softer derived voice;
+`PluginProcessor` persists `clickSubdivision`/`clickAccentMask`, resizes the
+mask on a meter change and ships both in the transport snapshot; the sync-strip
+Subdiv selector and the Click-sound accent step row are in place. Closing.

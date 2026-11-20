@@ -171,6 +171,17 @@ relative major's spelling). It reuses the tuner's live analysis but is a
 separate, mutually exclusive tool.
 _Avoid_: Key (that is the detected snippet key), mode
 
+**Chord scratchpad**:
+The frontend-only songwriting tool in the header **Chords** popover. A key +
+scale highlights compatible notes on a one-octave piano and a standard-tuning
+fretboard; selected pitch classes feed ranked diatonic/borrowed chord
+suggestions. Its **Find scales** view reverses the workflow: selected notes
+rank the root+scale pairs that contain them, and choosing one previews its
+tones without changing the selection. It makes no sound, starts no tuner
+analysis, and persists nothing.
+_Avoid_: Chord detector (there is no audio/MIDI chord detection), progression
+builder
+
 **Bridge event**:
 A named frontend↔backend message, declared once in `WebViewEditor.h` and mirrored
 in `bridge.js`.
@@ -209,6 +220,7 @@ _Avoid_: Message, IPC event
 | Named setlists (0035) | `Source/SetlistStore.h/.cpp` |
 | React app + components | `WebUI/src/` |
 | Bridge API | `WebUI/src/bridge.js` |
+| Chord scratchpad theory + ranking (0058) | `WebUI/src/chords.js` |
 
 ## Invariants
 

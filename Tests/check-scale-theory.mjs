@@ -121,13 +121,18 @@ check(nextSource.state.source === 10 && nextSource.state.locked === true, "new s
 const stopped = scalePrefillStep(nextSource.state, -1, null);
 check(stopped.apply === null && stopped.state.locked === false, "stopped source: resets the guard");
 
-// Tool-owner reconciliation (0053): a late backend `tunerOpen` change must
-// adopt an open analysis and drop a closed one, and must return the previous
-// owner unchanged when nothing moves (so the App effect can't loop).
+// Tool-owner reconciliation (0053/0058): a late backend `tunerOpen` change
+// must adopt an open analysis and drop a closed one, preserving the
+// non-analysis Chords tool when the analysis closes and yielding to it when
+// the analysis opens. Returning the previous owner unchanged when nothing
+// moves keeps the App effect from looping.
 check(reconcileActiveTool(null, true) === "tuner", "restore open: defaults to Tuner");
 check(reconcileActiveTool("scales", true) === "scales", "restore open: retains Scales");
 check(reconcileActiveTool("tuner", true) === "tuner", "restore open: retains Tuner");
+check(reconcileActiveTool("chords", true) === "tuner", "restore open: Chords yields to the analysis");
 check(reconcileActiveTool("scales", false) === null, "restore close: clears the owner");
+check(reconcileActiveTool("tuner", false) === null, "restore close: clears the tuner");
+check(reconcileActiveTool("chords", false) === "chords", "restore close: preserves Chords");
 check(reconcileActiveTool(null, false) === null, "restore close: already closed stays closed");
 
 if (failures === 0) {

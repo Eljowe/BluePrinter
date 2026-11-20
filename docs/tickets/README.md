@@ -134,8 +134,8 @@ before claiming.
 | [0046](0046-plugin-delay-compensation.md) | Plugin delay compensation for parallel chains | ready-for-agent | — |
 | [0047](0047-chain-cpu-latency-readout.md) | Per-chain CPU and reported latency readout | done | — |
 | [0048](0048-monitor-clip-guard.md) | Monitor/output clip guard | ready-for-agent | — |
-| [0049](0049-tap-tempo.md) | Tap tempo | ready-for-agent | — |
-| [0050](0050-click-subdivisions.md) | Click subdivisions and accents | ready-for-agent | — |
+| [0049](0049-tap-tempo.md) | Tap tempo | done | — |
+| [0050](0050-click-subdivisions.md) | Click subdivisions and accents | done | — |
 | [0051](0051-backing-track-import.md) | Backing-track import with tempo/key detection | needs-triage | — |
 | [0052](0052-tempo-locked-loop-playback.md) | Tempo-locked (time-stretched) loop playback | needs-triage | — |
 | [0053](0053-practice-scale-helper.md) | Practice helper: scale/chord overlay from the detected key | done | — |
@@ -143,16 +143,23 @@ before claiming.
 | [0055](0055-library-snippet-melody.md) | Library snippet melody: analyse existing snippets and draw the piano-roll in the card | done | 0054 |
 | [0056](0056-load-snippet-into-looper.md) | Load a library snippet into the looper to overdub and save a new version | done | — |
 | [0057](0057-snippet-playback-seek.md) | Seek snippet playback from the library waveform | done | — |
+| [0058](0058-songwriting-chord-helper.md) | Songwriting helper: chord suggestions from a scale, piano and fretboard note picker | done | — |
+| [0059](0059-sticky-quick-monitor-bar.md) | Sticky quick-monitor bar: keep the monitor knobs and practice tools reachable while scrolled | in-progress | — |
+| [0060](0060-ui-zoom-and-window-maximise.md) | UI zoom percentages and a maximise-window toggle | done | — |
+| [0061](0061-find-scales-from-notes.md) | Find scales from selected notes in the Chords tool | done | — |
+| [0062](0062-fill-screen-fluid-width.md) | Fill the screen: maximise to the whole work area and let the UI use the width | done | — |
 
 Themes: **audio integrity** (0046–0048) and **practice & songwriting**
 (0049–0054). Suggested order: 0046 → 0049/0050 → 0051 → 0052, with 0047/0048,
 0053 and 0054 as smaller follow-ups.
 
-**0046 (PDC), 0048 (clip guard), 0049 (tap tempo) and 0050 (click subdivisions)
-were triaged and are now `ready-for-agent`** — see their Agent Briefs. **0047
-(CPU/latency readout)** and **0053 (practice scale helper)** were triaged and
-are now implemented, `done`. 0054 (take melody extraction) was triaged and
-implemented, now `done`. 0051 and 0052 still start `needs-triage`.
+**0046 (PDC) and 0048 (clip guard) were triaged and remain `ready-for-agent`**
+— see their Agent Briefs. **0047 (CPU/latency readout) and 0053 (practice scale
+helper) were triaged and are now implemented, `done`.** **0049 (tap tempo)** and
+**0050 (click subdivisions)** were triaged, implemented and are now `done`.
+**0054–0057** (take melody extraction, library-snippet melody, snippet-to-looper
+load, snippet playback seek) were also implemented, all `done`. 0051 and 0052
+still start `needs-triage`.
 
 ## Roadmap notes
 
@@ -169,4 +176,8 @@ implemented, now `done`. 0051 and 0052 still start `needs-triage`.
   ever ships signed binaries). **Phase 9** is the next untriaged candidate set:
   audio integrity (0046 PDC, 0047 CPU/latency, 0048 clip guard) and practice &
   songwriting (0049 tap tempo, 0050 click subdivisions, 0051 backing track,
-  0052 time-stretch, 0053 scale helper).
+  0052 time-stretch, 0053 scale helper, 0058 chord scratchpad). **0058 is
+  implemented and `done`; 0061 adds reverse scale lookup to it and is also
+  `done`.** **0060 (UI zoom + maximise)** and **0062 (fill the screen + fluid
+  width)** are implemented and `done` (the C++ build still needs a Windows/CI
+  pass; the WebUI, bridge parity and pure-math checks are green).

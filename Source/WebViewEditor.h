@@ -221,6 +221,10 @@ public:
     // grip (the window has no OS/host resize border). The editor applies
     // the locked aspect ratio + size limits and resizes its window.
     static constexpr const char* frontendResizeEditorEvent     = "frontendResizeEditor";
+    // { enabled } — standalone-only maximise/restore (0060). The editor
+    // grows the top-level window to the largest aspect-correct size that
+    // fits the display work area, keeping the OS title bar.
+    static constexpr const char* frontendSetMaximisedEvent     = "frontendSetMaximised";
 
     static constexpr const char* backendVst3ChainEvent        = "backendVst3Chain";
     static constexpr const char* backendVst3ScanProgressEvent = "backendVst3ScanProgress";
@@ -268,6 +272,8 @@ public:
     // { dWidth } — resize the editor by a device-pixel width delta from
     // the WebUI corner grip, preserving the locked aspect ratio.
     void handleResizeEditor (const juce::var& data);
+    // { enabled } — standalone maximise/restore (0060).
+    void handleSetMaximised (const juce::var& data);
     void handleSetChainMidiChannels (const juce::var& data);
     // Named chain presets (0033).
     void handleSaveChainPreset (const juce::var& data);
@@ -337,6 +343,20 @@ private:
     void pickLibraryFolderThenSave(int pendingSnippetId);
 
     BluePrinterAudioProcessor& audioProcessor;
+
+    // Standalone-window maximise (0060/0061). Declared before webView because
+    // makeTransportSnapshot() runs during webView's construction and reads
+    // `maximised` for the initial transport blob. Message thread only.
+    void setWindowMaximised (bool shouldBeMaximised);
+    // Normal (aspect-locked) vs fill-screen (any aspect) size constraints.
+    void applyEditorSizeLimits();
+    void relaxEditorSizeLimits();
+    bool maximised = false;
+    int preMaximiseEditorWidth = 0;
+    int preMaximiseEditorHeight = 0;
+    juce::Point<int> preMaximiseWindowPosition;
+    bool applyingWindowLayout = false;
+
     BluePrinterWebViewComponent webView;
     juce::Label fallbackLabel;
 

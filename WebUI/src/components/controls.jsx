@@ -30,7 +30,7 @@ function arcPath(cx, cy, r, startAngle, endAngle) {
   return `M ${sx} ${sy} A ${r} ${r} 0 ${largeArc} 1 ${ex} ${ey}`;
 }
 
-export function Knob({ label, min, max, value, onChange, unit = "", step = "0.01", className = "", decimals = 1, disabled = false, title = "" }) {
+export function Knob({ label, min, max, value, onChange, unit = "", step = "0.01", className = "", decimals = 1, disabled = false, disableWheel = false, title = "" }) {
   const normalized = clamp((value - min) / (max - min), 0, 1);
   const angle = ARC_START + normalized * ARC_SWEEP;
   const dragState = useRef(null);
@@ -69,7 +69,11 @@ export function Knob({ label, min, max, value, onChange, unit = "", step = "0.01
   };
 
   const handleWheel = (event) => {
-    if (disabled) return;
+    // A pinned bar (0059) opts out: a permanent knob under the pointer must
+    // not turn page scrolling into value edits.
+    if (disabled || disableWheel) return;
+    // Ctrl/Cmd + wheel is the interface zoom (0060); leave it to UiScale.
+    if (event.ctrlKey || event.metaKey) return;
     event.preventDefault();
     const direction = event.deltaY < 0 ? 1 : -1;
     const fineStep = Number(step) || range / 100;

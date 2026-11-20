@@ -3139,7 +3139,7 @@ void BluePrinterAudioProcessor::setClickLevel (float levelDb)
 {
     if (! std::isfinite (levelDb))
         return;
-    const float clamped = juce::jlimit (-60.0f, 0.0f, levelDb);
+    const float clamped = juce::jlimit (-60.0f, 10.0f, levelDb);
     if (clickLevel.load (std::memory_order_acquire) == clamped)
         return;
     clickLevel.store (clamped, std::memory_order_release);
@@ -4654,7 +4654,7 @@ void BluePrinterAudioProcessor::setStateInformation (const void* data, int sizeI
             // Click sound tuning (defaults match resynthesizeClicks).
             const float savedClickLevel = static_cast<float> (state.getProperty ("clickLevel", 0.0f));
             clickLevel.store (std::isfinite (savedClickLevel)
-                                  ? juce::jlimit (-60.0f, 0.0f, savedClickLevel) : 0.0f,
+                                  ? juce::jlimit (-60.0f, 10.0f, savedClickLevel) : 0.0f,
                               std::memory_order_release);
             clickPitch        = static_cast<float> (state.getProperty ("clickPitch",        1000.0f));
             clickAccentPitch  = static_cast<float> (state.getProperty ("clickAccentPitch",  1500.0f));

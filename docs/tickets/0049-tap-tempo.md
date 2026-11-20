@@ -1,7 +1,7 @@
 ---
 id: "0049"
 title: "Tap tempo"
-status: ready-for-agent
+status: done
 blocked_by: []
 ---
 
@@ -156,3 +156,10 @@ There is no tap control, no tempo averaging, and no keyboard way to set tempo.
 
 2026-09-14 — Triaged and moved to `ready-for-agent`; open questions resolved as
 decisions 1–6 in the Agent Brief above.
+
+2026-10-03 — Reviewed against the code: implemented in `31e3fbf`. The pure
+`Source/TapTempo.h` (mean of the last 5 intervals, 2 s reset, 40..240 whole-BPM
+window) is covered by `Tests/test_TapTempo.cpp`; `PluginProcessor` drives the
+existing `setBpm` from `frontendTapTempo` and ignores taps while a take/loop
+capture (count-in included) is active; the header Tap button, the global `T`
+shortcut and its Keyboard-popover entry are in place. Closing.

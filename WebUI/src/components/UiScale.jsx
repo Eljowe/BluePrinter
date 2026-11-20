@@ -1,5 +1,6 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ResizeHandle from "./ResizeHandle";
+import UiZoomControl from "./UiZoomControl";
 
 // The C++ editor window is resizable with a locked aspect ratio: its
 // content area always matches DESIGN_WIDTH:DESIGN_HEIGHT. Rather than
@@ -17,21 +18,57 @@ import ResizeHandle from "./ResizeHandle";
 // element becomes the containing block for `position: fixed` descendants
 // (so the splash and the notification toast are portaled to <body>).
 //
-// Because the ratio is locked, width and height yield the same scale
-// factor; taking the min keeps the UI whole if a host ever reports an
-// off-ratio size (the shortfall is centered by `offsetX`).
+// Zoom (0060): the default is Fit (min(width/960, height/700), exactly the
+// old behaviour). A manual zoom is absolute — 100% means the design surface
+// at its real 960 CSS px width — so the percentage means the same thing at
+// any window size. Below Fit the surface is centred and shows more vertical
+// content; above Fit .ui-scroll scrolls in both directions. The zoom and
+// maximise controls live outside the transformed content so they stay
+// reachable and constant-size at every zoom level.
 const DESIGN_WIDTH = 960;
 const DESIGN_HEIGHT = 700;
+
+const ZOOM_STORAGE_KEY = "blueprinter.uiZoom";
+const ZOOM_MIN = 50;
+const ZOOM_MAX = 300;
+const ZOOM_STEP = 10;
+
+// Shared with the app (0059): the live scale and a portal target in the
+// fixed, pre-scaled overlay layer above the scrolling content.
+const UiScaleContext = React.createContext(null);
+
+export function useUiScale() {
+  return React.useContext(UiScaleContext);
+}
+
+function clampZoom(value) {
+  return Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, Math.round(value)));
+}
+
+function readStoredZoom() {
+  try {
+    const raw = localStorage.getItem(ZOOM_STORAGE_KEY);
+    if (raw === null || raw === "fit") return "fit";
+    const value = Number(raw);
+    if (!Number.isFinite(value)) return "fit";
+    return clampZoom(value);
+  } catch {
+    return "fit";
+  }
+}
 
 export default function UiScale({ children }) {
   const scrollRef = useRef(null);
   const contentRef = useRef(null);
-  const [{ scale, offsetX, minHeight }, setLayout] = useState({
-    scale: 1,
-    offsetX: 0,
-    minHeight: DESIGN_HEIGHT,
+  const [zoom, setZoom] = useState(readStoredZoom);
+  const [viewport, setViewport] = useState({
+    width: DESIGN_WIDTH,
+    height: DESIGN_HEIGHT,
   });
   const [contentHeight, setContentHeight] = useState(DESIGN_HEIGHT);
+  const [overlayNode, setOverlayNode] = useState(null);
+  const [scrollLeft, setScrollLeft] = useState(0);
+  const viewportRef = useRef(viewport);
 
   // Measure the scroll container, NOT window.innerWidth: innerWidth
   // includes the vertical scrollbar, which would make the scaled content
@@ -41,17 +78,8 @@ export default function UiScale({ children }) {
     const el = scrollRef.current;
     const width = (el && el.clientWidth) || window.innerWidth || DESIGN_WIDTH;
     const height = (el && el.clientHeight) || window.innerHeight || DESIGN_HEIGHT;
-    const nextScale = Math.min(width / DESIGN_WIDTH, height / DESIGN_HEIGHT) || 1;
-
-    setLayout({
-      scale: nextScale,
-      offsetX: Math.max(0, (width - DESIGN_WIDTH * nextScale) / 2),
-      // minHeight is in the content's own coordinate space, so dividing by
-      // the scale renders to exactly the viewport height — keeps short
-      // content filling the window (viewport units are not used: the
-      // content is transformed, not reflowed).
-      minHeight: height / nextScale,
-    });
+    viewportRef.current = { width, height };
+    setViewport({ width, height });
   }, []);
 
   useEffect(() => {
@@ -84,23 +112,144 @@ export default function UiScale({ children }) {
     return () => observer.disconnect();
   }, []);
 
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return undefined;
+
+    const onScroll = () => {
+      setScrollLeft((previous) => (previous === el.scrollLeft ? previous : el.scrollLeft));
+    };
+
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(ZOOM_STORAGE_KEY, String(zoom));
+    } catch {
+      // A private/blocked localStorage must not break the zoom control.
+    }
+  }, [zoom]);
+
+  const stepZoom = useCallback((direction) => {
+    setZoom((previous) => {
+      const { width, height } = viewportRef.current;
+      const fit = Math.min(width / DESIGN_WIDTH, height / DESIGN_HEIGHT) || 1;
+      const current = previous === "fit" ? Math.round(fit * 100) : previous;
+      return clampZoom(current + direction * ZOOM_STEP);
+    });
+  }, []);
+
+  const fitZoom = useCallback(() => setZoom("fit"), []);
+
+  // Ctrl/Cmd + wheel and Ctrl/Cmd + - / = / 0 drive the UI zoom. Page zoom
+  // is already suppressed in main.jsx; this turns those gestures into the
+  // intentional one. Wheel events are throttled so trackpad pinch does not
+  // race through the whole range in one gesture.
+  useEffect(() => {
+    let lastWheelAt = 0;
+
+    const onWheel = (event) => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey || event.deltaY === 0) return;
+      event.preventDefault();
+      const now = performance.now();
+      if (now - lastWheelAt < 80) return;
+      lastWheelAt = now;
+      stepZoom(event.deltaY < 0 ? 1 : -1);
+    };
+
+    const onKeyDown = (event) => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+      if (["+", "="].includes(event.key)) {
+        event.preventDefault();
+        stepZoom(1);
+      } else if (["-", "_"].includes(event.key)) {
+        event.preventDefault();
+        stepZoom(-1);
+      } else if (event.key === "0") {
+        event.preventDefault();
+        fitZoom();
+      }
+    };
+
+    window.addEventListener("wheel", onWheel, { passive: false });
+    window.addEventListener("keydown", onKeyDown, { passive: false });
+    return () => {
+      window.removeEventListener("wheel", onWheel);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [stepZoom, fitZoom]);
+
+  const fitScale = Math.min(viewport.width / DESIGN_WIDTH, viewport.height / DESIGN_HEIGHT) || 1;
+  const isFit = zoom === "fit";
+  const scale = isFit ? fitScale : zoom / 100;
+
+  // Fit uses the extra width: the surface is at least the design width and
+  // otherwise fills the viewport, so a wide (or maximised) window gets more
+  // columns/chain cards instead of paper gutters. Manual zoom stays absolute
+  // — a 960-wide surface, centred or scrolled.
+  const layoutWidth = isFit
+    ? Math.max(DESIGN_WIDTH, viewport.width / scale)
+    : DESIGN_WIDTH;
+  const offsetX = Math.max(0, (viewport.width - layoutWidth * scale) / 2);
+  const effectivePercent = Math.round(scale * 100);
+
+  const contextValue = useMemo(
+    () => ({ scale, offsetX, overlayNode }),
+    [scale, offsetX, overlayNode],
+  );
+
   return (
-    <div className="ui-viewport">
-      <div className="ui-scroll" ref={scrollRef}>
-        <div className="ui-scaled" style={{ height: `${contentHeight * scale}px` }}>
+    <UiScaleContext.Provider value={contextValue}>
+      <div className="ui-viewport">
+        <div className="ui-scroll" ref={scrollRef}>
           <div
-            className="ui-content"
-            ref={contentRef}
+            className="ui-scaled"
             style={{
-              minHeight: `${minHeight}px`,
-              transform: `translateX(${offsetX}px) scale(${scale})`,
+              width: `${Math.max(viewport.width, layoutWidth * scale)}px`,
+              height: `${contentHeight * scale}px`,
             }}
           >
-            {children}
+            <div
+              className="ui-content"
+              ref={contentRef}
+              style={{
+                width: `${layoutWidth}px`,
+                // minHeight is in the content's own coordinate space, so
+                // dividing by the scale renders to exactly the viewport
+                // height — keeps short content filling the window (viewport
+                // units are not used: the content is transformed, not
+                // reflowed). Zooming out therefore shows more vertical
+                // content instead of stretching the app.
+                minHeight: `${viewport.height / scale}px`,
+                transform: `translateX(${offsetX}px) scale(${scale})`,
+              }}
+            >
+              {children}
+            </div>
           </div>
         </div>
+        {/* Fixed, pre-scaled overlay layer for the sticky quick bar (0059).
+            It shares the zoom transform but not the scroll. */}
+        <div className="ui-overlay">
+          <div
+            className="ui-overlay-scale"
+            ref={setOverlayNode}
+            style={{
+              width: `${layoutWidth}px`,
+              transform: `translateX(${offsetX - scrollLeft}px) scale(${scale})`,
+            }}
+          />
+        </div>
+        <UiZoomControl
+          effectivePercent={effectivePercent}
+          isFit={isFit}
+          onStep={stepZoom}
+          onFit={fitZoom}
+        />
+        <ResizeHandle />
       </div>
-      <ResizeHandle />
-    </div>
+    </UiScaleContext.Provider>
   );
 }

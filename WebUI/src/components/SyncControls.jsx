@@ -243,7 +243,7 @@ export function SyncControls({
         <Knob
           label="Click"
           min={-60}
-          max={0}
+          max={10}
           value={Number(clickLevel ?? 0)}
           onChange={onClickLevelChange}
           step="0.5"

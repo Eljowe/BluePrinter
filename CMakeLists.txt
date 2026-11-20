@@ -275,6 +275,7 @@ if(BUILD_TESTING)
         Tests/test_RestoreSelfHeal.cpp
         Tests/test_StemCapture.cpp
         Tests/test_SetlistStore.cpp
+        Tests/test_EditorWindowMath.cpp
         # Production sources under test. Kept deliberately minimal so the
         # test target never pulls in WebView2, the plugin host, or the
         # audio device layer.
@@ -322,6 +323,11 @@ if(BUILD_TESTING)
         add_test(NAME ScaleTheory
                  COMMAND ${BLUEPRINTER_NODE_EXECUTABLE}
                          ${CMAKE_CURRENT_SOURCE_DIR}/Tests/check-scale-theory.mjs)
+
+        # Songwriting chord theory (0058): pure JS in WebUI/src/chords.js.
+        add_test(NAME ChordTheory
+                 COMMAND ${BLUEPRINTER_NODE_EXECUTABLE}
+                         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/check-chord-theory.mjs)
     else()
         message(STATUS "node not found: BridgeEventParity test disabled")
     endif()

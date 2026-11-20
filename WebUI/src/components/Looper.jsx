@@ -297,6 +297,8 @@ export function Looper({ transport, onOverdubChange, onLoopLevelChange, onOverdu
   };
 
   const handleZoomWheel = (e) => {
+    // Ctrl/Cmd + wheel is the interface zoom (0060); leave it to UiScale.
+    if (e.ctrlKey || e.metaKey) return;
     if (!hasLoop || isRecording) return;
     e.preventDefault();
     const rect = e.currentTarget.getBoundingClientRect();

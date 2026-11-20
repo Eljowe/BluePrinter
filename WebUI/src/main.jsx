@@ -7,8 +7,9 @@ import "./styles.css";
 // WebView2 handles Ctrl+wheel / Ctrl +-  as page zoom by default, and JUCE
 // exposes no option to disable it. Page zoom scales the CSS pixel, which
 // would change the corner grip's visual size while the self-scaling UI
-// stays put (UiScale compensates). Suppress the zoom gestures so the grip
-// stays a constant size. Pinch-zoom arrives as ctrl+wheel on trackpads too.
+// stays put. Suppress the native page zoom; UiScale turns the same gestures
+// into the intentional interface zoom (0060). Pinch-zoom arrives as
+// ctrl+wheel on trackpads too.
 const suppressCtrlWheelZoom = (event) => {
   if (event.ctrlKey || event.metaKey) event.preventDefault();
 };

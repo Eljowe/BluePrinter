@@ -1,4 +1,5 @@
 #include "WebViewEditor.h"
+#include "EditorWindowMath.h"
 #include "PluginChain.h"
 #include "Vst3Library.h"
 #include "Tuner.h"
@@ -894,6 +895,11 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
             if (owner != nullptr)
                 owner->handleResizeEditor (data);
         })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetMaximisedEvent, [owner](juce::var data)
+        {
+            if (owner != nullptr)
+                owner->handleSetMaximised (data);
+        })
         .withEventListener(BluePrinterWebViewEditor::frontendScanVst3FolderEvent, [owner](juce::var)
         {
             if (owner != nullptr)
@@ -1086,7 +1092,11 @@ BluePrinterWebViewEditor::~BluePrinterWebViewEditor()
     disposed.store (true, std::memory_order_release);
 
     // Persist the final window size in case the app is closed before the
-    // debounce fired.
+    // debounce fired. Never persist the maximised bounds — keep the size
+    // the window will return to on the next launch.
+    if (maximised && preMaximiseEditorWidth > 0 && preMaximiseEditorHeight > 0)
+        audioProcessor.saveEditorSize (preMaximiseEditorWidth, preMaximiseEditorHeight);
+
     flushEditorSizePersist();
 
     cancelPendingUpdate();
@@ -1181,8 +1191,11 @@ void BluePrinterWebViewEditor::resized()
     webView.setBounds(getLocalBounds());
     fallbackLabel.setBounds(getLocalBounds().reduced(20));
 
-    // Arm the debounced persist of the (aspect-locked) window size.
-    if (getWidth() > 0 && getHeight() > 0)
+    // Arm the debounced persist of the (aspect-locked) window size. While
+    // maximised (or applying the maximise/restore layout) the bounds are
+    // transient: committing them would make the next launch open at the
+    // full screen size.
+    if (! maximised && ! applyingWindowLayout && getWidth() > 0 && getHeight() > 0)
     {
         pendingEditorWidth  = getWidth();
         pendingEditorHeight = getHeight();
@@ -1197,6 +1210,9 @@ void BluePrinterWebViewEditor::flushEditorSizePersist()
         return;
 
     editorSizePersistPending = false;
+    if (maximised)
+        return;
+
     if (pendingEditorWidth > 0 && pendingEditorHeight > 0)
         audioProcessor.saveEditorSize (pendingEditorWidth, pendingEditorHeight);
 }
@@ -1388,6 +1404,8 @@ juce::var BluePrinterWebViewEditor::makeSetlistsSnapshot() const
 juce::var BluePrinterWebViewEditor::makeTransportSnapshot() const
 {
     auto* obj = new juce::DynamicObject();
+    obj->setProperty ("standalone", juce::JUCEApplicationBase::isStandaloneApp());
+    obj->setProperty ("maximised", maximised);
     obj->setProperty ("recording", audioProcessor.isRecordingRequested());
     obj->setProperty ("recordingLength", audioProcessor.getRecordingLengthSamples());
     obj->setProperty ("recordingSampleRate", audioProcessor.getSampleRate());
@@ -2434,11 +2452,145 @@ void BluePrinterWebViewEditor::handleResizeEditor (const juce::var& data)
     if (delta == 0)
         return;
 
+    // A manual grip resize leaves maximise: the new bounds become the size
+    // Restore would have returned to, so the next toggle maximises afresh.
+    if (maximised)
+    {
+        maximised = false;
+        applyEditorSizeLimits();
+    }
+
     const auto newWidth = juce::jlimit (minDesignWidth, maxDesignWidth, getWidth() + delta);
     const auto newHeight = juce::roundToInt (static_cast<double> (newWidth) / designAspect);
 
     if (newWidth != getWidth() || newHeight != getHeight())
         setSize (newWidth, newHeight);
+}
+
+void BluePrinterWebViewEditor::handleSetMaximised (const juce::var& data)
+{
+    if (auto* obj = data.getDynamicObject())
+        setWindowMaximised (static_cast<bool> (obj->getProperty ("enabled")));
+}
+
+void BluePrinterWebViewEditor::setWindowMaximised (bool shouldBeMaximised)
+{
+    // In a DAW the host owns the top-level window, so there is nothing to
+    // maximise. The UI hides the control when `standalone` is false; this
+    // guard keeps a stray event inert too.
+    if (! juce::JUCEApplicationBase::isStandaloneApp())
+        return;
+
+    if (shouldBeMaximised == maximised)
+        return;
+
+    auto* window = dynamic_cast<juce::DocumentWindow*> (getTopLevelComponent());
+    if (window == nullptr)
+        return;
+
+    auto& displays = juce::Desktop::getInstance().getDisplays();
+
+    if (shouldBeMaximised)
+    {
+        preMaximiseEditorWidth  = getWidth();
+        preMaximiseEditorHeight = getHeight();
+        preMaximiseWindowPosition = window->getScreenPosition();
+
+        const auto* display = displays.getDisplayForRect (window->getScreenBounds());
+        if (display == nullptr)
+            display = displays.getPrimaryDisplay();
+
+        if (display == nullptr)
+            return;
+
+        const auto workArea = display->userArea;
+        const int chromeWidth  = juce::jmax (0, window->getWidth()  - getWidth());
+        const int chromeHeight = juce::jmax (0, window->getHeight() - getHeight());
+
+        const auto content = EditorWindowMath::computeFillContentSize (
+            workArea.getWidth(), workArea.getHeight(),
+            chromeWidth, chromeHeight,
+            minDesignWidth, minDesignHeight);
+
+        if (content.width <= 0 || content.height <= 0)
+            return;
+
+        // The normal editor constrainer fixes the 960:700 ratio and caps the
+        // window at 2x. Relax it first so the standalone wrapper accepts the
+        // full work-area rectangle (the UI's Fit mode stretches to the width).
+        relaxEditorSizeLimits();
+
+        applyingWindowLayout = true;
+        setSize (content.width, content.height);
+
+        // Centre using the computed window size rather than reading the
+        // wrapper's bounds back: the standalone wrapper may resize itself
+        // on the next message-loop turn.
+        window->setTopLeftPosition (workArea.getCentreX() - (content.width + chromeWidth) / 2,
+                                    workArea.getCentreY() - (content.height + chromeHeight) / 2);
+        applyingWindowLayout = false;
+
+        // Anything armed by the resize must not reach the properties file.
+        editorSizePersistPending = false;
+        maximised = true;
+    }
+    else
+    {
+        const int restoreWidth = preMaximiseEditorWidth > 0 ? preMaximiseEditorWidth : designWidth;
+        const int restoreHeight = preMaximiseEditorHeight > 0
+            ? preMaximiseEditorHeight
+            : juce::roundToInt (static_cast<double> (restoreWidth) / designAspect);
+
+        applyingWindowLayout = true;
+        setSize (restoreWidth, restoreHeight);
+
+        // Clamp the remembered position to the display it lands on, so a
+        // monitor change while maximised can't strand the window off-screen.
+        auto position = preMaximiseWindowPosition;
+        const auto bounds = window->getBounds().withPosition (position);
+        const auto* display = displays.getDisplayForRect (bounds);
+        if (display == nullptr)
+            display = displays.getPrimaryDisplay();
+
+        if (display != nullptr)
+        {
+            const auto area = display->userArea;
+            position.x = juce::jlimit (area.getX(),
+                                       juce::jmax (area.getX(), area.getRight() - bounds.getWidth()),
+                                       position.x);
+            position.y = juce::jlimit (area.getY(),
+                                       juce::jmax (area.getY(), area.getBottom() - bounds.getHeight()),
+                                       position.y);
+        }
+
+        window->setTopLeftPosition (position);
+
+        // Back to the normal aspect-locked resize limits before the next
+        // user-driven resize reaches the wrapper.
+        applyEditorSizeLimits();
+        applyingWindowLayout = false;
+
+        editorSizePersistPending = false;
+        maximised = false;
+    }
+}
+
+void BluePrinterWebViewEditor::applyEditorSizeLimits()
+{
+    if (auto* constrainer = getConstrainer())
+    {
+        constrainer->setSizeLimits (minDesignWidth, minDesignHeight, maxDesignWidth, maxDesignHeight);
+        constrainer->setFixedAspectRatio (designAspect);
+    }
+}
+
+void BluePrinterWebViewEditor::relaxEditorSizeLimits()
+{
+    if (auto* constrainer = getConstrainer())
+    {
+        constrainer->setSizeLimits (minDesignWidth, minDesignHeight, 100000, 100000);
+        constrainer->setFixedAspectRatio (0.0);
+    }
 }
 
 void BluePrinterWebViewEditor::scanVst3Folder (const juce::File& folder)

@@ -97,27 +97,27 @@ html, body {
 .ui-scroll {
   width: 100%;
   height: 100%;
-  overflow-y: auto;
-  overflow-x: hidden;
+  /* At Fit nothing overflows; a manual zoom above Fit scrolls both axes so
+     every edge of the enlarged surface is reachable. */
+  overflow: auto;
   /* Reserve the scrollbar gutter so the measured client width is stable
      whether or not the content currently scrolls. */
   scrollbar-gutter: stable;
 }
 
-/* Reserves the scaled content height for the scroll container, because a
-   transform does not affect layout.
-   `clip`, not `hidden`: the untransformed 960px content overflows this box
-   whenever the window is narrower than the design width, and an overflow
-   `hidden` box is still scrollable programmatically — focusing a control on
-   the right (e.g. a chain's MIDI toggle) made the browser scroll it into
-   view, sliding the whole UI left and leaving a blank strip on the right. */
+/* Reserves the scaled content size for the scroll container, because a
+   transform does not affect layout. UiScale sets the width/height inline.
+   `clip`, not `hidden`: at zoom-out the untransformed 960px content is wider
+   than this box, and an overflow `hidden` box is still scrollable
+   programmatically — focusing a control on the right used to slide the whole
+   UI left. At zoom-in the box is already the full scaled width, so normal
+   two-axis scrolling still works. */
 .ui-scaled {
-  width: 100%;
   overflow: clip;
 }
 
 .ui-content {
-  width: 960px;
+  width: 100%;
   transform-origin: top left;
   display: flex;
   flex-direction: column;
@@ -128,6 +128,96 @@ html, body {
   width: 100%;
   min-width: 0;
   min-height: 0;
+}
+
+/* Unscaled shell controls (0060): zoom + standalone maximise. Sits beside
+   the corner grip, outside the transformed content, so it is always
+   constant-size and reachable even at the 50% zoom floor. */
+.ui-shell-controls {
+  position: absolute;
+  right: 52px;
+  bottom: 10px;
+  z-index: 61;
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.ui-zoom-control {
+  display: flex;
+  align-items: stretch;
+  border: 2px solid var(--line);
+  background: var(--panel);
+  box-shadow: var(--shadow-hard-sm);
+}
+
+.ui-zoom-control button,
+.ui-maximise {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  height: 28px;
+  min-width: 30px;
+  padding: 0 8px;
+  cursor: pointer;
+}
+
+.ui-zoom-control button:hover:not(:disabled),
+.ui-maximise:hover {
+  background: var(--btn-hover-bg);
+}
+
+.ui-zoom-control button:disabled {
+  color: var(--ink-3);
+  cursor: default;
+  opacity: 0.5;
+}
+
+.ui-zoom-readout {
+  min-width: 82px;
+  border-left: 1px solid var(--line-soft);
+  border-right: 1px solid var(--line-soft);
+  text-align: center;
+  white-space: nowrap;
+}
+
+.ui-zoom-readout.is-fit {
+  color: var(--ink-3);
+}
+
+.ui-maximise {
+  border: 2px solid var(--line);
+  background: var(--panel);
+  box-shadow: var(--shadow-hard-sm);
+  font-size: 0.62rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* Fixed overlay layer (0059): a sibling of the scrolling, transformed content
+   so a pinned surface can sit at the window top without inheriting the scroll
+   or the `.ui-content` transform. Its inner element is scaled with the same
+   values as `.ui-content` so portalled UI stays on the design grid. */
+.ui-overlay {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 0;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 50;
+}
+
+.ui-overlay-scale {
+  width: 960px;
+  transform-origin: top left;
 }
 
 /* Corner resize grip — the only resize affordance (the native window has
@@ -360,7 +450,6 @@ button {
   min-height: 100vh;
   padding: 24px 30px 28px;
   gap: 26px;
-  max-width: 1200px;
   margin: 0 auto;
 }
 
@@ -612,6 +701,7 @@ button {
 .header-knobs {
   display: flex;
   align-items: flex-start;
+  justify-content: space-between;
   gap: 24px;
   padding: 16px 20px;
   background: var(--panel);
@@ -4499,6 +4589,917 @@ html:has(.bp-splash) {
   color: var(--ink-3);
 }
 
+/* Header Chords popover (0058): a frontend-only songwriting scratchpad. The
+   left rail ranks diatonic/borrowed chords against the selected pitch classes;
+   the right side is a one-octave piano and a scrollable standard fretboard. */
+.chords-help {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.chords-popover {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 40;
+  width: 780px;
+  max-height: 580px;
+  overflow-y: auto;
+  padding: 14px;
+  background: var(--panel);
+  border: 2px solid var(--line);
+  box-shadow: var(--shadow-hard-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.chords-popover-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.chords-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.chords-header-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.chords-mode-switch {
+  flex-shrink: 0;
+}
+
+.chords-popover-title {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+.chords-key-context {
+  font-family: var(--mono);
+  font-size: 0.55rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.chords-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--mono);
+  font-size: 0.56rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ink-3);
+}
+
+.chords-select {
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  background: var(--panel);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  padding: 2px 4px;
+}
+
+.chords-mode {
+  display: inline-flex;
+  border: 1px solid var(--line);
+}
+
+.chords-mode-btn {
+  border: 0;
+  border-right: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-size: 0.56rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 4px 7px;
+  cursor: pointer;
+}
+
+.chords-mode-btn:last-child {
+  border-right: 0;
+}
+
+.chords-mode-btn:hover {
+  background: var(--panel-2);
+  color: var(--ink);
+}
+
+.chords-mode-btn.is-on {
+  background: var(--line);
+  color: var(--on-ink);
+}
+
+.chords-body {
+  display: grid;
+  grid-template-columns: 270px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.chords-suggestions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  padding-right: 10px;
+  border-right: 1px solid var(--line-soft);
+}
+
+/* Prominent "what am I playing" readout. It used to be a small text row that
+   was easy to miss; the detected chord now gets its own card with a big symbol,
+   explicit kicker and actions. */
+.chords-detected-card {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px 9px 9px;
+  border: 1px solid var(--line-soft);
+  border-left: 3px solid var(--line);
+  background: var(--panel-2);
+}
+
+.chords-detected-card.has-chord {
+  border-left-color: var(--accent);
+}
+
+.chords-detected-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chords-kicker {
+  font-family: var(--mono);
+  font-size: 0.5rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink-3);
+}
+
+.chords-detected-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.chords-detected-actions .chords-clear {
+  margin-left: 0;
+}
+
+.chords-detected-add {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-size: 0.5rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 3px 5px;
+  cursor: pointer;
+}
+
+.chords-detected-add:hover:not(:disabled) {
+  background: var(--panel-2);
+  color: var(--ink);
+}
+
+.chords-detected-add.is-on {
+  background: var(--accent);
+  border-color: var(--accent-strong);
+  color: var(--on-ink);
+}
+
+.chords-detected-add:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.chords-detected-main {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+}
+
+.chords-detected-symbol {
+  font-family: var(--font-display);
+  font-size: 1.55rem;
+  font-weight: 400;
+  line-height: 1;
+  color: var(--ink);
+}
+
+.chords-detected-symbol.is-muted {
+  color: var(--ink-3);
+}
+
+.chords-detected-name {
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  min-width: 0;
+}
+
+.chords-detected-notes {
+  font-family: var(--mono);
+  font-size: 0.61rem;
+  letter-spacing: 0.03em;
+  color: var(--ink-2);
+  min-width: 0;
+}
+
+/* Chord set strip: collected chords and every scale that contains them all. */
+.chords-set {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 9px;
+  border: 1px solid var(--line-soft);
+  background: var(--panel-2);
+}
+
+.chords-set-head {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+
+.chords-set-count {
+  font-family: var(--mono);
+  font-size: 0.5rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+}
+
+.chords-set-clear {
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-size: 0.5rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0;
+  cursor: pointer;
+}
+
+.chords-set-clear:hover {
+  color: var(--ink);
+}
+
+.chords-set-hint,
+.chords-set-empty {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 0.54rem;
+  line-height: 1.45;
+  letter-spacing: 0.03em;
+  color: var(--ink-3);
+}
+
+.chords-set-hint strong {
+  color: var(--accent-ink);
+}
+
+.chords-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.chords-chip {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.chords-chip-main {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  padding: 4px 6px;
+  cursor: pointer;
+  font-family: var(--mono);
+}
+
+.chords-chip-main:hover {
+  background: var(--line-soft);
+}
+
+.chords-chip-symbol {
+  font-family: var(--font-display);
+  font-size: 0.78rem;
+  font-weight: 400;
+  line-height: 1;
+}
+
+.chords-chip-notes {
+  font-size: 0.5rem;
+  letter-spacing: 0.02em;
+  color: var(--ink-3);
+}
+
+.chords-chip-remove {
+  border: 0;
+  border-left: 1px solid var(--line-soft);
+  background: transparent;
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  line-height: 1;
+  padding: 0 6px;
+  cursor: pointer;
+}
+
+.chords-chip-remove:hover {
+  background: var(--accent);
+  color: var(--on-ink);
+}
+
+.chords-fit-row {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  flex-wrap: wrap;
+  padding-top: 5px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.chords-fit-label {
+  font-family: var(--mono);
+  font-size: 0.5rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-3);
+  flex-shrink: 0;
+}
+
+.chords-scale-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  min-width: 0;
+}
+
+.chords-scale-chip {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-size: 0.52rem;
+  letter-spacing: 0.02em;
+  padding: 2px 5px;
+  cursor: pointer;
+}
+
+.chords-scale-chip:hover {
+  background: var(--panel-2);
+  color: var(--ink);
+}
+
+.chords-scale-chip.is-preview {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+  color: var(--accent-ink);
+}
+
+.chords-clear {
+  margin-left: auto;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-size: 0.52rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 2px 5px;
+  cursor: pointer;
+}
+
+.chords-clear:hover:not(:disabled) {
+  background: var(--panel-2);
+  color: var(--ink);
+}
+
+.chords-clear:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.chords-clear-preview {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-size: 0.52rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 3px 6px;
+  cursor: pointer;
+}
+
+.chords-clear-preview:hover {
+  background: var(--panel-2);
+  color: var(--ink);
+}
+
+.chords-hint {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 0.54rem;
+  letter-spacing: 0.04em;
+  color: var(--ink-3);
+}
+
+.chords-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.chords-group-title {
+  margin: 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  border-bottom: 1px solid var(--line-soft);
+  padding-bottom: 3px;
+  font-family: var(--mono);
+  font-size: 0.56rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ink);
+}
+
+.chords-group-title span {
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  color: var(--ink-3);
+}
+
+.chords-suggestion-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.chords-suggestion-scroll.is-scroll {
+  max-height: 390px;
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
+}
+
+.chords-empty {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  line-height: 1.4;
+  color: var(--ink-3);
+}
+
+.chords-suggestion {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 5px;
+  border: 1px solid var(--line-soft);
+  background: var(--panel);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.chords-suggestion.is-chord {
+  padding: 0;
+  gap: 0;
+}
+
+.chords-suggestion-load {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 4px 5px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+
+.chords-suggestion.is-in-set {
+  border-color: var(--accent);
+}
+
+.chords-suggestion-add {
+  align-self: stretch;
+  flex: 0 0 auto;
+  width: 26px;
+  border: 0;
+  border-left: 1px solid var(--line-soft);
+  background: transparent;
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.chords-suggestion-add:hover {
+  background: var(--panel-2);
+  color: var(--ink);
+}
+
+.chords-suggestion-add.is-on {
+  background: var(--accent);
+  color: var(--on-ink);
+}
+
+.chords-suggestion:hover {
+  background: var(--panel-2);
+  border-color: var(--line);
+}
+
+.chords-suggestion.is-match,
+.chords-suggestion.is-preview {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.chords-suggestion-roman {
+  flex: 0 0 40px;
+  font-family: var(--mono);
+  font-size: 0.61rem;
+  font-weight: 700;
+  color: var(--accent-ink);
+}
+
+.chords-suggestion-main {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.chords-suggestion-name {
+  font-family: var(--font-display);
+  font-size: 0.76rem;
+  font-weight: 400;
+  line-height: 1.1;
+  color: var(--ink);
+}
+
+.chords-suggestion-notes {
+  font-family: var(--mono);
+  font-size: 0.52rem;
+  letter-spacing: 0.03em;
+  color: var(--ink-3);
+}
+
+.chords-suggestion-tag {
+  max-width: 64px;
+  font-family: var(--mono);
+  font-size: 0.44rem;
+  line-height: 1.15;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--ink-3);
+  text-align: right;
+}
+
+.chords-suggestion-match {
+  flex: 0 0 auto;
+  font-family: var(--mono);
+  font-size: 0.48rem;
+  color: var(--accent-ink);
+}
+
+.chords-instruments {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+}
+
+.chords-instrument-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.chords-instrument-title {
+  font-family: var(--font-display);
+  font-size: 0.72rem;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+.chords-instrument-hint {
+  font-family: var(--mono);
+  font-size: 0.52rem;
+  letter-spacing: 0.04em;
+  color: var(--ink-3);
+}
+
+.chords-fretboard-head {
+  margin-top: 3px;
+}
+
+.chords-fretboard-nav {
+  display: flex;
+  gap: 3px;
+  margin-left: auto;
+}
+
+.chords-scroll-btn {
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.chords-scroll-btn:hover:not(:disabled) {
+  background: var(--panel-2);
+}
+
+.chords-scroll-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+/* Piano: real white/black key geometry, all keys are toggle buttons. */
+.chords-piano {
+  position: relative;
+  height: 150px;
+  padding: 2px;
+  border: 2px solid var(--line);
+  background: var(--line);
+  overflow: hidden;
+}
+
+.chords-piano-whites {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+  height: 100%;
+}
+
+.chords-piano-blacks {
+  position: absolute;
+  inset: 2px;
+  pointer-events: none;
+}
+
+.chords-note {
+  position: relative;
+  font-family: var(--mono);
+  cursor: pointer;
+}
+
+/* In-scale is a shape cue, not only a colour change: a small dot on every
+   compatible key/fret. Root has its accent outline/shadow and selected notes
+   have the solid fill, so all four states remain distinguishable without
+   relying on hue. */
+.chords-note.is-in-scale::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--accent);
+  pointer-events: none;
+}
+
+.chords-note.is-white.is-in-scale::after {
+  right: auto;
+  left: 6px;
+}
+
+.chords-note.is-black.is-in-scale::after {
+  background: var(--on-ink);
+}
+
+.chords-note.is-selected::after {
+  display: none;
+}
+
+.chords-note.is-white {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  height: 100%;
+  padding: 0 0 7px;
+  border: 0;
+  background: var(--panel);
+  color: var(--ink-3);
+}
+
+.chords-note.is-white:hover {
+  background: var(--panel-2);
+}
+
+.chords-note.is-white.is-in-scale {
+  color: var(--ink);
+  background: var(--panel-2);
+}
+
+.chords-note.is-white.is-root {
+  box-shadow: inset 0 -4px 0 var(--accent);
+}
+
+.chords-note.is-white.is-selected {
+  background: var(--accent);
+  color: var(--on-ink);
+  box-shadow: inset 0 -4px 0 var(--accent-strong);
+}
+
+.chords-note.is-black {
+  position: absolute;
+  top: 0;
+  width: 8.6%;
+  height: 63%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0 0 5px;
+  border: 1px solid var(--line);
+  background: var(--line);
+  color: var(--line-soft);
+  pointer-events: auto;
+  z-index: 2;
+  box-shadow: 1px 1px 0 var(--line);
+}
+
+.chords-note.is-black:hover {
+  background: var(--ink-2);
+  color: var(--on-ink);
+}
+
+.chords-note.is-black.is-in-scale {
+  background: var(--ink-2);
+  color: var(--on-ink);
+}
+
+.chords-note.is-black.is-selected {
+  background: var(--accent);
+  border-color: var(--accent-strong);
+  color: var(--on-ink);
+}
+
+.chords-note.is-selected:focus-visible {
+  outline-color: var(--ink);
+}
+
+.chords-note-label {
+  font-size: 0.52rem;
+  letter-spacing: 0.02em;
+  pointer-events: none;
+}
+
+/* Fretboard: horizontal scroll container, every position clickable. */
+.chords-fretboard-scroll {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  padding: 5px;
+  border: 2px solid var(--line);
+  background: var(--panel);
+}
+
+.chords-fretboard-scroll:focus-visible {
+  outline-offset: -3px;
+}
+
+.chords-fretboard {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.chords-fret-numbers,
+.chords-string {
+  display: grid;
+  grid-template-columns: 24px repeat(var(--fret-count, 25), minmax(26px, 1fr));
+  align-items: center;
+  gap: 2px;
+}
+
+.chords-fret-number,
+.chords-string-name {
+  font-family: var(--mono);
+  font-size: 0.48rem;
+  color: var(--ink-3);
+  text-align: center;
+}
+
+.chords-string-name {
+  font-size: 0.56rem;
+  font-weight: 700;
+}
+
+.chords-string .chords-note {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 21px;
+  padding: 0;
+  border: 0;
+  background: var(--panel-2);
+  color: var(--ink-3);
+  font-size: 0.47rem;
+  font-weight: 700;
+}
+
+.chords-string .chords-note:hover {
+  background: var(--line-soft);
+  color: var(--ink);
+}
+
+.chords-string .chords-note.is-in-scale {
+  background: var(--line-soft);
+  color: var(--ink);
+}
+
+.chords-string .chords-note.is-root {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.chords-string .chords-note.is-selected {
+  background: var(--accent);
+  color: var(--on-ink);
+  outline: 2px solid var(--accent-strong);
+  outline-offset: -2px;
+}
+
+.chords-fret-note {
+  pointer-events: none;
+}
+
+.chords-scale-summary {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 0.55rem;
+  letter-spacing: 0.03em;
+  color: var(--ink-3);
+}
+
+.chords-scale-root {
+  color: var(--accent-ink);
+  font-weight: 700;
+}
+
 /* Interactive loop waveform (0031): the timeline children live on a track
    scaled by zoom and slid by pan; crop handles drag whole-beat bounds. */
 .looper-track {
@@ -4822,4 +5823,178 @@ html:has(.bp-splash) {
   color: var(--rec);
   border: 1px solid var(--rec);
   padding: 2px 5px;
+}
+
+/* ============================================================
+   Sticky quick-monitor bar (0059)
+   Pinned to the window once the Monitor section scrolls past: the
+   Input/REC/Output/Dry strip plus the practice tools, condensed to 56px
+   so it costs about 8% of the design height. Lives in the fixed overlay
+   layer (see `.ui-overlay`), slides down from above the window, and is an
+   overlay — it never reserves flow height or shifts the page.
+   ============================================================ */
+
+.quick-bar {
+  position: relative;
+  width: 100%;
+  height: 56px;
+  background: var(--bg);
+  border-bottom: 3px solid var(--line);
+  pointer-events: none;
+  transform: translateY(-100%);
+  visibility: hidden;
+  transition:
+    transform 0.18s cubic-bezier(0.2, 0.7, 0.2, 1),
+    visibility 0s linear 0.18s;
+}
+
+.quick-bar.is-visible {
+  pointer-events: auto;
+  transform: translateY(0);
+  visibility: visible;
+  transition:
+    transform 0.18s cubic-bezier(0.2, 0.7, 0.2, 1),
+    visibility 0s;
+}
+
+.quick-bar-inner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 100%;
+  padding: 0 30px;
+}
+
+.quick-bar-index {
+  flex-shrink: 0;
+}
+
+/* The tool cluster: same buttons as the header, sat on the baseline row. */
+.quick-bar .quick-tools {
+  align-items: center;
+  gap: 10px;
+  flex-wrap: nowrap;
+}
+
+.quick-bar .quick-tools > * {
+  flex-shrink: 0;
+}
+
+/* Popovers open from the bar's left edge instead of the button's right edge:
+   Chords is 780px wide, so right-anchoring it to a button at x≈220 would
+   push it off the left of the 960px design. */
+.quick-bar .tuner-help,
+.quick-bar .scales-help,
+.quick-bar .chords-help {
+  position: static;
+}
+
+.quick-bar .tuner-popover,
+.quick-bar .scales-popover,
+.quick-bar .chords-popover {
+  top: calc(100% + 6px);
+  right: auto;
+  left: 30px;
+}
+
+/* Monitor cells: knob + a readout column (label, dB value, hairline meter). */
+.quick-monitor {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.quick-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Compact dial: the Knob's own value/label rows are hidden (the readout
+   column carries them) so the whole cell fits the 56px bar. The slider role
+   and aria-valuetext are unchanged. */
+.quick-knob .knob-shell {
+  width: 32px;
+  height: 32px;
+}
+
+.quick-knob .knob-value,
+.quick-knob .knob-label {
+  display: none;
+}
+
+.quick-cell-readout {
+  display: grid;
+  grid-template-rows: 10px 13px 7px;
+  align-content: center;
+  gap: 2px;
+  width: 68px;
+}
+
+.quick-cell-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--mono);
+  font-size: 0.55rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  line-height: 1;
+}
+
+.quick-cell-value {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  line-height: 1;
+}
+
+.quick-cell-value i {
+  margin-left: 3px;
+  font-style: normal;
+  font-weight: 400;
+  font-size: 0.52rem;
+  color: var(--ink-3);
+}
+
+.quick-cell-value.is-blank {
+  visibility: hidden;
+}
+
+/* The REC cell keeps the row height of the knob cells so all three meters
+   line up. */
+.quick-cell--meter .quick-cell-readout {
+  width: 68px;
+}
+
+.quick-lamp {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--line-soft);
+}
+
+.quick-lamp.is-on {
+  background: var(--rec);
+  box-shadow: 0 0 5px var(--rec);
+  animation: status-blink 1.2s linear infinite;
+}
+
+/* Hairline meter: the shared LevelMeter at bar scale. */
+.quick-meter .level-meter-track {
+  height: 7px;
+  border-width: 1px;
+}
+
+.quick-meter .level-meter-clip {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 6px;
 }
