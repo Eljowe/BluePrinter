@@ -1102,6 +1102,8 @@ BluePrinterAudioProcessor::~BluePrinterAudioProcessor()
     // session (e.g. a volume knob drag finished moments before closing)
     // is not lost.
     flushPendingChainPersist();
+    // The same for a song edit made within the 500 ms debounce window (0065).
+    flushSongPersist();
 }
 
 //==============================================================================
@@ -1294,6 +1296,7 @@ void BluePrinterAudioProcessor::releaseResources()
     // is being stopped and the host may tear the plugin down.
     flushPendingChainPersist();
     flushTagNamePersist();
+    flushSongPersist();
     takeRecorder.cancelCountIn();
     transportPosition.store (0, std::memory_order_release);
     if (takeRecorder.isRecordingRequested())
@@ -3052,8 +3055,10 @@ bool BluePrinterAudioProcessor::deleteSnippet (int id)
         if (snippet != nullptr)
             SnippetLibrary::deleteSavedFiles (*snippet);
 
-        // A deleted snippet leaves every setlist (0035).
+        // A deleted snippet leaves every setlist (0035) and every song's
+        // section link (0065).
         pruneSetlistsAgainstLibrary();
+        pruneSongsAgainstLibrary();
 
         listeners.call ([](Listener& l) { l.libraryChanged(); l.transportChanged(); });
     }
@@ -3159,6 +3164,7 @@ int BluePrinterAudioProcessor::deleteSnippets (const std::vector<int>& ids)
         return 0;
 
     pruneSetlistsAgainstLibrary();
+    pruneSongsAgainstLibrary();
     listeners.call ([](Listener& l) { l.libraryChanged(); l.transportChanged(); });
     return removed;
 }
@@ -3358,8 +3364,10 @@ void BluePrinterAudioProcessor::setLibraryFolder (const juce::File& folder)
         library.loadFromFolder (folder, loadError);
     }
 
-    // Snippets whose files vanished leave every setlist (0035).
+    // Snippets whose files vanished leave every setlist (0035) and every
+    // song's section link (0065).
     pruneSetlistsAgainstLibrary();
+    pruneSongsAgainstLibrary();
 
     listeners.call ([](Listener& l) { l.libraryChanged(); });
 }
@@ -3378,8 +3386,10 @@ void BluePrinterAudioProcessor::refreshLibraryFromFolder()
         library.loadFromFolder (folder, loadError);
     }
 
-    // Snippets whose files vanished leave every setlist (0035).
+    // Snippets whose files vanished leave every setlist (0035) and every
+    // song's section link (0065).
     pruneSetlistsAgainstLibrary();
+    pruneSongsAgainstLibrary();
 
     listeners.call ([](Listener& l) { l.libraryChanged(); });
 }
@@ -3837,11 +3847,18 @@ void BluePrinterAudioProcessor::flushSetlistPersist()
     }
 }
 
-juce::String BluePrinterAudioProcessor::createSetlist (const juce::String& name)
+juce::String BluePrinterAudioProcessor::createSetlist (const juce::String& name, const std::vector<int>& ids)
 {
     const auto id = setlists.create (name);
     if (id.isNotEmpty())
     {
+        // 0065: the Song tab creates a setlist with its linked recordings in
+        // section order. Skip invalid ids and duplicates; the plain
+        // { name } payload leaves the setlist empty.
+        for (int snippetId : ids)
+            if (snippetId > 0 && library.findById (snippetId) != nullptr)
+                setlists.addSnippet (id, snippetId);
+
         armSetlistPersist();
         listeners.call ([](Listener& l) { l.libraryChanged(); });
     }
@@ -3901,6 +3918,60 @@ void BluePrinterAudioProcessor::pruneSetlistsAgainstLibrary()
 
     if (setlists.prune (validIds))
         armSetlistPersist();
+}
+
+std::vector<Song> BluePrinterAudioProcessor::getSongs() const
+{
+    return songs.all();
+}
+
+void BluePrinterAudioProcessor::armSongPersist()
+{
+    songPersistPending = true;
+    songPersistDeadline = juce::Time::currentTimeMillis() + 500;
+}
+
+void BluePrinterAudioProcessor::flushSongPersist()
+{
+    if (! songPersistPending)
+        return;
+
+    songPersistPending = false;
+    if (auto* props = getUserState())
+    {
+        props->setValue ("songs", songs.toJson());
+        props->saveIfNeeded();
+    }
+}
+
+bool BluePrinterAudioProcessor::saveSong (const Song& song)
+{
+    if (! songs.upsert (song))
+        return false;
+
+    armSongPersist();
+    listeners.call ([](Listener& l) { l.libraryChanged(); });
+    return true;
+}
+
+bool BluePrinterAudioProcessor::deleteSong (const juce::String& id)
+{
+    if (! songs.remove (id))
+        return false;
+
+    armSongPersist();
+    listeners.call ([](Listener& l) { l.libraryChanged(); });
+    return true;
+}
+
+void BluePrinterAudioProcessor::pruneSongsAgainstLibrary()
+{
+    std::vector<int> validIds;
+    for (const auto& snippet : library.snapshot())
+        validIds.push_back (snippet->id);
+
+    if (songs.prune (validIds))
+        armSongPersist();
 }
 
 int BluePrinterAudioProcessor::getSavedEditorWidth()
@@ -4197,9 +4268,11 @@ void BluePrinterAudioProcessor::timerCallback()
     if (tagPersistPending && juce::Time::currentTimeMillis() >= tagPersistDeadline)
         flushTagNamePersist();
 
-    // Same for the named setlists (0035).
+    // Same for the named setlists (0035) and songs (0065).
     if (setlistPersistPending && juce::Time::currentTimeMillis() >= setlistPersistDeadline)
         flushSetlistPersist();
+    if (songPersistPending && juce::Time::currentTimeMillis() >= songPersistDeadline)
+        flushSongPersist();
 
     // Flush the debounced snippet-gain save (Gain knob drags).
     if (snippetGainPersistPending
@@ -5303,6 +5376,20 @@ void BluePrinterAudioProcessor::restoreUserState()
             validIds.push_back (snippet->id);
         if (setlists.prune (validIds))
             armSetlistPersist();
+    }
+
+    // 4. Songs (0065). JSON array of planning documents; loaded after the
+    //    folder for the same reason, then every link to a missing snippet is
+    //    cleared (and persisted).
+    const auto songsJson = props->getValue ("songs");
+    if (songsJson.isNotEmpty())
+        songs.fromJson (songsJson);
+    {
+        std::vector<int> validIds;
+        for (const auto& snippet : library.snapshot())
+            validIds.push_back (snippet->id);
+        if (songs.prune (validIds))
+            armSongPersist();
     }
 
     // VST3 chain restoration is deliberately NOT done here: it must run

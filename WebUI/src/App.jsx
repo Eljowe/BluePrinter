@@ -13,10 +13,12 @@ import { Notification } from "./components/Notification";
 import { PluginChain } from "./components/PluginChain";
 import { PluginManager } from "./components/PluginManager";
 import { Looper } from "./components/Looper";
+import { Song } from "./components/Song";
 import { SplashScreen } from "./components/SplashScreen";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { BACKEND_EVENTS, FRONTEND_EVENTS, emit, getInitialData, subscribe } from "./bridge";
 import { SCALE_IDS, reconcileActiveTool } from "./utils";
+import { normaliseSong } from "./songModel";
 import iconUrl from "./icon.svg";
 import { IconArrowDown } from "./components/icons";
 
@@ -38,12 +40,27 @@ const CLIP_KEYS = {
 const SPLASH_MIN_MS = 900;
 const SPLASH_FADE_MS = 400;
 
-// Which recording approach the tab bar shows: the one-shot take recorder
-// or the looper. Persisted so the plugin reopens where you left off.
+// Which recording approach the tab bar shows: the one-shot take recorder,
+// the looper, or the song planner. Persisted so the plugin reopens where you
+// left off.
 const RECORDING_MODE_KEY = "bp:recordingMode";
+const RECORDING_MODES = ["take", "loop", "song"];
 
 function readInitialRecordingMode() {
-  return localStorage.getItem(RECORDING_MODE_KEY) === "loop" ? "loop" : "take";
+  const stored = localStorage.getItem(RECORDING_MODE_KEY);
+  return stored === "loop" || stored === "song" ? stored : "take";
+}
+
+// Song builder (0065): the active song id is a frontend choice, validated
+// against each snippets payload (fallback: first song, else null).
+const ACTIVE_SONG_KEY = "bp:activeSongId";
+
+function readInitialActiveSongId() {
+  try {
+    return localStorage.getItem(ACTIVE_SONG_KEY) || null;
+  } catch {
+    return null;
+  }
 }
 
 // Practice-scale choice (0053), persisted like the recording tab. Validated
@@ -98,6 +115,12 @@ function readInitialTagNames() {
 function readInitialSetlists() {
   const raw = getInitialData().setlists;
   return Array.isArray(raw) ? raw : [];
+}
+
+function readInitialSongs() {
+  const raw = getInitialData().songs;
+  if (!Array.isArray(raw)) return [];
+  return raw.map(normaliseSong).filter(Boolean);
 }
 
 function readInitialTransport() {
@@ -200,6 +223,12 @@ export default function App() {
   const [snippets, setSnippets] = useState(readInitialSnippets);
   const [tagNames, setTagNames] = useState(readInitialTagNames);
   const [setlists, setSetlists] = useState(readInitialSetlists);
+  const [songs, setSongs] = useState(readInitialSongs);
+  const [activeSongId, setActiveSongId] = useState(readInitialActiveSongId);
+  // Song capture context (0065). Lifted out of <Song> because recording a
+  // section switches to the Take/Loop tab and unmounts the planner; the
+  // section badge and Save & attach need the remembered section afterwards.
+  const [songCapture, setSongCapture] = useState(null);
   const [transport, setTransport] = useState(readInitialTransport);
   const [notification, setNotification] = useState(null);
   const [dragActive, setDragActive] = useState(false);
@@ -333,9 +362,9 @@ export default function App() {
   const handleRecordingTabsKeyDown = (e) => {
     if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
     e.preventDefault();
-    const next = e.key === "ArrowRight"
-      ? (recordingMode === "take" ? "loop" : "take")
-      : (recordingMode === "loop" ? "take" : "loop");
+    const index = RECORDING_MODES.indexOf(recordingMode);
+    const step = e.key === "ArrowRight" ? 1 : -1;
+    const next = RECORDING_MODES[(index + step + RECORDING_MODES.length) % RECORDING_MODES.length];
     handleRecordingModeChange(next);
     document.getElementById(`recording-tab-${next}`)?.focus();
   };
@@ -382,6 +411,9 @@ export default function App() {
 
       if (e.key === " ") {
         if (isControl(document.activeElement)) return;
+        // The Song tab owns Space: the selected section is local to <Song>,
+        // so this handler must neither preventDefault nor record here.
+        if (recordingMode === "song") return;
         e.preventDefault();
         if (recordingMode === "take") {
           const capturing = transport.recording || transport.preRollActive;
@@ -486,6 +518,7 @@ export default function App() {
         if (Array.isArray(payload.snippets)) setSnippets(payload.snippets);
         if (payload.tagNames && typeof payload.tagNames === "object") setTagNames(payload.tagNames);
         if (Array.isArray(payload.setlists)) setSetlists(payload.setlists);
+        if (Array.isArray(payload.songs)) setSongs(payload.songs.map(normaliseSong).filter(Boolean));
         setTransport((prev) => ({
           ...prev,
           libraryFolder: payload.libraryFolder ?? prev.libraryFolder,
@@ -903,6 +936,64 @@ export default function App() {
   };
   const handleSetSetlistOrder = (id, ids) => emit(FRONTEND_EVENTS.setSetlistOrder, { id, ids });
 
+  // Song builder (0065): the active song is a frontend choice; a payload
+  // that no longer contains it falls back to the first song (else none).
+  // Reconcile only when the songs payload changes, so a just-created id is
+  // never clobbered by the payload that predates it.
+  const activeSongIdRef = useRef(activeSongId);
+  activeSongIdRef.current = activeSongId;
+
+  const handleActiveSongChange = (id) => {
+    setActiveSongId(id ?? null);
+    try {
+      if (id) localStorage.setItem(ACTIVE_SONG_KEY, id);
+      else localStorage.removeItem(ACTIVE_SONG_KEY);
+    } catch {
+      /* storage unavailable — keep the in-memory choice only */
+    }
+  };
+
+  useEffect(() => {
+    const current = activeSongIdRef.current;
+    if (songs.length === 0) {
+      if (current !== null) handleActiveSongChange(null);
+      return;
+    }
+    if (!songs.some((song) => song.id === current))
+      handleActiveSongChange(songs[0].id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [songs]);
+
+  // A section capture context goes stale when the take/loop is discarded from
+  // the Take or Loop tab instead of the Song tab. Poll (with a short grace so
+  // the click that armed it isn't mistaken for a stale capture before the
+  // first transport push) and clear it once the media is gone and nothing is
+  // recording.
+  const transportRef = useRef(transport);
+  transportRef.current = transport;
+
+  useEffect(() => {
+    if (!songCapture) return undefined;
+    const armedAt = Number(songCapture.startedAt ?? Date.now());
+
+    const check = () => {
+      const current = transportRef.current;
+      const capturingNow = Boolean(current.recording || current.preRollActive
+        || current.looperRecording || current.looperPreRoll);
+      if (capturingNow) return;
+      if (Date.now() - armedAt < 1500) return;
+
+      const gone = songCapture.mode === "take"
+        ? !current.takePending
+        : Number(current.audioLoopLength ?? 0) <= 0;
+      if (gone) setSongCapture(null);
+    };
+
+    check();
+    const timer = setInterval(check, 750);
+    return () => clearInterval(timer);
+  }, [songCapture]);
+
   const playingSnippet = transport.playingSnippetId >= 0 ? snippets.find((s) => s.id === transport.playingSnippetId) : null;
   const playPositionSeconds = playingSnippet && playingSnippet.sampleRate > 0
     ? transport.playingPosition / playingSnippet.sampleRate
@@ -1087,6 +1178,21 @@ export default function App() {
               >
                 Loop
               </button>
+              <button
+                type="button"
+                role="tab"
+                id="recording-tab-song"
+                aria-selected={recordingMode === "song"}
+                aria-controls="recording-panel-song"
+                tabIndex={recordingMode === "song" ? 0 : -1}
+                className={`recording-tab ${recordingMode === "song" ? "is-active" : ""}`}
+                onClick={() => handleRecordingModeChange("song")}
+              >
+                Song
+                {songCapture ? (
+                  <span className="recording-tab-badge" title="Section capture waiting to attach" aria-label="Section capture pending" />
+                ) : null}
+              </button>
             </div>
 
             <SyncControls
@@ -1130,7 +1236,7 @@ export default function App() {
 
               <TakeReview transport={transport} />
             </div>
-          ) : (
+          ) : recordingMode === "loop" ? (
             <div id="recording-panel-loop" className="recording-panel" role="tabpanel" aria-labelledby="recording-tab-loop">
               <Looper
                 transport={transport}
@@ -1138,6 +1244,19 @@ export default function App() {
                 onLoopLevelChange={handleLoopLevelChange}
                 onOverdubLevelChange={handleOverdubLevelChange}
                 onResetClip={handleResetClip}
+              />
+            </div>
+          ) : (
+            <div id="recording-panel-song" className="recording-panel" role="tabpanel" aria-labelledby="recording-tab-song">
+              <Song
+                songs={songs}
+                snippets={snippets}
+                transport={transport}
+                activeSongId={activeSongId}
+                onActiveSongChange={handleActiveSongChange}
+                onSwitchTab={handleRecordingModeChange}
+                pendingCapture={songCapture}
+                onPendingCaptureChange={setSongCapture}
               />
             </div>
           )}

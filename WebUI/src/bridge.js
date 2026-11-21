@@ -91,7 +91,7 @@ export const FRONTEND_EVENTS = {
   renameTag: "frontendRenameTag",
   // Named setlists (0035): ordered groups of snippets stored in the
   // properties file and shipped with every snippets payload as `setlists`.
-  createSetlist: "frontendCreateSetlist",             // { name }
+  createSetlist: "frontendCreateSetlist",             // { name, ids? }
   renameSetlist: "frontendRenameSetlist",             // { id, name }
   deleteSetlist: "frontendDeleteSetlist",             // { id }
   addSnippetToSetlist: "frontendAddSnippetToSetlist", // { setlistId, id }
@@ -101,6 +101,11 @@ export const FRONTEND_EVENTS = {
   setSnippetsColor: "frontendSetSnippetsColor",       // { ids, color }
   deleteSnippets: "frontendDeleteSnippets",           // { ids }
   addSnippetsToSetlist: "frontendAddSnippetsToSetlist", // { setlistId, ids }
+  // Song builder (0065): { song } upserts a planning document (sections,
+  // chords, one linked recording per section); { id } deletes one. The song
+  // array rides the existing snippets payload as `songs`.
+  saveSong: "frontendSaveSong",
+  deleteSong: "frontendDeleteSong",
   setMetronome: "frontendSetMetronome",
   setBpm: "frontendSetBpm",
   // { t } — a tap at a monotonic timestamp (ms) for tap tempo. The backend

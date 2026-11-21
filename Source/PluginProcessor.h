@@ -24,6 +24,7 @@
 #include "Looper.h"
 #include "StemCapture.h"
 #include "SetlistStore.h"
+#include "SongStore.h"
 #include "RestoreSelfHeal.h"
 #include "ChainStatePersistence.h"
 #include "DelayCompensation.h"
@@ -552,12 +553,23 @@ public:
     // JSON array under the `setlists` properties key. Message thread only.
     // Every mutation persists (debounced) and notifies libraryChanged.
     std::vector<SetlistEntry> getSetlists() const;
-    juce::String createSetlist (const juce::String& name);
+    // `ids` (0065) seeds an ordered membership in the same call; the plain
+    // { name } payload still creates an empty setlist.
+    juce::String createSetlist (const juce::String& name, const std::vector<int>& ids = {});
     bool renameSetlist (const juce::String& id, const juce::String& name);
     bool deleteSetlist (const juce::String& id);
     bool addSnippetToSetlist (const juce::String& id, int snippetId);
     bool removeSnippetFromSetlist (const juce::String& id, int snippetId);
     bool setSetlistOrder (const juce::String& id, const std::vector<int>& snippetIds);
+
+    // Song builder (0065): planning documents (sections, chords, one linked
+    // recording per section), persisted as a JSON array under the `songs`
+    // properties key. Every mutation arms the debounced persist and fires
+    // libraryChanged so the UI reconciles through the snippets payload.
+    // Message thread only.
+    std::vector<Song> getSongs() const;
+    bool saveSong (const Song& song);
+    bool deleteSong (const juce::String& id);
 
     // Editor window size, persisted in the properties file so a resized
     // window is restored on the next launch (the JUCE standalone wrapper
@@ -727,6 +739,13 @@ private:
     void armSetlistPersist();
     void flushSetlistPersist();
     void pruneSetlistsAgainstLibrary();
+    // Song builder (0065), same debounced-persist pattern as setlists.
+    SongStore songs;
+    bool songPersistPending = false;
+    int64_t songPersistDeadline = 0;
+    void armSongPersist();
+    void flushSongPersist();
+    void pruneSongsAgainstLibrary();
     // Debounced per-snippet gain persist: the Gain knob emits on every
     // pointer move, so both the sidecar write and the (expensive) library
     // snapshot push are deferred to timerCallback. The in-memory value is

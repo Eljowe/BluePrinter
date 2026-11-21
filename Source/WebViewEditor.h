@@ -139,6 +139,10 @@ public:
     static constexpr const char* frontendSetSnippetsColorEvent = "frontendSetSnippetsColor";
     static constexpr const char* frontendDeleteSnippetsEvent   = "frontendDeleteSnippets";
     static constexpr const char* frontendAddSnippetsToSetlistEvent = "frontendAddSnippetsToSetlist";
+    // Song builder (0065): { song } upserts a planning document, { id }
+    // deletes one. The song array rides the snippets payload as `songs`.
+    static constexpr const char* frontendSaveSongEvent         = "frontendSaveSong";
+    static constexpr const char* frontendDeleteSongEvent       = "frontendDeleteSong";
     static constexpr const char* frontendSetMetronomeEvent     = "frontendSetMetronome";
     static constexpr const char* frontendSetBpmEvent           = "frontendSetBpm";
     // { t } — a tap at a monotonic JS timestamp (ms). The backend averages
@@ -312,6 +316,7 @@ public:
     juce::var makeSnippetsSnapshot() const;
     juce::var makeTagNamesSnapshot() const;
     juce::var makeSetlistsSnapshot() const;
+    juce::var makeSongsSnapshot() const;
     juce::var makeTransportSnapshot() const;
 
     // Fire a transient notification to the frontend. Public so the

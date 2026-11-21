@@ -69,6 +69,7 @@ target_sources(BluePrinter PRIVATE
     Source/RestoreSelfHeal.cpp
     Source/StemCapture.cpp
     Source/SetlistStore.cpp
+    Source/SongStore.cpp
     Source/ChainStatePersistence.cpp)
 
 target_include_directories(BluePrinter PRIVATE
@@ -279,6 +280,7 @@ if(BUILD_TESTING)
         Tests/test_RestoreSelfHeal.cpp
         Tests/test_StemCapture.cpp
         Tests/test_SetlistStore.cpp
+        Tests/test_SongStore.cpp
         Tests/test_EditorWindowMath.cpp
         # Production sources under test. Kept deliberately minimal so the
         # test target never pulls in WebView2, the plugin host, or the
@@ -297,7 +299,8 @@ if(BUILD_TESTING)
         Source/Resampler.cpp
         Source/RestoreSelfHeal.cpp
         Source/StemCapture.cpp
-        Source/SetlistStore.cpp)
+        Source/SetlistStore.cpp
+        Source/SongStore.cpp)
 
     juce_generate_juce_header(BluePrinterTests)
 
@@ -332,6 +335,11 @@ if(BUILD_TESTING)
         add_test(NAME ChordTheory
                  COMMAND ${BLUEPRINTER_NODE_EXECUTABLE}
                          ${CMAKE_CURRENT_SOURCE_DIR}/Tests/check-chord-theory.mjs)
+
+        # Song-builder model (0065): pure JS in WebUI/src/songModel.js.
+        add_test(NAME SongModel
+                 COMMAND ${BLUEPRINTER_NODE_EXECUTABLE}
+                         ${CMAKE_CURRENT_SOURCE_DIR}/Tests/check-song-model.mjs)
     else()
         message(STATUS "node not found: BridgeEventParity test disabled")
     endif()

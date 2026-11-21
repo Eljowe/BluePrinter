@@ -170,6 +170,17 @@ helper) were triaged and are now implemented, `done`.** **0049 (tap tempo)** and
 load, snippet playback seek) were also implemented, all `done`. 0051 and 0052
 still start `needs-triage`.
 
+### Phase 11 - Song builder
+
+| Ticket | Title | Status | Blocked by |
+| ------ | ----- | ------ | ---------- |
+| [0065](0065-song-builder.md) | Song builder: plan sections, chords and recordings | in-progress | - |
+
+0065 is the **plan + record** scope agreed on 2026-11-21: a third Song tab with
+sections, chords, melody notes, per-section loop/take capture and attach, a
+copyable chart and setlist creation. Rehearsal (a click-only transport with a
+live section/bar/chord highlight) is designed as the fast follow, not v1.
+
 ## Roadmap notes
 
 - Ordered by risk-reduction first, then user-visible wins, with the refactor

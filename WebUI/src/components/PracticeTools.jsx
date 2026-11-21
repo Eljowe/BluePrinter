@@ -102,7 +102,7 @@ export function PracticeTools({
       <details className="shortcut-help">
         <summary title="Keyboard shortcuts">Keyboard</summary>
         <dl className="shortcut-list">
-          <div><dt>Space</dt><dd>Start / stop capture (Take or Loop tab)</dd></div>
+          <div><dt>Space</dt><dd>Start / stop capture (Take or Loop tab; records the selected Song section)</dd></div>
           <div><dt>Enter</dt><dd>Save the selected take's trimmed region</dd></div>
           <div><dt>Delete</dt><dd>Delete the selected take (no confirmation)</dd></div>
           <div><dt>T</dt><dd>Tap tempo</dd></div>

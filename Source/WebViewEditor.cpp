@@ -177,6 +177,109 @@ juce::var snippetToVar (const Snippet& s, bool melodyAnalysing)
 
     return juce::var (obj);
 }
+
+// Song builder (0065): the payload field names are the contract shared with
+// WebUI/src/songModel.js — keep them in step.
+juce::var songToVar (const Song& song)
+{
+    auto* obj = new juce::DynamicObject();
+    obj->setProperty ("version", 1);
+    obj->setProperty ("id", song.id);
+    obj->setProperty ("name", song.name);
+    obj->setProperty ("keyRoot", song.keyRoot);
+    obj->setProperty ("keyScale", song.keyScale);
+    obj->setProperty ("bpm", static_cast<double> (song.bpm));
+    obj->setProperty ("numerator", song.numerator);
+    obj->setProperty ("denominator", song.denominator);
+
+    juce::Array<juce::var> sections;
+    sections.ensureStorageAllocated (static_cast<int> (song.sections.size()));
+    for (const auto& section : song.sections)
+    {
+        auto* sectionObj = new juce::DynamicObject();
+        sectionObj->setProperty ("id", section.id);
+        sectionObj->setProperty ("name", section.name);
+        sectionObj->setProperty ("bars", section.bars);
+
+        juce::Array<juce::var> chords;
+        chords.ensureStorageAllocated (static_cast<int> (section.chords.size()));
+        for (const auto& chord : section.chords)
+        {
+            auto* chordObj = new juce::DynamicObject();
+            chordObj->setProperty ("bar", chord.bar);
+            chordObj->setProperty ("symbol", chord.symbol);
+            chordObj->setProperty ("name", chord.name);
+            chords.add (juce::var (chordObj));
+        }
+        sectionObj->setProperty ("chords", juce::var (chords));
+        sectionObj->setProperty ("idea", section.idea);
+        sectionObj->setProperty ("snippetId", section.snippetId);
+        sectionObj->setProperty ("recordedBpm", static_cast<double> (section.recordedBpm));
+        sectionObj->setProperty ("recordedBars", section.recordedBars);
+        sections.add (juce::var (sectionObj));
+    }
+
+    obj->setProperty ("sections", juce::var (sections));
+    return juce::var (obj);
+}
+
+// Parse one song payload. Every value is optional; SongStore::upsert
+// sanitises the result, so this only has to be type-safe.
+Song songFromVar (const juce::var& value)
+{
+    Song song;
+
+    const auto* obj = value.getDynamicObject();
+    if (obj == nullptr)
+        return song;
+
+    song.id = obj->getProperty ("id").toString();
+    song.name = obj->getProperty ("name").toString();
+    song.keyRoot = static_cast<int> (obj->getProperty ("keyRoot"));
+    song.keyScale = obj->getProperty ("keyScale").toString();
+    song.bpm = static_cast<float> (static_cast<double> (obj->getProperty ("bpm")));
+    song.numerator = static_cast<int> (obj->getProperty ("numerator"));
+    song.denominator = static_cast<int> (obj->getProperty ("denominator"));
+
+    if (const auto* sections = obj->getProperty ("sections").getArray())
+    {
+        for (const auto& sectionValue : *sections)
+        {
+            const auto* sectionObj = sectionValue.getDynamicObject();
+            if (sectionObj == nullptr)
+                continue;
+
+            SongSection section;
+            section.id = sectionObj->getProperty ("id").toString();
+            section.name = sectionObj->getProperty ("name").toString();
+            section.bars = static_cast<int> (sectionObj->getProperty ("bars"));
+            section.idea = sectionObj->getProperty ("idea").toString();
+            section.snippetId = static_cast<int> (sectionObj->getProperty ("snippetId"));
+            section.recordedBpm = static_cast<float> (static_cast<double> (sectionObj->getProperty ("recordedBpm")));
+            section.recordedBars = static_cast<int> (sectionObj->getProperty ("recordedBars"));
+
+            if (const auto* chords = sectionObj->getProperty ("chords").getArray())
+            {
+                for (const auto& chordValue : *chords)
+                {
+                    const auto* chordObj = chordValue.getDynamicObject();
+                    if (chordObj == nullptr)
+                        continue;
+
+                    SongChord chord;
+                    chord.bar = static_cast<int> (chordObj->getProperty ("bar"));
+                    chord.symbol = chordObj->getProperty ("symbol").toString();
+                    chord.name = chordObj->getProperty ("name").toString();
+                    section.chords.push_back (std::move (chord));
+                }
+            }
+
+            song.sections.push_back (std::move (section));
+        }
+    }
+
+    return song;
+}
 }
 
 juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor& processor,
@@ -526,7 +629,15 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
         .withEventListener(BluePrinterWebViewEditor::frontendCreateSetlistEvent, [&processor](juce::var data)
         {
             if (auto* obj = data.getDynamicObject())
-                processor.createSetlist (obj->getProperty ("name").toString());
+            {
+                // 0065: the Song tab seeds the ordered linked recordings in
+                // the same call; a plain { name } payload still works.
+                std::vector<int> ids;
+                if (auto* arr = obj->getProperty ("ids").getArray())
+                    for (const auto& v : *arr)
+                        ids.push_back (static_cast<int> (v));
+                processor.createSetlist (obj->getProperty ("name").toString(), ids);
+            }
         })
         .withEventListener(BluePrinterWebViewEditor::frontendRenameSetlistEvent, [&processor](juce::var data)
         {
@@ -594,6 +705,20 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
                         ids.push_back (static_cast<int> (v));
                 processor.addSnippetsToSetlist (obj->getProperty ("setlistId").toString(), ids);
             }
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendSaveSongEvent, [&processor, owner](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+            {
+                if (! processor.saveSong (songFromVar (obj->getProperty ("song"))))
+                    if (owner != nullptr)
+                        owner->sendNotification ("Could not save the song — a name is required.", "error");
+            }
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendDeleteSongEvent, [&processor](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+                processor.deleteSong (obj->getProperty ("id").toString());
         })
         .withEventListener(BluePrinterWebViewEditor::frontendSetMetronomeEvent, [&processor](juce::var data)
         {
@@ -965,6 +1090,7 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
         .withInitialisationData("snippets", owner->makeSnippetsSnapshot())
         .withInitialisationData("tagNames", owner->makeTagNamesSnapshot())
         .withInitialisationData("setlists", owner->makeSetlistsSnapshot())
+        .withInitialisationData("songs", owner->makeSongsSnapshot())
         .withInitialisationData("transport", owner->makeTransportSnapshot());
 
    #if JUCE_WINDOWS
@@ -1378,6 +1504,7 @@ void BluePrinterWebViewEditor::emitLibraryToFrontend()
     obj->setProperty ("snippets", makeSnippetsSnapshot());
     obj->setProperty ("tagNames", makeTagNamesSnapshot());
     obj->setProperty ("setlists", makeSetlistsSnapshot());
+    obj->setProperty ("songs", makeSongsSnapshot());
     webView.emitEventIfBrowserIsVisible(juce::Identifier(backendSnippetsEvent), juce::var (obj));
 }
 
@@ -1423,6 +1550,16 @@ juce::var BluePrinterWebViewEditor::makeSetlistsSnapshot() const
         obj->setProperty ("ids", juce::var (ids));
         arr.add (juce::var (obj));
     }
+    return juce::var (arr);
+}
+
+juce::var BluePrinterWebViewEditor::makeSongsSnapshot() const
+{
+    juce::Array<juce::var> arr;
+    const auto songs = audioProcessor.getSongs();
+    arr.ensureStorageAllocated (static_cast<int> (songs.size()));
+    for (const auto& song : songs)
+        arr.add (songToVar (song));
     return juce::var (arr);
 }
 

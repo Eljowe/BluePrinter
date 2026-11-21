@@ -646,6 +646,8 @@ export function Looper({ transport, onOverdubChange, onLoopLevelChange, onOverdu
                 <option value="2">2 bars</option>
                 <option value="4">4 bars</option>
                 <option value="8">8 bars</option>
+                <option value="12">12 bars</option>
+                <option value="16">16 bars</option>
               </select>
             </label>
           </div>
