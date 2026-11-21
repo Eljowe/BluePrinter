@@ -295,3 +295,8 @@ Three fixes from review (build/tests were already green):
 Docs updated (ADR-0009, AGENTS.md, this ticket) to the corrected start/lead-in
 wording. Re-verified below; still no commit and still `in-progress` pending the
 real-WebView2 smoke test.
+
+- 2026-11-21: Linux CI caught a juce::var -> int64_t ambiguity in the
+  rontendSetPracticeRunning handler (int64_t is long on Linux while the
+  var conversion is juce::int64). The cast now uses juce::int64;
+  Windows/macOS were unaffected. Local Release build and CTest 5/5 green.

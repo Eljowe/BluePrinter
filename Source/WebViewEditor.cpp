@@ -835,7 +835,7 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
         {
             if (auto* obj = data.getDynamicObject())
                 processor.setPracticeRunning (static_cast<bool> (obj->getProperty ("enabled")),
-                                              static_cast<int64_t> (obj->getProperty ("startSample")));
+                                              static_cast<juce::int64> (obj->getProperty ("startSample")));
         })
         .withEventListener(BluePrinterWebViewEditor::frontendSetLooperRecordingEvent, [&processor](juce::var data)
         { if (auto* obj = data.getDynamicObject()) processor.setLooperRecording (static_cast<bool> (obj->getProperty ("enabled"))); })
