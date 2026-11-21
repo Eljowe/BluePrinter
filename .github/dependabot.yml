@@ -2,15 +2,42 @@ version: 2
 # Actions are pinned to commit SHAs in .github/workflows/build.yml. Dependabot
 # keeps those pins (and the WebUI npm dependencies) moving with weekly PRs, so
 # the SHA pins cannot silently rot.
+#
+# Major versions are deliberately ignored: they are breaking migrations that
+# need a deliberate pass (React 19, Vite 8, action runtime bumps) and a real
+# WebView2/CI check, not a drive-by merge. Minor and patch updates are grouped
+# into one PR per ecosystem so the queue stays short.
 updates:
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    groups:
+      actions-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-major"
 
   - package-ecosystem: "npm"
     directory: "/WebUI"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    groups:
+      webui-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-major"
