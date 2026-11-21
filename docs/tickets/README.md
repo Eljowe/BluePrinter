@@ -149,6 +149,13 @@ before claiming.
 | [0061](0061-find-scales-from-notes.md) | Find scales from selected notes in the Chords tool | done | — |
 | [0062](0062-fill-screen-fluid-width.md) | Fill the screen: maximise to the whole work area and let the UI use the width | done | — |
 
+### Phase 10 — Structural debt (audit follow-ups)
+
+| Ticket | Title | Status | Blocked by |
+| ------ | ----- | ------ | ---------- |
+| [0063](0063-split-app-and-styles.md) | Split App.jsx and styles.css into feature modules | needs-triage | — |
+| [0064](0064-reduce-agents-context-budget.md) | Reduce the always-loaded AGENTS.md context budget | ready-for-agent | — |
+
 Themes: **audio integrity** (0046–0048) and **practice & songwriting**
 (0049–0054). Suggested order: 0046 → 0049/0050 → 0051 → 0052, with 0047/0048,
 0053 and 0054 as smaller follow-ups.
@@ -181,3 +188,7 @@ still start `needs-triage`.
   `done`.** **0060 (UI zoom + maximise)** and **0062 (fill the screen + fluid
   width)** are implemented and `done` (the C++ build still needs a Windows/CI
   pass; the WebUI, bridge parity and pure-math checks are green).
+- **Phase 10** holds the two remaining structural findings from the safety audit:
+  0063 (split `App.jsx`/`styles.css`) is `needs-triage` because it needs a real
+  WebView2 visual check, and 0064 (trim the always-loaded `AGENTS.md`) is
+  `ready-for-agent` — mechanical, no design decisions, but must not lose a fact.

@@ -1,0 +1,14 @@
+# Line-ending and diff policy.
+#
+# Text files are stored with LF in the repository and checked out with the
+# platform's native endings. Do not run a mass `git add --renormalize` unless
+# you intend to rewrite history-wide line endings.
+* text=auto
+
+# Binary assets: never normalise or diff these as text.
+*.wav  binary
+*.vst3 binary
+*.png  binary
+*.ico  binary
+*.pdf  binary
+*.zip  binary

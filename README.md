@@ -171,23 +171,62 @@ trim monitoring level while recording.
 
 ## Prerequisites
 
-- Windows 10/11
-- Visual Studio 2022 with the *Desktop development with C++* workload
+Per-platform source-build requirements (ADR-0006). The pinned JUCE is the
+same version everywhere — **8.0.14** — at `C:/JUCE/JUCE` (override with
+`-DJUCE_DIR=...`).
+
+**All platforms**
+
 - CMake 3.22+
-- Node.js 18+ and npm
-- JUCE source tree at `C:/JUCE/JUCE` (override with `-DJUCE_DIR=...` if yours
-  is elsewhere). The project builds against **JUCE 8.0.14 plus the patch in
+- Node.js 18+ and npm (builds the React UI)
+- A JUCE 8.0.14 source tree at `C:/JUCE/JUCE`, or `-DJUCE_DIR="C:/path/to/JUCE"`
+
+**Windows**
+
+- Visual Studio 2022 with the *Desktop development with C++* workload
+- The project builds against **JUCE 8.0.14 plus the patch in
   [`cmake/patches/juce-webview2-additional-args.patch`](cmake/patches/juce-webview2-additional-args.patch)**,
-  which adds `WinWebView2::withAdditionalBrowserArguments` (used by the editor to
-  pass `--allow-no-sandbox-job --disable-gpu`). Apply it to a stock tree with
+  which adds `WinWebView2::withAdditionalBrowserArguments` (used by the editor
+  to pass `--allow-no-sandbox-job --disable-gpu`). Apply it to a stock tree with
   `git -C C:/JUCE/JUCE apply <path-to-patch>`; CI does the same after checkout.
-- Microsoft Edge **WebView2 Runtime** (preinstalled on Windows 10/11 in
-  most setups; otherwise the editor falls back to a plain message)
+  macOS and Linux use stock JUCE — the patch touches `WinWebView2` only.
+- Microsoft Edge **WebView2 Runtime** (preinstalled on Windows 10/11 in most
+  setups; otherwise the editor falls back to a plain message). CI additionally
+  fetches the **WebView2 SDK** from NuGet into
+  `JUCE_WEBVIEW2_PACKAGE_LOCATION`; a local build needs the SDK available to
+  JUCE (e.g. the same NuGet package, or a path passed via that variable).
+
+**macOS 11+ (universal)**
+
+- Xcode command-line tools (`xcode-select --install`)
+- Stock JUCE 8.0.14 (no patch, no WebView2 SDK) — the editor uses **WKWebView**
+  from the OS
+- Builds **AU + VST3 + Standalone** (CMake adds `AU` on `APPLE`)
+
+**Linux (Ubuntu 22.04+)**
+
+- `build-essential`, CMake, Node.js 18+ (and `git` for the JUCE checkout)
+- Stock JUCE 8.0.14, with the usual JUCE dev packages plus **WebKitGTK 4.1**
+  (the backend for `Backend::webkitgtk`). The exact list CI uses
+  ([`.github/workflows/build.yml`](.github/workflows/build.yml)):
+  `libasound2-dev libjack-jackd2-dev libfreetype6-dev libfontconfig1-dev
+  libx11-dev libxcomposite-dev libxcursor-dev libxext-dev libxinerama-dev
+  libxrandr-dev libxrender-dev libgtk-3-dev libwebkit2gtk-4.1-dev
+  libglu1-mesa-dev mesa-common-dev librsvg2-bin`
+- Builds VST3 + Standalone; the runtime needs `libwebkit2gtk-4.1-0`
 
 ## Configure
 
+On Windows with Visual Studio 2022:
+
 ```
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+```
+
+On macOS/Linux (or with Ninja anywhere) omit `-G`/`-A`:
+
+```
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 ```
 
 If JUCE is elsewhere:
@@ -217,16 +256,21 @@ cmake --build build --config Debug --target BluePrinter_VST3
 ### Continuous integration
 
 Every push to `master` and every pull request runs
-[`.github/workflows/build.yml`](.github/workflows/build.yml) on `windows-latest`.
-It builds the WebUI (`npm ci && npm run build`), configures CMake against a pinned
-JUCE (the workflow's `JUCE_VERSION`, **8.0.14**) with **Ninja + MSVC** — deliberately
-not the `Visual Studio 17 2022` generator, which broke when GitHub repointed
+[`.github/workflows/build.yml`](.github/workflows/build.yml) as four jobs:
+**Windows** (`windows-latest`), **macOS** (`macos-latest`) and **Linux**
+(`ubuntu-latest`) build the WebUI (`npm ci && npm run build`), configure CMake
+against a pinned JUCE (the workflow's `JUCE_VERSION`, **8.0.14**), build the
+**Release** targets, run the pure-logic CTest suite, and upload their artifacts
+(the macOS job packages the unsigned `.dmg`, the Linux job the `.deb` +
+AppImage). The Windows job uses **Ninja + MSVC** — deliberately not the
+`Visual Studio 17 2022` generator, which broke when GitHub repointed
 `windows-latest` to a VS 2026 image — applies the required JUCE patch from
-`cmake/patches/`, builds the **Release** standalone + VST3, runs the
-pure-logic CTest suite, and uploads both binaries as downloadable artifacts.
-The WebView2 SDK is fetched from NuGet and passed via
-`JUCE_WEBVIEW2_PACKAGE_LOCATION`. No secrets are needed — the output is unsigned
+`cmake/patches/`, and fetches the WebView2 SDK from NuGet into
+`JUCE_WEBVIEW2_PACKAGE_LOCATION`; macOS/Linux use stock JUCE (no patch). A
+fourth, advisory job runs `BluePrinterTests` under **ASan/UBSan** on Linux
+(see `build-linux-sanitizers`). No secrets are needed — the output is unsigned
 (code signing is tracked separately).
+
 
 ## Run
 

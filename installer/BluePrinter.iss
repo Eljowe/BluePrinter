@@ -14,7 +14,8 @@
 ;   every DAW scans by default - no registry entries needed.
 ; - VC++ redistributable and the WebView2 Runtime are downloaded at
 ;   install time only when missing (the app is a WebView2 host and links
-;   the dynamic MSVC runtime, /MD).
+;   the dynamic MSVC runtime, /MD). Both are evergreen Microsoft downloads,
+;   so they are not hash-pinned — see the [Code] section.
 ; - Uninstall intentionally does NOT touch %APPDATA%\Retrokielto or the
 ;   snippet library folder - those are user data.
 
@@ -70,6 +71,17 @@ Filename: "{tmp}\WebView2Setup.exe"; Parameters: "/silent /install"; StatusMsg: 
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent
 
 [Code]
+// Microsoft VC++ redistributable / WebView2 Runtime downloads.
+//
+// Both URLs are Microsoft HTTPS endpoints (aka.ms and go.microsoft.com both
+// redirect to https://download.microsoft.com). The payloads are EVERGREEN:
+// their SHA-256 changes whenever Microsoft republishes, so pinning a hash here
+// would break the installer on the next update. DownloadTemporaryFile's hash
+// argument is therefore intentionally empty ('' below).
+//
+// The real integrity control for what users run is CODE SIGNING (ticket 0015);
+// until it lands the installer is unsigned and SmartScreen warns about it (see
+// README). This is a known residual, not an oversight.
 const
   VCRedistUrl = 'https://aka.ms/vs/17/release/vc_redist.x64.exe';
   WebView2Url = 'https://go.microsoft.com/fwlink/p/?LinkId=2124703';

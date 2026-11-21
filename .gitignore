@@ -4,3 +4,7 @@
 build/
 WebUI/node_modules/
 WebUI/dist/
+
+# Compiled objects that can end up in the repo root (e.g. scripts/pdbmap.cpp
+# built next to it). Never source.
+*.obj
