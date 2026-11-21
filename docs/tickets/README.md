@@ -154,7 +154,7 @@ before claiming.
 | Ticket | Title | Status | Blocked by |
 | ------ | ----- | ------ | ---------- |
 | [0063](0063-split-app-and-styles.md) | Split App.jsx and styles.css into feature modules | needs-triage | — |
-| [0064](0064-reduce-agents-context-budget.md) | Reduce the always-loaded AGENTS.md context budget | ready-for-agent | — |
+| [0064](0064-reduce-agents-context-budget.md) | Reduce the always-loaded AGENTS.md context budget | done | — |
 
 Themes: **audio integrity** (0046–0048) and **practice & songwriting**
 (0049–0054). Suggested order: 0046 → 0049/0050 → 0051 → 0052, with 0047/0048,
@@ -204,5 +204,5 @@ live section/bar/chord highlight) is designed as the fast follow, not v1.
   pass; the WebUI, bridge parity and pure-math checks are green).
 - **Phase 10** holds the two remaining structural findings from the safety audit:
   0063 (split `App.jsx`/`styles.css`) is `needs-triage` because it needs a real
-  WebView2 visual check, and 0064 (trim the always-loaded `AGENTS.md`) is
+  WebView2 visual check, and 0064 (trim the always-loaded `AGENTS.md`, now 14.7 KB with the mechanics in `docs/architecture/`) is
   `ready-for-agent` — mechanical, no design decisions, but must not lose a fact.

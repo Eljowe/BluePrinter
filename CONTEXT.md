@@ -3,8 +3,9 @@
 A cross-platform guitar take-recorder plugin (VST3 + Standalone; AU on macOS)
 that hosts parallel VST3 FX chains, records takes and loops from the processed
 signal, and files them in a local snippet library. This file defines the
-project's language and shape; deep implementation detail lives in
-[`AGENTS.md`](AGENTS.md).
+project's language and shape; the always-loaded rules and the map live in
+[`AGENTS.md`](AGENTS.md), and implementation mechanics live in
+[`docs/architecture/`](docs/architecture/README.md).
 
 ## Language
 
@@ -266,6 +267,11 @@ _Avoid_: Message, IPC event
 
 | Area | Where |
 | ---- | ----- |
+| Architecture docs (on-demand mechanics moved out of AGENTS.md) | `docs/architecture/` |
+| Signal flow, chains/routing, PDC, capture, takes, stems, meters, clock | `docs/architecture/audio-path.md` |
+| Chain persistence, deferred restore, self-heal, presets, diagnostics | `docs/architecture/chain-restore.md` |
+| React shell, bridge payloads, scaling, splash, library/songs UI | `docs/architecture/webui.md` |
+| Build, WebView2 patch, ASIO, tasks, CI, packaging/release | `docs/architecture/build-and-ci.md` |
 | Audio processor, routing, state, restore | `Source/PluginProcessor.h/.cpp` |
 | WebView2 editor + bridge dispatch | `Source/WebViewEditor.h/.cpp` |
 | VST3 chain + async loading | `Source/PluginChain.h/.cpp` |

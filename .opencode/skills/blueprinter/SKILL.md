@@ -18,10 +18,10 @@ Audio input -> Input trim (APVTS Gain, dB) -> +-> [chain 0] ----> sum -> + -> Me
 - **Processor** (`Source/PluginProcessor.h/.cpp`): owns all state — APVTS (`Gain` → Input, `PlaybackVolume` → Output, both dB), the chain list, takes/looper recording + playback, metronome, MIDI clock, persistence. The editor is a listener/view; the frontend mirrors state.
 - **UI bridge** (`Source/WebViewEditor.h/.cpp`): WebView2 editor, all frontend↔backend events. The React side never talks to C++ directly except through `bridge.js`.
 - **React UI** (`WebUI/src/`): `App.jsx` subscribes to backend events and passes state down; components emit mutations.
-- **Chains**: parallel VST3 FX chains in `std::vector<std::shared_ptr<PluginChain>>` (guarded by `chainLock`; the audio thread refreshes a `shared_ptr` snapshot under `tryEnter()`, reusing the previous block's on contention, and removed chains/slots are retired and reclaimed after two successful snapshot refills). Stable ids, per-chain input mask / MIDI / record / volume / mute. Full model: AGENTS.md "VST3 Chains".
-- **Recording**: takes + looper share `recordBuffer` as live capture scratch, capture the record mix (dry + `recordOnCapture` chains), never capture simultaneously. Each stopped take is copied into its own buffer and appended to a bounded stack (8 / 256 MB) in `TakeRecorder` (TakeReview → select/audition/save/delete); Dub layers onto the selected take. Full model: AGENTS.md "VST3 Chains" + "Recording".
-- **MIDI clock + click**: header-level toggles, Start/Stop queued to a lock-free `MidiSendQueue` and sent to the output device by `MidiClockOutput`'s sender thread, click gating. Full model: AGENTS.md "MIDI clock".
-- **Deferred restore**: saved chains load one plugin per message-loop turn; persist is gated while restoring. Full model: AGENTS.md "Deferred chain restore".
+- **Chains**: parallel VST3 FX chains in `std::vector<std::shared_ptr<PluginChain>>` (guarded by `chainLock`; the audio thread refreshes a `shared_ptr` snapshot under `tryEnter()`, reusing the previous block's on contention, and removed chains/slots are retired and reclaimed after two successful snapshot refills). Stable ids, per-chain input mask / MIDI / record / volume / mute. Full model: `docs/architecture/audio-path.md`.
+- **Recording**: takes + looper share `recordBuffer` as live capture scratch, capture the record mix (dry + `recordOnCapture` chains), never capture simultaneously. Each stopped take is copied into its own buffer and appended to a bounded stack (8 / 256 MB) in `TakeRecorder` (TakeReview → select/audition/save/delete); Dub layers onto the selected take. Full model: `docs/architecture/audio-path.md`.
+- **MIDI clock + click**: header-level toggles, Start/Stop queued to a lock-free `MidiSendQueue` and sent to the output device by `MidiClockOutput`'s sender thread, click gating. Full model: `docs/architecture/audio-path.md`.
+- **Deferred restore**: saved chains load one plugin per message-loop turn; persist is gated while restoring. Full model: `docs/architecture/chain-restore.md`.
 
 ## Key Files
 
@@ -46,6 +46,7 @@ Audio input -> Input trim (APVTS Gain, dB) -> +-> [chain 0] ----> sum -> + -> Me
 
 - **React WebUI / WebView2 bridge** (events, payloads, component patterns, CSS, Vite build, add-a-new-event recipe): load the **webui-bridge** skill.
 - **C++ JUCE audio patterns** (`processBlock` order, APVTS, threading, plugin chains, snippets, adding a parameter): load the **juce-audio** skill.
-- **Always-loaded model details** (chains, routing, MIDI clock, deferred restore, splash, persistence): AGENTS.md.
+- **Always-loaded rules, map and per-area summaries** (chains ownership, persist/restore rules, event naming): [`AGENTS.md`](../../../AGENTS.md).
+- **Implementation mechanics and incident history** (load on demand): [`docs/architecture/`](../../../docs/architecture/README.md) — `audio-path.md` (chains, PDC, capture, clock), `chain-restore.md` (restore, self-heal, presets), `webui.md` (shell, bridge payloads, scaling, songs), `build-and-ci.md` (build, CI, release).
 - **Coding conventions** (C++/React/threading/formatting, no linters): AGENTS.md "Coding Conventions".
-- **Build commands**: AGENTS.md "Commands"; WebUI build in the webui-bridge skill.
+- **Build commands**: AGENTS.md "Commands"; WebUI build in the webui-bridge skill; full build/CI/release in `docs/architecture/build-and-ci.md`.
