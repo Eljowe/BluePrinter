@@ -124,14 +124,14 @@ jobs:
         run: ctest --test-dir build --output-on-failure
 
       - name: Upload standalone
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: BluePrinter-Standalone
           path: build/BluePrinter_artefacts/Release/Standalone/BluePrinter.exe
           if-no-files-found: error
 
       - name: Upload VST3
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: BluePrinter-VST3
           path: build/BluePrinter_artefacts/Release/VST3/BluePrinter.vst3
@@ -199,7 +199,7 @@ jobs:
         run: bash installer/build-macos-release.sh
 
       - name: Upload macOS DMG
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: BluePrinter-macOS
           path: build/release/*-macos/BluePrinter-*.dmg
@@ -273,7 +273,7 @@ jobs:
         run: bash installer/build-linux-release.sh
 
       - name: Upload Linux packages
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: BluePrinter-Linux
           path: |
