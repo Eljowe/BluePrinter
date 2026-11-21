@@ -1,7 +1,7 @@
 ---
 id: "0048"
 title: "Monitor/output clip guard"
-status: ready-for-agent
+status: in-progress
 blocked_by: []
 ---
 
@@ -126,16 +126,16 @@ written before the Output gain, so an overloaded monitor hard-clips the DAC.
 
 **Acceptance criteria:**
 
-- [ ] Pure-module unit tests: output magnitude never exceeds the ceiling for inputs well
+- [x] Pure-module unit tests: output magnitude never exceeds the ceiling for inputs well
       above it; near-unity for inputs well below the knee; monotonic; deterministic;
       honours the full −12..0 dBFS range; disabled is a no-op.
-- [ ] With the guard on, `recordingMixBuffer` / the print and the record meter are
+- [x] With the guard on, `recordingMixBuffer` / the print and the record meter are
       unchanged (monitor-only).
-- [ ] The OUT meter reads the guarded signal; the clip LED latches when the guard
+- [x] The OUT meter reads the guarded signal; the clip LED latches when the guard
       engages and clears via `frontendResetClip { target: "output" }`.
-- [ ] Enabled + ceiling persist across restart and round-trip in the transport snapshot.
-- [ ] No audio-thread allocation or locks are added.
-- [ ] The bridge event parity test, the CTest suite and the WebUI build stay green.
+- [x] Enabled + ceiling persist across restart and round-trip in the transport snapshot.
+- [x] No audio-thread allocation or locks are added.
+- [x] The bridge event parity test, the CTest suite and the WebUI build stay green.
 - [ ] Manual smoke test: a too-hot monitor saturates smoothly instead of hard-clipping;
       the print is unchanged; the clip LED warns while the guard is limiting.
 
@@ -156,3 +156,15 @@ listing; add the term to `CONTEXT.md` if useful.
 
 2026-09-14 — Triaged and moved to `ready-for-agent`; open questions resolved as
 decisions 1–8 in the Agent Brief above.
+
+2026-11-21 — Implemented: `Source/SoftClip.h` (pure `ceilingGain`/`shape`/
+`processBuffer`, unit-tested in `Tests/test_SoftClip.cpp`), processor step 13c
+after the Output gain and tuner mute and before the OUT meter (monitor-only,
+latches the OUT clip when it engages), host-state persistence, the two frontend
+events + `clipGuardEnabled`/`clipGuardCeiling` snapshot fields, and the Monitor
+deck Guard toggle + ceiling popover (`HeaderControls.jsx`, `styles.css`). The
+C++ build, the CTest suite (including bridge parity) and the WebUI build are
+green. The only remaining item is the manual real-WebView2/DAW smoke test
+(the unchecked acceptance criterion above): a too-hot monitor should saturate
+smoothly, the print must stay unchanged, and the OUT clip LED should warn while
+the guard is limiting.

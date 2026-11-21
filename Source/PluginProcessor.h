@@ -383,6 +383,15 @@ public:
     float getOverdubLevel() const { return overdubLevel.load (std::memory_order_acquire); }
     void setOverdubLevel (float levelDb);
 
+    // Monitor/output soft-clip guard (0048), applied after the master Output
+    // and the tuner monitor mute, immediately before the OUT meter. Off by
+    // default; the ceiling (dBFS, -12..0) is the soft clip's asymptote. It
+    // never changes the print — monitor-only.
+    bool isClipGuardEnabled() const { return clipGuardEnabled.load (std::memory_order_acquire); }
+    void setClipGuardEnabled (bool enabled);
+    float getClipGuardCeilingDb() const { return clipGuardCeilingDb.load (std::memory_order_acquire); }
+    void setClipGuardCeilingDb (float ceilingDb);
+
     // Master click level (dB, -60..0; minimum mutes). Monitor-only,
     // independent of the tick/accent balance and persisted in host state.
     float getClickLevel() const { return clickLevel.load (std::memory_order_acquire); }
@@ -910,6 +919,9 @@ private:
     std::atomic<float>   loopLevel        { 0.0f };
     std::atomic<float>   dryLevel         { 0.0f };
     std::atomic<float>   overdubLevel     { 0.0f };
+    // Monitor/output soft-clip guard (0048), persisted in host state.
+    std::atomic<bool>    clipGuardEnabled   { false };
+    std::atomic<float>   clipGuardCeilingDb { -1.0f };
     std::atomic<int64_t> transportPosition { 0 };
     std::atomic<int64_t> metronomePosition { 0 };
     int loopCrossfadeSamples = 0;

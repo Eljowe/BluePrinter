@@ -819,6 +819,176 @@ button {
   animation: status-blink 1.2s linear infinite;
 }
 
+/* Monitor/output soft-clip guard (0048): a compact toggle in the Monitor deck
+   with its ceiling knob in an anchored popover (the Click-sound pattern). */
+.monitor-cell--guard {
+  position: relative;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+/* The toggle and its ceiling disclosure sit joined as one compact control. */
+.monitor-guard-row {
+  display: inline-flex;
+  align-items: stretch;
+}
+
+.monitor-guard {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border: 2px solid var(--line-soft);
+  background: var(--panel);
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.08s linear, border-color 0.08s linear, color 0.08s linear;
+}
+
+.monitor-guard:hover {
+  border-color: var(--line);
+  color: var(--ink);
+}
+
+.monitor-guard.is-on {
+  border-color: var(--line);
+  background: var(--accent-dim);
+  color: var(--accent-ink);
+}
+
+.monitor-guard.is-engaged {
+  border-color: var(--rec);
+  color: var(--rec-dark);
+}
+
+/* Ceiling disclosure: opens the popover, never changes the guard state. It
+   shares the toggle's height and visual language, with the shared edge as a
+   single border. */
+.monitor-guard-caret {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 32px;
+  padding: 0;
+  border: 2px solid var(--line-soft);
+  border-left: none;
+  background: var(--panel);
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.08s linear, border-color 0.08s linear, color 0.08s linear;
+}
+
+.monitor-guard-caret:hover {
+  border-color: var(--line);
+  background: var(--btn-hover-bg);
+  color: var(--ink);
+}
+
+.monitor-guard-caret.is-on {
+  border-color: var(--line);
+}
+
+.monitor-guard-caret.is-open {
+  background: var(--panel-2);
+  color: var(--ink);
+}
+
+.monitor-guard-caret span {
+  display: block;
+  transition: transform 0.08s linear;
+}
+
+.monitor-guard-caret.is-open span {
+  transform: rotate(180deg);
+}
+
+.monitor-guard-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--line-soft);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+.monitor-guard.is-on .monitor-guard-dot {
+  background: var(--accent);
+}
+
+.monitor-guard.is-engaged .monitor-guard-dot {
+  background: var(--rec);
+  box-shadow: 0 0 6px var(--rec);
+  animation: status-blink 1.2s linear infinite;
+}
+
+.monitor-guard-value {
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.guard-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 30;
+  width: 196px;
+  padding: 14px;
+  background: var(--panel);
+  border: 2px solid var(--line);
+  box-shadow: 5px 5px 0 var(--line);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.guard-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+}
+
+.guard-popover-title {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.guard-popover-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.guard-popover-hint {
+  margin: 0;
+  font-size: 0.66rem;
+  line-height: 1.35;
+  color: var(--ink-2);
+  text-align: center;
+}
+
 .monitor-meter {
   display: flex;
   flex-direction: column;

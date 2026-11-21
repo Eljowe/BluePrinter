@@ -641,6 +641,16 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
             if (auto* obj = data.getDynamicObject())
                 processor.setOverdubLevel (static_cast<float> (obj->getProperty ("level")));
         })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetClipGuardEvent, [&processor](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+                processor.setClipGuardEnabled (static_cast<bool> (obj->getProperty ("enabled")));
+        })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetClipGuardCeilingEvent, [&processor](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+                processor.setClipGuardCeilingDb (static_cast<float> (obj->getProperty ("ceilingDb")));
+        })
         .withEventListener(BluePrinterWebViewEditor::frontendSetClickLevelEvent, [&processor](juce::var data)
         {
             if (auto* obj = data.getDynamicObject())
@@ -1441,6 +1451,8 @@ juce::var BluePrinterWebViewEditor::makeTransportSnapshot() const
     obj->setProperty ("loopLevel",        audioProcessor.getLoopLevel());
     obj->setProperty ("dryLevel",         audioProcessor.getDryLevel());
     obj->setProperty ("overdubLevel",     audioProcessor.getOverdubLevel());
+    obj->setProperty ("clipGuardEnabled", audioProcessor.isClipGuardEnabled());
+    obj->setProperty ("clipGuardCeiling", audioProcessor.getClipGuardCeilingDb());
     obj->setProperty ("clickPitch",        audioProcessor.getClickPitch());
     obj->setProperty ("clickLevel",        audioProcessor.getClickLevel());
     obj->setProperty ("clickAccentPitch",  audioProcessor.getClickAccentPitch());

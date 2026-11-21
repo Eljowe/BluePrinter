@@ -22,6 +22,7 @@
 #include "Tuner.h"
 #include "ChainPreset.h"
 #include "Resampler.h"
+#include "SoftClip.h"
 
 #include <algorithm>
 #include <cmath>
@@ -1892,6 +1893,20 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             buffer.clear (channel, 0, numSamples);
     }
 
+    // 13c. Monitor/output soft-clip guard (0048). After the master Output and
+    //      the tuner mute, before the OUT meter, so the meter reads the guarded
+    //      signal. Monitor-only: recordingMixBuffer was written above, so the
+    //      print and the record meter are untouched. Disabled = bit-identical
+    //      no-op. When the guard limits a sample past the ceiling it latches
+    //      the OUT clip indicator, so the LED warns to back Output off.
+    if (clipGuardEnabled.load (std::memory_order_acquire))
+    {
+        const float ceiling = SoftClip::ceilingGain (clipGuardCeilingDb.load (std::memory_order_acquire));
+
+        if (SoftClip::processBuffer (buffer, numSamples, ceiling, true))
+            outputMeter.latchClip();
+    }
+
     // 14. Output meter: the post-master-Output monitor signal — what the
     //     user actually hears. Computed last so it includes the click and
     //     any snippet/loop playback.
@@ -3312,6 +3327,26 @@ void BluePrinterAudioProcessor::setOverdubLevel (float levelDb)
     if (overdubLevel.load (std::memory_order_acquire) == clamped)
         return;
     overdubLevel.store (clamped, std::memory_order_release);
+    listeners.call ([](Listener& l) { l.transportChanged(); });
+}
+
+void BluePrinterAudioProcessor::setClipGuardEnabled (bool enabled)
+{
+    if (clipGuardEnabled.load (std::memory_order_acquire) == enabled)
+        return;
+    clipGuardEnabled.store (enabled, std::memory_order_release);
+    listeners.call ([](Listener& l) { l.transportChanged(); });
+}
+
+void BluePrinterAudioProcessor::setClipGuardCeilingDb (float ceilingDb)
+{
+    if (! std::isfinite (ceilingDb))
+        return;
+
+    const float clamped = juce::jlimit (-12.0f, 0.0f, ceilingDb);
+    if (clipGuardCeilingDb.load (std::memory_order_acquire) == clamped)
+        return;
+    clipGuardCeilingDb.store (clamped, std::memory_order_release);
     listeners.call ([](Listener& l) { l.transportChanged(); });
 }
 
@@ -4763,6 +4798,9 @@ void BluePrinterAudioProcessor::getStateInformation (juce::MemoryBlock& destData
     state.setProperty ("loopLevel",        loopLevel.load(),        nullptr);
     state.setProperty ("dryLevel",         dryLevel.load(),         nullptr);
     state.setProperty ("overdubLevel",     overdubLevel.load(),     nullptr);
+    // Monitor/output soft-clip guard (0048).
+    state.setProperty ("clipGuardEnabled",   clipGuardEnabled.load(),   nullptr);
+    state.setProperty ("clipGuardCeilingDb", clipGuardCeilingDb.load(), nullptr);
     state.setProperty ("midiClockEnabled", midiClockEnabled.load(), nullptr);
     state.setProperty ("midiClockOnRecord", midiClockOnRecord.load(), nullptr);
     state.setProperty ("clickDuringCapture", clickDuringCapture.load(), nullptr);
@@ -4827,6 +4865,17 @@ void BluePrinterAudioProcessor::setStateInformation (const void* data, int sizeI
             loopLevel.store        (static_cast<float> (state.getProperty ("loopLevel",        0.0f)));
             dryLevel.store         (static_cast<float> (state.getProperty ("dryLevel",         0.0f)));
             overdubLevel.store     (static_cast<float> (state.getProperty ("overdubLevel",     0.0f)));
+            {
+                // Monitor/output soft-clip guard (0048): additive properties,
+                // defaults match the constructor (off, -1 dBFS) and the
+                // ceiling is clamped to the supported -12..0 range.
+                const bool  guardOn   = static_cast<bool>  (state.getProperty ("clipGuardEnabled",   false));
+                const float guardCeil = static_cast<float> (state.getProperty ("clipGuardCeilingDb", -1.0f));
+                clipGuardEnabled.store (guardOn, std::memory_order_release);
+                clipGuardCeilingDb.store (std::isfinite (guardCeil)
+                                              ? juce::jlimit (-12.0f, 0.0f, guardCeil) : -1.0f,
+                                          std::memory_order_release);
+            }
             midiClockEnabled.store (static_cast<bool>  (state.getProperty ("midiClockEnabled", false)));
             midiClockOnRecord.store (static_cast<bool> (state.getProperty ("midiClockOnRecord", false)));
             // Header-level click-during-capture gate. Old builds had

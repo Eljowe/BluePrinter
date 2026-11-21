@@ -119,6 +119,11 @@ export const FRONTEND_EVENTS = {
   // Overdub trim in dB (-60..0) applied to each new layer before it is
   // mixed into the loop. { level }
   setOverdubLevel: "frontendSetOverdubLevel",
+  // Monitor/output soft-clip guard (0048). { enabled } turns it on;
+  // { ceilingDb } is the dBFS ceiling (-12..0, default -1). Monitor-only:
+  // it never changes the print.
+  setClipGuard: "frontendSetClipGuard",
+  setClipGuardCeiling: "frontendSetClipGuardCeiling",
   // Clear a latched clip indicator: { target } is one of
   // "input" | "record" | "output" | "loop" | "all".
   resetClip: "frontendResetClip",

@@ -114,6 +114,14 @@ What the user hears, post-master-Output. Monitor-only Solo and monitor-mute chan
 it; they never change the recording mix.
 _Avoid_: Main mix (that is the pre-Output sum)
 
+**Guard** (monitor):
+The optional, zero-latency soft clip at the very end of the monitor path — after
+the master Output and the tuner mute, immediately before the OUT meter. It bounds
+each channel at a dBFS ceiling (default −1 dBFS) with a fixed soft-knee curve and
+latches the OUT clip LED when it has to limit. The print and the record meter are
+never touched.
+_Avoid_: Limiter (there is no lookahead or delay compensation), compressor
+
 **Blocklist** / **Quarantine**:
 Two different exclusions. A *blocklist* entry is a plugin the user chose to skip
 in the scanner. A *quarantine* entry is a plugin the self-heal added after it
@@ -226,6 +234,7 @@ _Avoid_: Message, IPC event
 | Metering math | `Source/MeterMath.h` |
 | Per-chain CPU math (0047) | `Source/ChainCpuMath.h` |
 | Per-meter level/peak/clip state | `Source/Meter.h` |
+| Monitor soft-clip guard curve (0048) | `Source/SoftClip.h` |
 | Standalone window fill maths (0062) | `Source/EditorWindowMath.h` |
 | Take stack + review/overdub state machine | `Source/TakeRecorder.h/.cpp` |
 | Per-chain capture stems (0038) | `Source/StemCapture.h/.cpp` |
@@ -245,7 +254,7 @@ _Avoid_: Message, IPC event
   a dangling chain, slot or plugin — and can never be the thread that destroys
   one. `prepareToPlay`/`releaseResources` force the collection with audio stopped.
 - Chains run in parallel on a pristine input snapshot and never hear each other.
-- Monitor controls (Output, Solo, monitor-mute, Loop level) never change the print.
+- Monitor controls (Output, Solo, monitor-mute, Loop level, Guard) never change the print.
 - Melody audition is monitor-only; it is stopped when a capture starts and never
   enters the recording mix. One melody player at a time (`MelodySource` tracks
   whether a take or a library snippet is sounding).

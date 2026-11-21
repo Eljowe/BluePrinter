@@ -133,7 +133,7 @@ before claiming.
 | ------ | ----- | ------ | ---------- |
 | [0046](0046-plugin-delay-compensation.md) | Plugin delay compensation for parallel chains | ready-for-agent | — |
 | [0047](0047-chain-cpu-latency-readout.md) | Per-chain CPU and reported latency readout | done | — |
-| [0048](0048-monitor-clip-guard.md) | Monitor/output clip guard | ready-for-agent | — |
+| [0048](0048-monitor-clip-guard.md) | Monitor/output clip guard | in-progress | — |
 | [0049](0049-tap-tempo.md) | Tap tempo | done | — |
 | [0050](0050-click-subdivisions.md) | Click subdivisions and accents | done | — |
 | [0051](0051-backing-track-import.md) | Backing-track import with tempo/key detection | needs-triage | — |
@@ -160,8 +160,9 @@ Themes: **audio integrity** (0046–0048) and **practice & songwriting**
 (0049–0054). Suggested order: 0046 → 0049/0050 → 0051 → 0052, with 0047/0048,
 0053 and 0054 as smaller follow-ups.
 
-**0046 (PDC) and 0048 (clip guard) were triaged and remain `ready-for-agent`**
-— see their Agent Briefs. **0047 (CPU/latency readout) and 0053 (practice scale
+**0046 (PDC) remains `ready-for-agent`** — see its Agent Brief. **0048 (clip
+guard) is `in-progress`: implemented, pending the manual real-WebView2/DAW
+smoke test.** **0047 (CPU/latency readout) and 0053 (practice scale
 helper) were triaged and are now implemented, `done`.** **0049 (tap tempo)** and
 **0050 (click subdivisions)** were triaged, implemented and are now `done`.
 **0054–0057** (take melody extraction, library-snippet melody, snippet-to-looper

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Knob } from "./controls";
 import { LevelMeter } from "./LevelMeter";
+import { IconX } from "./icons";
 
 // Header-level monitoring knobs: tempo (shared by the take recorder,
 // the looper and the MIDI clock), the input trim (record level) and the
@@ -23,6 +24,49 @@ function MeterChannel({ label, level, peak, clipped, onResetClip }) {
   );
 }
 
+// Ceiling + reset for the monitor/output soft-clip guard (0048), the same
+// popover pattern as the Click-sound one in SyncControls. The header owns the
+// open state: the Guard button toggles the guard, and the small caret beside
+// it discloses this ceiling panel without changing the enabled state.
+function GuardPopover({ ceiling, onCeilingChange, onClose }) {
+  return (
+    <div className="guard-popover" role="dialog" aria-label="Monitor guard settings">
+      <div className="guard-popover-header">
+        <span className="guard-popover-title">Monitor guard</span>
+        <div className="guard-popover-actions">
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={() => onCeilingChange(-1)}
+            title="Reset the ceiling to the default -1.0 dBFS"
+          >
+            Reset
+          </button>
+          <button type="button" className="icon-btn" onClick={onClose} title="Close" aria-label="Close">
+            <IconX size={13} />
+          </button>
+        </div>
+      </div>
+
+      <Knob
+        label="Ceiling"
+        min={-12}
+        max={0}
+        step="0.5"
+        decimals={1}
+        unit="dBFS"
+        value={ceiling}
+        onChange={onCeilingChange}
+        title="Soft-clip ceiling — the monitor saturates towards this level instead of hard-clipping"
+      />
+
+      <p className="guard-popover-hint">
+        Soft-clips the monitor at the ceiling. Never changes the print.
+      </p>
+    </div>
+  );
+}
+
 export function HeaderControls({
   input,
   onInputChange,
@@ -33,10 +77,17 @@ export function HeaderControls({
   onTapTempo,
   dryLevel,
   onDryLevelChange,
+  clipGuardEnabled,
+  clipGuardCeiling,
+  onClipGuardChange,
+  onClipGuardCeilingChange,
   transport,
   onResetClip,
 }) {
   const resetClip = (target) => (onResetClip ? () => onResetClip(target) : undefined);
+  const [guardOpen, setGuardOpen] = useState(false);
+  const guardEngaged = Boolean(clipGuardEnabled && transport?.outputClipped);
+  const guardCeiling = Number.isFinite(Number(clipGuardCeiling)) ? Number(clipGuardCeiling) : -1;
 
   // The REC bus prints during a take or a loop capture (count-ins included),
   // so the lamp above the REC meter mirrors the Transport/Looper state pills.
@@ -155,6 +206,44 @@ export function HeaderControls({
           clipped={transport?.outputClipped}
           onResetClip={resetClip("output")}
         />
+      </div>
+      <div className="monitor-cell monitor-cell--guard">
+        {/* Guard toggles the soft clip; the caret only discloses the ceiling. */}
+        <div className="monitor-guard-row">
+          <button
+            type="button"
+            className={`monitor-guard ${clipGuardEnabled ? "is-on" : ""} ${guardEngaged ? "is-engaged" : ""}`}
+            aria-pressed={Boolean(clipGuardEnabled)}
+            onClick={() => onClipGuardChange(!clipGuardEnabled)}
+            title={clipGuardEnabled
+              ? `Monitor guard is on — the monitor soft-clips at ${guardCeiling.toFixed(1)} dBFS and warns with the OUT clip LED when it limits. Never affects the print.`
+              : "Monitor guard — soft-clip the monitor at a dBFS ceiling so a hot output saturates instead of hard-clipping. Never affects the print."}
+          >
+            <span className="monitor-guard-dot" aria-hidden="true" />
+            Guard
+          </button>
+          <button
+            type="button"
+            className={`monitor-guard-caret ${guardOpen ? "is-open" : ""} ${clipGuardEnabled ? "is-on" : ""}`}
+            aria-label="Monitor guard ceiling"
+            aria-expanded={guardOpen}
+            aria-haspopup="dialog"
+            title="Guard ceiling"
+            onClick={() => setGuardOpen((open) => !open)}
+          >
+            <span aria-hidden="true">▾</span>
+          </button>
+        </div>
+        <span className="monitor-guard-value" title="Monitor guard ceiling">
+          {guardCeiling.toFixed(1)} dBFS
+        </span>
+        {guardOpen ? (
+          <GuardPopover
+            ceiling={guardCeiling}
+            onCeilingChange={onClipGuardCeilingChange}
+            onClose={() => setGuardOpen(false)}
+          />
+        ) : null}
       </div>
       <Knob
         label="Dry"

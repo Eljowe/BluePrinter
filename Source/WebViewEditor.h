@@ -151,6 +151,10 @@ public:
     static constexpr const char* frontendSetLoopLevelEvent     = "frontendSetLoopLevel";
     // { level } — overdub trim in dB (-60..0) applied to each new layer.
     static constexpr const char* frontendSetOverdubLevelEvent  = "frontendSetOverdubLevel";
+    // Monitor/output soft-clip guard (0048): { enabled } turns it on, and
+    // { ceilingDb } sets the dBFS ceiling (-12..0, default -1).
+    static constexpr const char* frontendSetClipGuardEvent        = "frontendSetClipGuard";
+    static constexpr const char* frontendSetClipGuardCeilingEvent = "frontendSetClipGuardCeiling";
     // { target } — clear a latched clip indicator ("input" | "record" |
     // "output" | "loop" | "all").
     static constexpr const char* frontendResetClipEvent         = "frontendResetClip";

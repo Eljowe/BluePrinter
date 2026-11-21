@@ -112,6 +112,7 @@ function readInitialTransport() {
     inputClipped: false, recordClipped: false, outputClipped: false, loopClipped: false,
     libraryFolder: "", lastSaveError: "",
     metronomeEnabled: true, bpm: 120, countInBeats: 4, loopLevel: 0, overdubLevel: 0, dryLevel: 0, clickDuringCapture: true,
+    clipGuardEnabled: false, clipGuardCeiling: -1,
     timeSignatureNumerator: 4, timeSignatureDenominator: 4,
     clickPitch: 1000, clickAccentPitch: 1500, clickDecay: 90, clickVolume: 0.35, clickAccentVolume: 0.5, clickNoise: 0.1,
     clickLevel: 0, clickSubdivision: 0, clickAccents: [],
@@ -158,6 +159,8 @@ function readInitialTransport() {
     loopLevel: Number(raw.loopLevel ?? 0),
     overdubLevel: Number(raw.overdubLevel ?? 0),
     dryLevel: Number(raw.dryLevel ?? 0),
+    clipGuardEnabled: Boolean(raw.clipGuardEnabled),
+    clipGuardCeiling: Number(raw.clipGuardCeiling ?? -1),
     clickDuringCapture: raw.clickDuringCapture !== false,
     clickPitch: Number(raw.clickPitch ?? 1000),
     clickLevel: Number(raw.clickLevel ?? 0),
@@ -550,6 +553,8 @@ export default function App() {
         loopLevel:        payload.loopLevel !== undefined        ? Number(payload.loopLevel)        : prev.loopLevel,
         dryLevel:         payload.dryLevel !== undefined         ? Number(payload.dryLevel)         : prev.dryLevel,
         overdubLevel:     payload.overdubLevel !== undefined     ? Number(payload.overdubLevel)     : prev.overdubLevel,
+        clipGuardEnabled: payload.clipGuardEnabled !== undefined ? Boolean(payload.clipGuardEnabled) : prev.clipGuardEnabled,
+        clipGuardCeiling: payload.clipGuardCeiling !== undefined ? Number(payload.clipGuardCeiling) : prev.clipGuardCeiling,
         clickDuringCapture: payload.clickDuringCapture !== undefined ? Boolean(payload.clickDuringCapture) : prev.clickDuringCapture,
         clickPitch:        payload.clickPitch        !== undefined ? Number(payload.clickPitch)        : prev.clickPitch,
         clickLevel:        payload.clickLevel        !== undefined ? Number(payload.clickLevel)        : prev.clickLevel,
@@ -837,6 +842,16 @@ export default function App() {
     emit(FRONTEND_EVENTS.setOverdubLevel, { level: next });
   };
 
+  const handleClipGuardChange = (enabled) => {
+    setTransport((prev) => ({ ...prev, clipGuardEnabled: enabled }));
+    emit(FRONTEND_EVENTS.setClipGuard, { enabled });
+  };
+
+  const handleClipGuardCeilingChange = (ceilingDb) => {
+    setTransport((prev) => ({ ...prev, clipGuardCeiling: ceilingDb }));
+    emit(FRONTEND_EVENTS.setClipGuardCeiling, { ceilingDb });
+  };
+
   const handleMidiClockChange = (enabled) => {
     setTransport((prev) => ({ ...prev, midiClockEnabled: enabled }));
     emit(FRONTEND_EVENTS.setMidiClock, { enabled });
@@ -1024,6 +1039,10 @@ export default function App() {
             onTapTempo={handleTapTempo}
             dryLevel={transport.dryLevel}
             onDryLevelChange={handleDryLevelChange}
+            clipGuardEnabled={transport.clipGuardEnabled}
+            clipGuardCeiling={transport.clipGuardCeiling}
+            onClipGuardChange={handleClipGuardChange}
+            onClipGuardCeilingChange={handleClipGuardCeilingChange}
             transport={transport}
             onResetClip={handleResetClip}
           />
