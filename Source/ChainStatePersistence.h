@@ -25,12 +25,25 @@ class ChainStatePersistence
 public:
     struct Deps
     {
-        std::vector<std::unique_ptr<PluginChain>>& chains;
+        std::vector<std::shared_ptr<PluginChain>>& chains;
         juce::CriticalSection& chainLock;
         Vst3Library& vst3;
         int& nextChainId;
         // Wired into every created chain's onChanged (the debounced persist).
         std::function<void()> onChainChanged;
+        // Prepare a newly created chain with the live device config BEFORE it
+        // is published. The processor's hook is a no-op until the host has
+        // prepared the device (restore-time chains must not be prepared with
+        // the 44100/512 defaults — see ADR-0002).
+        std::function<void (PluginChain&)> prepareChain;
+        // Hand a chain removed from the list to the owner, which retires it:
+        // the audio thread may still hold a reference, so the owner frees it
+        // on the message thread once its snapshot has dropped it.
+        std::function<void (std::shared_ptr<PluginChain>)> retireChain;
+        // Upper bound on the chain list (0 = no limit). createChain returns
+        // nullptr past it, because the processor's audio-thread snapshot is
+        // sized/reserved to the same maximum and would silently truncate.
+        int maxChains = 0;
     };
 
     explicit ChainStatePersistence (Deps depsToUse);
@@ -54,8 +67,9 @@ public:
     PluginChain* createChain (const juce::String& name, int inputMask,
                               bool wantsMidi, bool recordOnCapture);
 
-    // Drop every chain (restore path). Fires onSlotRemoved so the editor can
-    // close any open plugin windows.
+    // Drop every chain (restore path). Each chain is handed to the owner's
+    // retirement hook, which closes its plugin windows and keeps it alive
+    // until the audio thread can no longer reference it.
     void clearChains();
 
     // Reassign fresh ids to any chain whose id is missing or duplicated, and

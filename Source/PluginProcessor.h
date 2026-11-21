@@ -269,7 +269,7 @@ public:
     //     guitar take.
     //   - Chains are identified by a stable id ("chain0", "chain1", …)
     //     and a user-editable name, both persisted.
-    const std::vector<std::unique_ptr<PluginChain>>& getChains() const { return chains; }
+    const std::vector<std::shared_ptr<PluginChain>>& getChains() const { return chains; }
     PluginChain* getChainById (const juce::String& chainId) const;
 
     // Chain lifecycle (message thread). All of these persist and notify
@@ -717,15 +717,53 @@ private:
     void flushSnippetGainPersist();
     // The chain list. Chains are independent parallel processors of the
     // input; see the chain API comments above. Owned by the processor
-    // (unique_ptr), guarded by chainLock. The audio thread iterates a
-    // raw-pointer snapshot (blockChains) taken under chainLock at the
-    // start of each block — same lifetime model PluginChain uses for
-    // its slots.
-    std::vector<std::unique_ptr<PluginChain>> chains;
+    // (shared_ptr), guarded by chainLock. The audio thread iterates a
+    // shared_ptr snapshot (blockChains) taken under a try-lock at the start
+    // of each block — same lifetime model PluginChain uses for its slots.
+    // A removed chain is NOT destroyed immediately: it moves into
+    // retiredChains and is only released once the audio thread can no longer
+    // reference it (see retireChain / collectRetiredChains).
+    std::vector<std::shared_ptr<PluginChain>> chains;
     mutable juce::CriticalSection chainLock;
     // Counter for generating stable chain ids. Persisted with the chain
     // state so ids never collide after a restore.
     int nextChainId = 0;
+
+    // Upper bound on chains. `blockChains` is reserved to this size on the
+    // message thread so the audio thread's snapshot never allocates, and
+    // addChain/ChainStatePersistence::createChain refuse to go past it.
+    static constexpr int maxChains = 64;
+
+    // A retired chain is released once this many successful snapshot
+    // refills have happened after the retirement. The first refill drops the
+    // chain from `blockChains` while the retired list still owns it, the
+    // second confirms; only then is the retired reference released. Tying
+    // reclamation to refills (never to wall-clock time or block counts)
+    // guarantees the audio thread can't be holding the last reference when
+    // the object is freed.
+    static constexpr uint64_t retireGraceRefills = 2;
+
+    struct RetiredChain
+    {
+        std::shared_ptr<PluginChain> chain;
+        uint64_t deadlineGeneration = 0;
+    };
+    // Chains removed from `chains` but not yet destroyed. Message-thread
+    // only (the timers below).
+    std::vector<RetiredChain> retiredChains;
+    // Move a chain out of `chains` into retiredChains with a deadline and
+    // close its editor windows. Message thread only.
+    void retireChain (std::shared_ptr<PluginChain> chain);
+    // Release retired chains (and every live chain's retired slots) whose
+    // deadline has passed. Called from timerCallback, so the plugin
+    // instances are destroyed on the message thread. `force` ignores the
+    // generation (prepareToPlay/releaseResources, where audio is stopped and
+    // the snapshots have just been cleared).
+    void collectRetiredChains (bool force = false);
+    // Successful `blockChains` refills, bumped only when the try-lock was
+    // taken and the snapshot was rebuilt. Retirement deadlines are expressed
+    // against it.
+    std::atomic<uint64_t> chainSnapshotGeneration { 0 };
 
     // Bundle serialise/apply + chain construction (0027 step 5b). Created in
     // the constructor with references to the members above; see
@@ -755,11 +793,21 @@ private:
     juce::AudioBuffer<float> recordingMixBuffer;
     juce::MidiBuffer chainMidiScratch;
     // Scratch for the per-chain MIDI channel filter. Member so the
-    // audio thread never allocates.
+    // audio thread never allocates (both are ensureSize'd in prepareToPlay
+    // and filled with a bounded event/byte budget per block).
     juce::MidiBuffer chainMidiFiltered;
-    // Audio-thread snapshot of the chain pointers for this block.
-    // Reused member so no allocation happens in processBlock.
-    std::vector<PluginChain*> blockChains;
+    // Audio-thread snapshot of the chains for this block. Reused member so
+    // no allocation happens in processBlock; the shared_ptrs keep a chain
+    // alive after the message thread removed it.
+    std::vector<std::shared_ptr<PluginChain>> blockChains;
+
+    // Per-block MIDI copy budget for each chain. Both the event count and the
+    // byte size are bounded so the copy can never allocate: the buffers are
+    // ensureSize'd to maxChainMidiBytes in prepareToPlay, and events that
+    // would exceed either budget are skipped. (A MidiBuffer event costs its
+    // data bytes + 6 for the time/size header.)
+    static constexpr int maxChainMidiEvents = 512;
+    static constexpr int maxChainMidiBytes  = 64 * 1024;
 
     // Take recorder: bounded take stack + review/overdub state machine (0027,
     // 0037). The shared capture buffer (recordBuffer) and its lock stay here;
@@ -913,6 +961,10 @@ private:
     std::atomic<uint16_t> clickAccentMask  { 0x0001 };
     void resynthesizeClicks();
     double currentSampleRate = 44100.0;
+    // Block size the host last prepared with. Needed to prepare a chain
+    // created at runtime (addChain) with the live device config before it is
+    // published — see ChainStatePersistence::createChain.
+    int currentBlockSize = 512;
 
     // MIDI clock output. Clock pulses (0xF8, 24 ppqn) are generated in
     // processBlock alongside the audible metronome. MIDI Start / Stop

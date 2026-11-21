@@ -5,7 +5,7 @@ description: Project map for BluePrinter tasks — architecture overview, module
 
 # BluePrinter Plugin
 
-Audio plugin (VST3 + Standalone) for recording guitar takes, saving WAV + JSON sidecar files, and hosting VST3 FX chains. Built with JUCE and a React/Vite WebView2 UI. Windows-only (WebView2 requirement).
+Audio plugin (VST3 + Standalone; AU on macOS) for recording guitar takes, saving WAV + JSON sidecar files, and hosting VST3 FX chains. Built with JUCE and a React/Vite UI hosted in WebView2 (Windows), WKWebView (macOS) or WebKitGTK (Linux). Cross-platform (ADR-0006).
 
 ## Architecture
 
@@ -18,9 +18,9 @@ Audio input -> Input trim (APVTS Gain, dB) -> +-> [chain 0] ----> sum -> + -> Me
 - **Processor** (`Source/PluginProcessor.h/.cpp`): owns all state — APVTS (`Gain` → Input, `PlaybackVolume` → Output, both dB), the chain list, takes/looper recording + playback, metronome, MIDI clock, persistence. The editor is a listener/view; the frontend mirrors state.
 - **UI bridge** (`Source/WebViewEditor.h/.cpp`): WebView2 editor, all frontend↔backend events. The React side never talks to C++ directly except through `bridge.js`.
 - **React UI** (`WebUI/src/`): `App.jsx` subscribes to backend events and passes state down; components emit mutations.
-- **Chains**: parallel VST3 FX chains in `std::vector<std::unique_ptr<PluginChain>>` (guarded by `chainLock`; the audio thread iterates a raw-pointer snapshot). Stable ids, per-chain input mask / MIDI / record / volume / mute. Full model: AGENTS.md "VST3 Chains".
+- **Chains**: parallel VST3 FX chains in `std::vector<std::shared_ptr<PluginChain>>` (guarded by `chainLock`; the audio thread refreshes a `shared_ptr` snapshot under `tryEnter()`, reusing the previous block's on contention, and removed chains/slots are retired and reclaimed after two successful snapshot refills). Stable ids, per-chain input mask / MIDI / record / volume / mute. Full model: AGENTS.md "VST3 Chains".
 - **Recording**: takes + looper share `recordBuffer` as live capture scratch, capture the record mix (dry + `recordOnCapture` chains), never capture simultaneously. Each stopped take is copied into its own buffer and appended to a bounded stack (8 / 256 MB) in `TakeRecorder` (TakeReview → select/audition/save/delete); Dub layers onto the selected take. Full model: AGENTS.md "VST3 Chains" + "Recording".
-- **MIDI clock + click**: header-level toggles, direct Start/Stop to the output device, click gating. Full model: AGENTS.md "MIDI clock".
+- **MIDI clock + click**: header-level toggles, Start/Stop queued to a lock-free `MidiSendQueue` and sent to the output device by `MidiClockOutput`'s sender thread, click gating. Full model: AGENTS.md "MIDI clock".
 - **Deferred restore**: saved chains load one plugin per message-loop turn; persist is gated while restoring. Full model: AGENTS.md "Deferred chain restore".
 
 ## Key Files

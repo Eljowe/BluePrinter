@@ -1105,6 +1105,14 @@ BluePrinterWebViewEditor::~BluePrinterWebViewEditor()
     audioProcessor.apvts.removeParameterListener(paramGain, this);
     audioProcessor.apvts.removeParameterListener(paramOutput, this);
     audioProcessor.removeListener (this);
+
+    // Drop the per-chain slot-removal bindings as well: they capture `this`,
+    // and the chains outlive the editor (a DAW can destroy the editor while
+    // the processor keeps running, and a later restore, preset load or chain
+    // removal still fires them). Only this editor ever sets them.
+    for (auto& chain : audioProcessor.getChains())
+        chain->onSlotRemoved = nullptr;
+
     closeAllVst3Editors();
 }
 

@@ -1,12 +1,19 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <atomic>
+#include <cstdint>
+#include <memory>
 #include "Vst3Library.h"
 #include "MidiChannelFilter.h"
 
 // One slot in the FX chain. Owns the loaded plugin instance and its
 // bypass flag. Plugins are serial — the output of slot N feeds the input
 // of slot N+1.
+//
+// Slots are held by shared_ptr (see PluginChain::slots): the audio thread's
+// per-block snapshot keeps a slot alive after the message thread removed it,
+// so removal never frees a plugin the audio thread is still using.
 struct ChainSlot
 {
     std::unique_ptr<juce::AudioPluginInstance> plugin;
@@ -31,6 +38,12 @@ enum ChainInputBits : int
 // Owns a list of VST3 plugin instances and processes audio through them
 // in order. All chain mutations (add/remove/bypass/state) happen on the
 // message thread; processBlock is called from the audio thread.
+//
+// Lifetime: processBlock iterates a shared_ptr snapshot of the slot list
+// (blockSlots) that it refreshes under a try-lock. A slot removed on the
+// message thread moves into retiredSlots and is only destroyed after two
+// later snapshot refills, so the audio thread can never hold a dangling slot
+// (and is never the thread that destroys one).
 //
 // The chain does not own its blocklist or its cached scan result — both
 // live in the Vst3Library that is shared with the other chain. The
@@ -161,8 +174,9 @@ public:
                          int timeoutMs,
                          LoadCallback callback);
 
-    // Remove the slot at `index`. Closes any editor window for the slot
-    // before destroying the plugin.
+    // Remove the slot at `index`. The slot is retired (not destroyed) so the
+    // audio thread can finish the block that may still reference it; any
+    // editor window for it is closed immediately via onSlotRemoved.
     bool removePlugin (int index);
 
     // Toggle bypass for the slot at `index`.
@@ -172,22 +186,48 @@ public:
     // range. No-op if from == to. Fires onChanged.
     bool movePlugin (int fromIndex, int toIndex);
 
-    // Drop every slot.
+    // Drop every slot. The slots are retired and released once the audio
+    // thread's snapshot has dropped them; only the message-thread-visible
+    // list is emptied now.
     void clear();
 
     // Whether any slot currently has a non-bypassed plugin loaded.
-    // Safe to call from the audio thread (short lock). The processor
-    // uses it to skip chains that have nothing to run — a transparent
-    // chain's scratch is just a copy of the dry input, so summing it
-    // back into the mix would double the dry signal.
+    // Lock-free (an atomic count maintained by the message-thread
+    // mutations), so the audio thread can call it inside processBlock.
+    // The processor uses it to skip chains that have nothing to run — a
+    // transparent chain's scratch is just a copy of the dry input, so
+    // summing it back into the mix would double the dry signal.
     bool hasActivePlugins() const
     {
-        const juce::ScopedLock sl (lock);
-        for (auto& slot : slots)
-            if (slot->plugin != nullptr && ! slot->bypassed)
-                return true;
-        return false;
+        return activePluginCount.load (std::memory_order_acquire) > 0;
     }
+
+    // Upper bound on slots per chain. The audio-thread snapshot
+    // (blockSlots) is reserved to this size in the constructor so filling
+    // it never allocates; addPlugin/finalizeAsyncLoad refuse to exceed it.
+    static constexpr int maxSlots = 64;
+
+    // A retired slot is released once this many successful slot-snapshot
+    // refills have happened after the retirement (see
+    // collectRetiredSlots). Never tied to wall-clock time: releasing on a
+    // timer could drop the last reference while the audio thread's snapshot
+    // still holds it.
+    static constexpr uint64_t retireGraceRefills = 2;
+
+    // Release retired slots whose deadline has passed. Called from the
+    // processor's 30 Hz timer for every live chain, so the plugin instances
+    // are destroyed on the message thread, never in processBlock. `force`
+    // ignores the generation and is used where the caller has just cleared
+    // blockSlots with audio stopped (prepareToPlay / releaseResources).
+    void collectRetiredSlots (bool force = false);
+
+    // True while an async plugin load (addPluginAsync) is still in flight.
+    // The loader keeps a raw pointer to this chain from the plugin UI
+    // apartment and from its polling timer, so the owner must not destroy the
+    // chain before those finish. A timed-out load stays counted: its
+    // abandoned worker can still touch the chain, so the chain is leaked
+    // rather than freed under it.
+    bool hasLoadsInFlight() const { return loadsInFlight.load (std::memory_order_acquire) > 0; }
 
     // The chain's reported processing delay: the sum of getLatencySamples()
     // over loaded, non-bypassed slots (0047; the same definition 0046 uses).
@@ -195,6 +235,13 @@ public:
     // so a plugin that changes its reported latency at runtime is picked up.
     // Message-thread only (takes the slot lock).
     int getActiveLatencySamples() const;
+
+    // The chain's tail: the SUM of getTailLengthSeconds() over loaded,
+    // non-bypassed slots, because a chain's slots are serial (slot N's tail
+    // runs through slot N+1). The processor takes the MAX over its parallel
+    // chains. A host query, never called from processBlock. Message-thread
+    // only (takes the slot lock).
+    double getTailLengthSeconds() const;
 
     int getNumPlugins() const;
     juce::AudioPluginInstance* getPlugin (int index) const;
@@ -327,7 +374,47 @@ public:
 
 private:
     Vst3Library& library;
-    std::vector<std::unique_ptr<ChainSlot>> slots;
+
+    // Slots, message-thread mutated. shared_ptr so the audio-thread snapshot
+    // (blockSlots) and retiredSlots can hold a slot after it has been
+    // removed from this list.
+    std::vector<std::shared_ptr<ChainSlot>> slots;
+
+    // Audio-thread snapshot of `slots` for the current block. Refilled in
+    // processBlock only when `lock` can be entered without blocking; on
+    // contention the previous block's snapshot is reused. Reserved to
+    // maxSlots in the constructor so refilling never allocates.
+    std::vector<std::shared_ptr<ChainSlot>> blockSlots;
+
+    // Slots removed from `slots` but not yet destroyed. Kept until the
+    // audio thread's snapshot can no longer reference them (see
+    // collectRetiredSlots). Message-thread only.
+    struct RetiredSlot
+    {
+        std::shared_ptr<ChainSlot> slot;
+        uint64_t deadlineGeneration = 0;
+    };
+    std::vector<RetiredSlot> retiredSlots;
+
+    // Successful `blockSlots` refills, bumped only after a refill under
+    // tryEnter succeeds (never when the lock is contended and the previous
+    // snapshot is reused). Retirement deadlines are expressed against it.
+    std::atomic<uint64_t> slotSnapshotGeneration { 0 };
+
+    // Number of slots holding a loaded, non-bypassed plugin. Maintained on
+    // the message thread so hasActivePlugins() is lock-free on the audio
+    // thread.
+    std::atomic<int> activePluginCount { 0 };
+    void refreshActivePluginCount();
+
+    // In-flight async loads (see hasLoadsInFlight).
+    std::atomic<int> loadsInFlight { 0 };
+
+    // True between prepareToPlay and releaseResources. The destructor only
+    // calls releaseResources() on still-prepared plugins (a plugin the host
+    // already released must not be released twice).
+    bool prepared = false;
+
     std::vector<PendingSlot> pendingSlots;
     juce::AudioPluginFormatManager formatManager;
     double currentSampleRate = 44100.0;

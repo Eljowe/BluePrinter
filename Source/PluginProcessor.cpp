@@ -538,10 +538,29 @@ BluePrinterAudioProcessor::BluePrinterAudioProcessor()
     // available to report the failing plugin.
     restoreUserState();
 
-    // Chain bundle serialise/apply + chain construction.
+    // Reserve both chain lists up front. The audio thread refills
+    // blockChains every block and must never allocate; `chains` keeps its
+    // capacity through a restore because clearChains() copies instead of
+    // moving the vector.
+    chains.reserve (static_cast<size_t> (maxChains));
+    blockChains.reserve (static_cast<size_t> (maxChains));
+
+    // Chain bundle serialise/apply + chain construction. The prepare hook
+    // hands a freshly created chain the live device config (a chain created
+    // after the device opened would otherwise prepare its plugins at the
+    // 44100/512 defaults); the retire hook keeps the audio thread's
+    // snapshot valid while a removed chain is being destroyed.
     chainStatePersistence = std::make_unique<ChainStatePersistence> (
-        ChainStatePersistence::Deps { chains, chainLock, vst3Library, nextChainId,
-                                      [this] { persistPluginChain(); } });
+        ChainStatePersistence::Deps {
+            chains, chainLock, vst3Library, nextChainId,
+            [this] { persistPluginChain(); },
+            [this] (PluginChain& chain)
+            {
+                if (isDevicePrepared())
+                    chain.prepareToPlay (currentSampleRate, currentBlockSize);
+            },
+            [this] (std::shared_ptr<PluginChain> chain) { retireChain (std::move (chain)); },
+            maxChains });
 
     // Seed the default chain layout (mirrors the pre-multi-chain
     // behaviour): a MIDI chain that sees the keyboard, and an audio FX
@@ -858,6 +877,7 @@ juce::String BluePrinterAudioProcessor::addChain (const juce::String& name,
                                                  bool wantsMidi,
                                                  bool recordOnCapture)
 {
+    // createChain enforces maxChains (and returns nullptr when full).
     auto* chain = chainStatePersistence->createChain (name, inputMask, wantsMidi, recordOnCapture);
     if (chain == nullptr)
         return {};
@@ -869,7 +889,7 @@ juce::String BluePrinterAudioProcessor::addChain (const juce::String& name,
 
 bool BluePrinterAudioProcessor::removeChain (const juce::String& chainId)
 {
-    std::unique_ptr<PluginChain> removed;
+    std::shared_ptr<PluginChain> removed;
     {
         const juce::ScopedLock sl (chainLock);
         for (auto it = chains.begin(); it != chains.end(); ++it)
@@ -886,13 +906,80 @@ bool BluePrinterAudioProcessor::removeChain (const juce::String& chainId)
     if (removed == nullptr)
         return false;
 
-    // Dropping every slot closes any open editor windows (via
-    // onSlotRemoved) and releases the plugin instances before the
-    // chain object itself is destroyed.
-    removed->clear();
+    // The chain is retired, NOT destroyed: the audio thread may still be
+    // using it (its per-block snapshot holds a shared_ptr). retireChain()
+    // closes any open editor windows immediately and hands the chain to the
+    // snapshot-refill collector, so the plugins are released on the message
+    // thread once the audio thread has dropped the chain from its snapshot.
+    retireChain (std::move (removed));
     persistPluginChain();
     listeners.call ([](Listener& l) { l.pluginChainChanged(); });
     return true;
+}
+
+void BluePrinterAudioProcessor::retireChain (std::shared_ptr<PluginChain> chain)
+{
+    if (chain == nullptr)
+        return;
+
+    // Close the chain's editor windows now. The chain outlives this call for
+    // a few snapshot refills, but a plugin editor window must never outlive
+    // the plugin it draws — and a restore can reuse the chain id, so the
+    // editor's id-keyed window map would otherwise keep a window attached to
+    // a dead instance.
+    if (chain->onSlotRemoved)
+    {
+        const int numSlots = chain->getNumPlugins();
+        for (int i = numSlots - 1; i >= 0; --i)
+            chain->onSlotRemoved (i);
+    }
+
+    RetiredChain retired;
+    retired.chain = std::move (chain);
+    retired.deadlineGeneration = chainSnapshotGeneration.load (std::memory_order_acquire)
+                               + retireGraceRefills;
+    retiredChains.push_back (std::move (retired));
+}
+
+void BluePrinterAudioProcessor::collectRetiredChains (bool force)
+{
+    // Retired chains: erase the entries whose deadline has passed (the
+    // shared_ptr destructor then frees the chain and its plugins here, on the
+    // message thread). Reclamation is driven by successful snapshot refills,
+    // never by wall-clock time: the first refill after retirement drops the
+    // chain from blockChains while the retired list still owns it, the second
+    // confirms, and only then is the retired reference released. If audio is
+    // paused the chain is retained (bounded) instead of risking a release
+    // while the audio thread still holds it. `force` is only used where the
+    // caller cleared blockChains with audio stopped.
+    // A chain with an async plugin load still in flight is kept regardless:
+    // the loader's apartment task and polling waiter hold a raw pointer to it.
+    if (! retiredChains.empty())
+    {
+        const auto generation = chainSnapshotGeneration.load (std::memory_order_acquire);
+
+        retiredChains.erase (std::remove_if (retiredChains.begin(), retiredChains.end(),
+            [generation, force] (const RetiredChain& retired)
+            {
+                return (force || generation >= retired.deadlineGeneration)
+                    && retired.chain != nullptr
+                    && ! retired.chain->hasLoadsInFlight();
+            }),
+            retiredChains.end());
+    }
+
+    // Live chains' retired slots follow the same rhythm. The shared_ptrs are
+    // copied out first so the (potentially slow) plugin destruction does not
+    // hold chainLock — the audio thread's try-lock would otherwise fail and
+    // it would run a block on its previous snapshot.
+    std::vector<std::shared_ptr<PluginChain>> live;
+    {
+        const juce::ScopedLock sl (chainLock);
+        live = chains;
+    }
+
+    for (auto& chain : live)
+        chain->collectRetiredSlots (force);
 }
 
 bool BluePrinterAudioProcessor::renameChain (const juce::String& chainId, const juce::String& name)
@@ -1040,7 +1127,22 @@ bool BluePrinterAudioProcessor::isMidiEffect() const
 
 double BluePrinterAudioProcessor::getTailLengthSeconds() const
 {
-    return 0.0;
+    // A host query (never called from processBlock). Chains run in PARALLEL
+    // off the same input, so the rig's tail is the LONGEST chain tail rather
+    // than their sum; inside a chain the slots are serial, so
+    // PluginChain::getTailLengthSeconds() sums its slots. The dry path adds
+    // nothing, so a transparent rig still reports 0.
+    //
+    // Without this a host may truncate reverb/amp-sim tails when the plugin
+    // is bypassed or removed from the graph.
+    double tail = 0.0;
+
+    const juce::ScopedLock sl (chainLock);
+    for (const auto& chain : chains)
+        if (chain != nullptr)
+            tail = juce::jmax (tail, chain->getTailLengthSeconds());
+
+    return tail;
 }
 
 int BluePrinterAudioProcessor::getNumPrograms()
@@ -1091,7 +1193,20 @@ void BluePrinterAudioProcessor::prepareToPlay (double sampleRate, int samplesPer
     chainInputBuffer.setSize (channels, samplesPerBlock, false, false, true);
     chainScratchBuffer.setSize (channels, samplesPerBlock, false, false, true);
     recordingMixBuffer.setSize (channels, samplesPerBlock, false, false, true);
+
+    // Audio-thread snapshot: reserved for the maximum chain count so the
+    // per-block refill can never allocate. Clearing here also drops any
+    // reference the audio thread held before this (no audio runs during
+    // prepareToPlay); the forced collection then frees chains whose
+    // generation deadline is meaningless now that the snapshot is gone, so a
+    // stopped device never retains them indefinitely.
     blockChains.clear();
+    blockChains.reserve (static_cast<size_t> (maxChains));
+
+    // Per-chain MIDI copies: sized for the per-block byte budget so the
+    // audio thread's bounded copy loop never reallocates.
+    chainMidiScratch.ensureSize (static_cast<size_t> (maxChainMidiBytes));
+    chainMidiFiltered.ensureSize (static_cast<size_t> (maxChainMidiBytes));
 
     // Tuner analysis window: a plain single-producer ring, preallocated so
     // the audio thread never allocates (0034). Stop the worker first in case
@@ -1105,6 +1220,7 @@ void BluePrinterAudioProcessor::prepareToPlay (double sampleRate, int samplesPer
         startTunerWorker();
 
     currentSampleRate = sampleRate;
+    currentBlockSize  = samplesPerBlock;
     melodyPlayer.prepare (sampleRate);
     loopCrossfadeSamples = juce::jlimit (1, 256, static_cast<int> (sampleRate * 0.003));
 
@@ -1115,6 +1231,12 @@ void BluePrinterAudioProcessor::prepareToPlay (double sampleRate, int samplesPer
         for (auto& chain : chains)
             chain->prepareToPlay (sampleRate, samplesPerBlock);
     }
+
+    // Audio is stopped and blockChains was cleared above: a retired chain's
+    // snapshot deadline can never be reached while the device is stopped, so
+    // collect it now (same for the chains' retired slots, which their own
+    // prepareToPlay has already released).
+    collectRetiredChains (true);
 
     // Synthesize the metronome clicks from the current click
     // parameters. Two distinct sounds, rendered on the message thread
@@ -1168,6 +1290,13 @@ void BluePrinterAudioProcessor::releaseResources()
         for (auto& chain : chains)
             chain->releaseResources();
     }
+
+    // Audio is stopped: drop the snapshot so it can't keep a retired chain
+    // alive, then release the retired chains (their deadlines can never be
+    // reached while no audio runs).
+    blockChains.clear();
+    collectRetiredChains (true);
+
     clickBuffer.reset();
     accentClickBuffer.reset();
     subClickBuffer.reset();
@@ -1246,14 +1375,30 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     for (int channel = 0; channel < numChannels; ++channel)
         buffer.applyGain (channel, 0, numSamples, inputGain);
 
-    // 1. Snapshot the chain list so a message-thread add/remove
-    //    mid-block can't invalidate our iteration. Same raw-pointer
-    //    snapshot model PluginChain uses for its slots.
+    // 1. Snapshot the chain list so a message-thread add/remove mid-block
+    //    can't invalidate our iteration. tryEnter: never block the audio
+    //    thread on a chain mutation. If the lock is busy (a chain is being
+    //    added/removed/restored right now) the previous block's snapshot is
+    //    reused — it stays valid because its shared_ptrs keep those chains
+    //    alive even after they were removed from `chains` (removal only
+    //    retires them). The vector is reserved to maxChains, so filling it
+    //    never allocates.
+    if (chainLock.tryEnter())
     {
-        const juce::ScopedLock sl (chainLock);
         blockChains.clear();
         for (auto& chain : chains)
-            blockChains.push_back (chain.get());
+        {
+            if (static_cast<int> (blockChains.size()) >= maxChains)
+                break;
+            blockChains.push_back (chain);
+        }
+        chainLock.exit();
+
+        // Publish the refill only after the snapshot was actually rebuilt
+        // (not on a failed try-lock, and not per block): retired chains are
+        // released once this has advanced past their deadline, so a reused
+        // snapshot never counts as progress.
+        chainSnapshotGeneration.fetch_add (1, std::memory_order_release);
     }
 
     // 1b. Pristine dry-input snapshot. Every chain copies its selected
@@ -1320,7 +1465,7 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     // chainInputBuffer above, so it is untouched — solo/monitor-mute are
     // monitoring-only.
     bool soloActive = false;
-    for (auto* chain : blockChains)
+    for (auto& chain : blockChains)
         if (chain->isMonitorSolo())
             soloActive = true;
     if (soloActive)
@@ -1328,7 +1473,7 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 
     for (int chainIndex = 0; chainIndex < static_cast<int> (blockChains.size()); ++chainIndex)
     {
-        auto* chain = blockChains[static_cast<size_t> (chainIndex)];
+        auto* chain = blockChains[static_cast<size_t> (chainIndex)].get();
 
         // A chain with no active plugins is transparent: its scratch
         // would merely hold a copy of the dry input, so summing it
@@ -1348,22 +1493,50 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                                          chain->getInputMask(), numChannels, numSamples);
 
         // Per-chain MIDI copy so one chain's generated notes can't leak
-        // into another. Copies into the member's existing storage (no
-        // allocation unless the input MIDI grows beyond its capacity).
+        // into another. Copying event by event into the member's existing,
+        // ensureSize'd storage, bounded by BOTH the event count and the byte
+        // budget (an event costs its data bytes + 6 for the time/size
+        // header), so no allocation can happen here — an event that would
+        // exceed either budget is skipped. Assigning the MidiBuffer outright
+        // would reallocate whenever the host block is denser than the scratch.
         // The chain's MIDI channel filter is applied here too.
-        chainMidiScratch = midiMessages;
+        chainMidiScratch.clear();
+        {
+            int copied = 0;
+            int bytes  = 0;
+            for (const auto metadata : midiMessages)
+            {
+                const int cost = metadata.numBytes + 6;
+
+                if (copied >= maxChainMidiEvents || bytes + cost > maxChainMidiBytes)
+                    continue;
+
+                chainMidiScratch.addEvent (metadata.getMessage(), metadata.samplePosition);
+                ++copied;
+                bytes += cost;
+            }
+        }
+
         juce::MidiBuffer* midiForChain = &chainMidiScratch;
         const uint16_t midiMask = chain->getMidiChannelsMask();
         if (midiMask != 0xFFFF)
         {
             chainMidiFiltered.clear();
-            juce::MidiBuffer::Iterator it (chainMidiScratch);
-            juce::MidiMessage msg;
-            int samplePos = 0;
-            while (it.getNextEvent (msg, samplePos))
+            int copied = 0;
+            int bytes  = 0;
+            for (const auto metadata : chainMidiScratch)
             {
-                if (chain->acceptsMidiChannel (msg.getChannel()))
-                    chainMidiFiltered.addEvent (msg, samplePos);
+                const int cost = metadata.numBytes + 6;
+                if (copied >= maxChainMidiEvents || bytes + cost > maxChainMidiBytes)
+                    continue;
+
+                const auto message = metadata.getMessage();
+                if (! chain->acceptsMidiChannel (message.getChannel()))
+                    continue;
+
+                chainMidiFiltered.addEvent (message, metadata.samplePosition);
+                ++copied;
+                bytes += cost;
             }
             midiForChain = &chainMidiFiltered;
         }
@@ -1453,11 +1626,18 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 
     // 4. Record the clean (post-gain, pre-click) record mix. Access to
     //    the record buffer is serialised with the message thread via
-    //    recordLock.
+    //    recordLock; tryEnter so the audio thread never blocks on it (the
+    //    message thread holds it while finalising a take / starting an
+    //    overdub). A busy lock drops this block's write — one block at a
+    //    capture boundary, never a dropout, because the message thread only
+    //    holds it around start/stop of the capture.
     if (takeRecorder.isRecordingRequested() && recordBuffer != nullptr)
     {
-        const juce::ScopedLock sl (recordLock);
-        takeRecorder.write (*recordBuffer, maxRecordSamples, recordingMixBuffer, numSamples);
+        if (recordLock.tryEnter())
+        {
+            takeRecorder.write (*recordBuffer, maxRecordSamples, recordingMixBuffer, numSamples);
+            recordLock.exit();
+        }
     }
 
     // 5. Compute input levels from the clean post-gain dry snapshot so
@@ -3635,10 +3815,11 @@ void BluePrinterAudioProcessor::applyChainState (const juce::var& state, juce::S
     vst3Library.setSkipStateRestore (! restoreStateBlobs);
 
     // Keep the deferred-restore driver (timerCallback) paused while a
-    // restore is in progress: clearChains() below would destroy a chain
-    // whose async load is still in flight. In the standalone both
-    // restores complete before the message loop starts pumping, so the
-    // driver only ever sees the settled state.
+    // restore is in progress: clearChains() below retires the old chains
+    // (the audio thread may still hold them) and a load finalising into one
+    // of them would be pointless. In the standalone both restores complete
+    // before the message loop starts pumping, so the driver only ever sees
+    // the settled state.
     restoreActive = true;
 
     // Suppress persistence for the whole restore. clearChains() and the
@@ -3739,6 +3920,12 @@ void BluePrinterAudioProcessor::recordQuarantinedSkip (const juce::String& fileN
 //==============================================================================
 void BluePrinterAudioProcessor::timerCallback()
 {
+    // timerCallback calls this to reclaim chains/slots that were removed
+    // long enough ago, so the audio thread can't still be referencing them.
+    // This is the only place a removed PluginChain (or a removed slot's
+    // plugin) is destroyed, so it always happens on the message thread.
+    collectRetiredChains();
+
     // Fixed-length looper capture (0022): the audio thread stopped writing
     // at the target and flagged us. Finalise on the message thread so the
     // buffer trim, peak refresh, MIDI-clock update and listeners all run

@@ -1,11 +1,9 @@
 #include "PluginChain.h"
 
+#include <algorithm>
 #include <future>
 #include <thread>
 #include "PluginProcessor.h"
-
-#include <future>
-#include <thread>
 
 PluginChain::PluginChain (Vst3Library& lib)
     : library (lib)
@@ -13,11 +11,45 @@ PluginChain::PluginChain (Vst3Library& lib)
     // Register the VST3 format. addFormat takes ownership and deletes it
     // in the format manager's destructor.
     formatManager.addFormat (std::make_unique<juce::VST3PluginFormat>());
+
+    // The audio thread refills this snapshot every block; reserving it here
+    // guarantees that push_back never allocates in processBlock.
+    blockSlots.reserve (static_cast<size_t> (maxSlots));
 }
 
 PluginChain::~PluginChain()
 {
-    clear();
+    // By the time a chain is destroyed it has been retired for the required
+    // snapshot refills (see BluePrinterAudioProcessor::retiredChains), so no
+    // audio block can still be referencing these slots. Release the plugins
+    // the host never released, drop our listeners first so a plugin that
+    // notifies as it dies never calls back into a half-destroyed chain, then
+    // let the slots (and their plugins) go.
+    const auto releaseSlot = [this] (const std::shared_ptr<ChainSlot>& slot)
+    {
+        if (slot == nullptr || slot->plugin == nullptr)
+            return;
+
+        if (prepared)
+            slot->plugin->releaseResources();
+
+        slot->plugin->removeListener (this);
+        detachParameterListeners (*slot->plugin);
+    };
+
+    for (auto& slot : slots)
+        releaseSlot (slot);
+
+    // Retired slots were detached when they were removed; they may still be
+    // prepared, so release them too.
+    for (auto& retired : retiredSlots)
+        if (retired.slot != nullptr && retired.slot->plugin != nullptr && prepared)
+            retired.slot->plugin->releaseResources();
+
+    prepared = false;
+    slots.clear();
+    retiredSlots.clear();
+    pendingSlots.clear();
 }
 
 void PluginChain::prepareToPlay (double sampleRate, int samplesPerBlock)
@@ -25,22 +57,41 @@ void PluginChain::prepareToPlay (double sampleRate, int samplesPerBlock)
     currentSampleRate = sampleRate;
     currentBlockSize  = samplesPerBlock;
 
+    // Host thread with the audio callback stopped: safe to drop the stale
+    // snapshot here, which also releases any last reference the audio thread
+    // was holding to a retired slot. The forced collection then frees those
+    // slots (their generation deadline is meaningless now that the snapshot
+    // is gone), so a stopped device never retains them indefinitely.
+    blockSlots.clear();
+    collectRetiredSlots (true);
+
     const juce::ScopedLock sl (lock);
     for (auto& slot : slots)
     {
         if (slot->plugin != nullptr)
             slot->plugin->prepareToPlay (sampleRate, samplesPerBlock);
     }
+
+    prepared = true;
 }
 
 void PluginChain::releaseResources()
 {
-    const juce::ScopedLock sl (lock);
-    for (auto& slot : slots)
     {
-        if (slot->plugin != nullptr)
-            slot->plugin->releaseResources();
+        const juce::ScopedLock sl (lock);
+        for (auto& slot : slots)
+        {
+            if (slot->plugin != nullptr)
+                slot->plugin->releaseResources();
+        }
     }
+
+    prepared = false;
+
+    // Audio is stopped here too, so the snapshot can go and the retired slots
+    // it may have pinned can be freed.
+    blockSlots.clear();
+    collectRetiredSlots (true);
 }
 
 int PluginChain::getActiveLatencySamples() const
@@ -53,18 +104,40 @@ int PluginChain::getActiveLatencySamples() const
     return total;
 }
 
+double PluginChain::getTailLengthSeconds() const
+{
+    // Serial slots: each plugin's tail feeds the next one, so the chain's
+    // total tail is the sum (see the header).
+    const juce::ScopedLock sl (lock);
+    double total = 0.0;
+    for (auto& slot : slots)
+        if (slot->plugin != nullptr && ! slot->bypassed)
+            total += juce::jmax (0.0, slot->plugin->getTailLengthSeconds());
+    return total;
+}
+
 void PluginChain::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
 {
-    // The chain runs plugins in order, in place. We use a snapshot of the
-    // slot list so adding/removing plugins from the message thread mid-
-    // block can't invalidate our iteration.
-    std::vector<ChainSlot*> snapshot;
+    // Refresh the shared_ptr snapshot of runnable slots. tryEnter: the
+    // message thread may be mutating the list (add/remove/bypass), and
+    // blocking here would stall the audio thread inside a plugin's UI
+    // operation. On contention the previous block's snapshot is reused —
+    // it is still valid, because its shared_ptrs keep those slots alive even
+    // if they have just been removed (they then sit in retiredSlots).
+    if (lock.tryEnter())
     {
-        const juce::ScopedLock sl (lock);
-        snapshot.reserve (slots.size());
+        blockSlots.clear();
         for (auto& slot : slots)
             if (slot->plugin != nullptr && ! slot->bypassed)
-                snapshot.push_back (slot.get());
+                blockSlots.push_back (slot);
+        lock.exit();
+
+        // Publish the refill AFTER the snapshot is rebuilt: the retired list
+        // only frees a slot once this generation has advanced past its
+        // deadline, i.e. once at least two refills have dropped it from the
+        // snapshot. Bumped here (not per block) so a reused snapshot never
+        // counts as progress.
+        slotSnapshotGeneration.fetch_add (1, std::memory_order_release);
     }
 
     if (! wantsMidi.load (std::memory_order_acquire))
@@ -73,13 +146,44 @@ void PluginChain::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
         // plugins an empty buffer so note-aware FX can't see the
         // keyboard input.
         juce::MidiBuffer emptyMidi;
-        for (auto* slot : snapshot)
+        for (auto& slot : blockSlots)
             slot->plugin->processBlock (buffer, emptyMidi);
-        return;
     }
+    else
+    {
+        for (auto& slot : blockSlots)
+            slot->plugin->processBlock (buffer, midi);
+    }
+}
 
-    for (auto* slot : snapshot)
-        slot->plugin->processBlock (buffer, midi);
+void PluginChain::refreshActivePluginCount()
+{
+    int count = 0;
+    for (auto& slot : slots)
+        if (slot->plugin != nullptr && ! slot->bypassed)
+            ++count;
+
+    activePluginCount.store (count, std::memory_order_release);
+}
+
+void PluginChain::collectRetiredSlots (bool force)
+{
+    if (retiredSlots.empty())
+        return;
+
+    const auto generation = slotSnapshotGeneration.load (std::memory_order_acquire);
+
+    // Never falls back to wall-clock time: if audio is paused (or this chain
+    // is skipped because it has no active plugins) the slot is retained
+    // rather than risking a release while the audio thread's snapshot still
+    // holds it. prepareToPlay/releaseResources force a collection after
+    // clearing blockSlots with audio stopped.
+    retiredSlots.erase (std::remove_if (retiredSlots.begin(), retiredSlots.end(),
+        [generation, force] (const RetiredSlot& retired)
+        {
+            return force || generation >= retired.deadlineGeneration;
+        }),
+        retiredSlots.end());
 }
 
 void PluginChain::attachParameterListeners (juce::AudioProcessor& plugin)
@@ -150,16 +254,27 @@ int PluginChain::addPlugin (const juce::File& vst3File, juce::String& outError)
         return -1;
     }
 
+    // Bounded so the audio-thread snapshot's reserved capacity always covers
+    // every slot.
+    if (getNumPlugins() >= maxSlots)
+    {
+        outError = "This chain is full (" + juce::String (maxSlots) + " plugins).";
+        return -1;
+    }
+
     juce::String pluginName;
     auto* instance = createInstance (vst3File, pluginName, outError);
     if (instance == nullptr)
         return -1;
 
+    // Owned from here on so an early return can't leak the instance.
+    std::unique_ptr<juce::AudioPluginInstance> ownedInstance (instance);
+
     // Listen for parameter/structure changes inside the plugin so the
     // owner can persist tweaks (onChanged). Attached here on the
     // message thread; removed before the plugin is destroyed.
-    instance->addListener (this);
-    attachParameterListeners (*instance);
+    ownedInstance->addListener (this);
+    attachParameterListeners (*ownedInstance);
 
     // Eager prepare only when the host already knows the real device
     // configuration (isDevicePrepared). Before that the chain's rate /
@@ -173,18 +288,19 @@ int PluginChain::addPlugin (const juce::File& vst3File, juce::String& outError)
     if (BluePrinterAudioProcessor::isDevicePrepared())
     {
         BluePrinterAudioProcessor::setCrashOp ("preparing plugin (prepareToPlay)", vst3File.getFileName().toRawUTF8());
-        instance->prepareToPlay (currentSampleRate, currentBlockSize);
+        ownedInstance->prepareToPlay (currentSampleRate, currentBlockSize);
         BluePrinterAudioProcessor::setCrashOp ("no chain operation in progress");
     }
 
-    auto slot = std::make_unique<ChainSlot>();
-    slot->plugin.reset (instance);
+    auto slot = std::make_shared<ChainSlot>();
+    slot->plugin = std::move (ownedInstance);
     slot->name = pluginName.isNotEmpty() ? pluginName : vst3File.getFileNameWithoutExtension();
     slot->path = vst3File.getFullPathName();
 
     {
         const juce::ScopedLock sl (lock);
         slots.push_back (std::move (slot));
+        refreshActivePluginCount();
     }
 
     if (onChanged)
@@ -213,6 +329,12 @@ int PluginChain::finalizeAsyncLoad (std::unique_ptr<juce::AudioPluginInstance> i
     if (hasPluginFile (file))
         return -1;
 
+    // Bounded so the audio-thread snapshot's reserved capacity always covers
+    // every slot. Refused before attaching listeners so the instance is
+    // simply released.
+    if (getNumPlugins() >= maxSlots)
+        return -1;
+
     // Listen for parameter/structure changes inside the plugin so the
     // owner can persist tweaks (onChanged). Attached here on the
     // message thread; removed before the plugin is destroyed.
@@ -233,7 +355,7 @@ int PluginChain::finalizeAsyncLoad (std::unique_ptr<juce::AudioPluginInstance> i
         BluePrinterAudioProcessor::setCrashOp ("no chain operation in progress");
     }
 
-    auto slot = std::make_unique<ChainSlot>();
+    auto slot = std::make_shared<ChainSlot>();
     slot->plugin = std::move (instance);
     slot->name = name.isNotEmpty() ? name : file.getFileNameWithoutExtension();
     slot->path = file.getFullPathName();
@@ -242,6 +364,7 @@ int PluginChain::finalizeAsyncLoad (std::unique_ptr<juce::AudioPluginInstance> i
     {
         const juce::ScopedLock sl (lock);
         slots.push_back (std::move (slot));
+        refreshActivePluginCount();
         newIndex = static_cast<int> (slots.size()) - 1;
     }
 
@@ -301,6 +424,15 @@ bool PluginChain::addPluginAsync (const juce::File& vst3File,
 
     auto promise = std::make_shared<std::promise<LoadResult>>();
     pending->future = promise->get_future();
+
+    // The apartment task below holds a raw `this` (createInstance reads the
+    // chain's format manager and prepared rate/block size) and so does the
+    // polling waiter. The owner must therefore keep this chain alive until
+    // the load finishes: see hasLoadsInFlight / the processor's retirement
+    // collector. A timed-out load keeps the count set, because its abandoned
+    // worker can still touch the chain — the chain is leaked instead of being
+    // freed under it.
+    loadsInFlight.fetch_add (1, std::memory_order_acq_rel);
 
     // Run the synchronous createInstance on the plugin UI apartment
     // (see getPluginUiApartment in PluginProcessor.h), not a bare
@@ -379,6 +511,10 @@ bool PluginChain::addPluginAsync (const juce::File& vst3File,
                     callback (slotIndex, name,
                               slotIndex < 0 ? error : juce::String(),
                               false);
+
+                // The worker finished and the waiter is done: the chain may
+                // be reclaimed from here on.
+                chain->loadsInFlight.fetch_sub (1, std::memory_order_acq_rel);
                 delete this;
                 return;
             }
@@ -389,7 +525,10 @@ bool PluginChain::addPluginAsync (const juce::File& vst3File,
                 // Worker still running. We abandon it: the future will
                 // eventually resolve and the resulting instance will be
                 // destroyed when the future is destroyed. The worker
-                // thread itself is not killed (unsafe in C++).
+                // thread itself is not killed (unsafe in C++). The load
+                // count intentionally stays set: the abandoned worker can
+                // still call into this chain, so the chain must outlive it
+                // (see hasLoadsInFlight).
                 if (callback)
                     callback (-1, {},
                               "Timed out loading plugin: " + pending->file.getFullPathName(),
@@ -410,18 +549,32 @@ bool PluginChain::addPluginAsync (const juce::File& vst3File,
 bool PluginChain::removePlugin (int index)
 {
     const int removedIndex = index;
+    std::shared_ptr<ChainSlot> removed;
     {
         const juce::ScopedLock sl (lock);
         if (index < 0 || index >= static_cast<int> (slots.size()))
             return false;
-        if (slots[index]->plugin != nullptr)
-        {
-            slots[index]->plugin->removeListener (this);
-            detachParameterListeners (*slots[index]->plugin);
-            slots[index]->plugin->releaseResources();
-        }
+
+        removed = std::move (slots[static_cast<size_t> (index)]);
         slots.erase (slots.begin() + index);
+        refreshActivePluginCount();
     }
+
+    // Stop listening to the plugin now (message thread; JUCE's listener
+    // lists are lock-protected), but do NOT release or destroy it: the audio
+    // thread may still be inside processBlock with this slot in its
+    // snapshot. It is destroyed once the snapshot has dropped it.
+    if (removed != nullptr && removed->plugin != nullptr)
+    {
+        removed->plugin->removeListener (this);
+        detachParameterListeners (*removed->plugin);
+    }
+
+    if (removed != nullptr)
+        retiredSlots.push_back (RetiredSlot {
+            std::move (removed),
+            slotSnapshotGeneration.load (std::memory_order_acquire) + retireGraceRefills });
+
     if (onSlotRemoved)
         onSlotRemoved (removedIndex);
     if (onChanged)
@@ -436,6 +589,7 @@ bool PluginChain::setBypass (int index, bool shouldBypass)
         if (index < 0 || index >= static_cast<int> (slots.size()))
             return false;
         slots[index]->bypassed = shouldBypass;
+        refreshActivePluginCount();
     }
     if (onChanged)
         onChanged();
@@ -462,22 +616,40 @@ bool PluginChain::movePlugin (int fromIndex, int toIndex)
 
 void PluginChain::clear()
 {
+    std::vector<std::shared_ptr<ChainSlot>> removed;
     std::vector<int> removedIndices;
     {
         const juce::ScopedLock sl (lock);
+        removed.reserve (slots.size());
+        removedIndices.reserve (slots.size());
         for (size_t i = 0; i < slots.size(); ++i)
         {
-            if (slots[i]->plugin != nullptr)
-            {
-                slots[i]->plugin->removeListener (this);
-                detachParameterListeners (*slots[i]->plugin);
-                slots[i]->plugin->releaseResources();
-            }
+            removed.push_back (std::move (slots[i]));
             removedIndices.push_back (static_cast<int> (i));
         }
         slots.clear();
         pendingSlots.clear();
+        refreshActivePluginCount();
     }
+
+    // Same rule as removePlugin: detach our listeners now, but keep the slot
+    // (and its plugin) alive until the audio thread's snapshot can no longer
+    // reference it.
+    const auto deadlineGeneration = slotSnapshotGeneration.load (std::memory_order_acquire)
+                                  + retireGraceRefills;
+
+    for (auto& slot : removed)
+    {
+        if (slot != nullptr && slot->plugin != nullptr)
+        {
+            slot->plugin->removeListener (this);
+            detachParameterListeners (*slot->plugin);
+        }
+
+        if (slot != nullptr)
+            retiredSlots.push_back (RetiredSlot { std::move (slot), deadlineGeneration });
+    }
+
     if (onSlotRemoved)
     {
         for (int idx : removedIndices)

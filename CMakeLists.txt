@@ -256,6 +256,7 @@ if(BUILD_TESTING)
         Tests/test_ClickSynth.cpp
         Tests/test_MetronomePlayer.cpp
         Tests/test_MidiClockMath.cpp
+        Tests/test_MidiSendQueue.cpp
         Tests/test_MeterMath.cpp
         Tests/test_ChainCpuMath.cpp
         Tests/test_Meter.cpp

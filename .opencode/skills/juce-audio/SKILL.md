@@ -90,11 +90,16 @@ BluePrinter uses JUCE for audio processing, VST3 hosting, and WebView2 UI integr
     (`midiStartPending`). With `midiClockOnRecord` on the clock runs only
     while a take or loop capture is active (count-in included) and stops
     when the capture ends; the run condition is the atomics-only helper
-    `wantsClockRun()`. Edges send Start/Stop directly to the hardware
-    output device (`sendDirectMidiStart`/`sendDirectMidiStop` +
-    `midiOutputLock`) — the standalone never forwards the host MIDI
-    buffer to hardware, so without the direct send the drum machine stays
-    silent. The click is gated header-level too: `metronomeEnabled`
+    `wantsClockRun()`. Edges send Start/Stop to the hardware output device —
+    the standalone never forwards the host MIDI buffer to hardware, so
+    without the direct send the drum machine stays silent. Those sends are
+    **queued, never synchronous**: `MidiClockOutput::sendStart/sendStop/
+    sendClock` only push into the lock-free `MidiSendQueue`, and
+    `MidiClockOutput`'s own sender thread drains it with
+    `sendMessageNow()` (open/close of the device stay on the message
+    thread). A queued Stop discards the already-queued pulse train first,
+    so gear never keeps stepping after Stop; a queued Start goes out before
+    the pulses. The click is gated header-level too: `metronomeEnabled`
     (master) AND `clickDuringCapture` (off = count-in only) for both take
     recording and looper capture.
 13. Master monitor Output: apply the "PlaybackVolume" param (display Output,
@@ -110,7 +115,7 @@ simultaneously. Both loops are otherwise independent of the metronome/clock.
 
 ## Threading Model
 
-- **Audio thread**: `processBlock()`, `prepareToPlay()`, `releaseResources()`. No locks, no allocations, no UI calls.
+- **Audio thread**: `processBlock()`, `prepareToPlay()`, `releaseResources()`. No blocking locks, no allocations, no UI calls. Chain and slot snapshots are refilled under `tryEnter()` and fall back to the previous block's snapshot on contention; removed chains/slots are retired and reclaimed later on the message thread.
 - **Message thread**: All GUI operations, chain mutations, file I/O, parameter changes.
 - **Async:** `juce::AsyncUpdater` (WebViewEditor) and `juce::ThreadPool` for VST3 scanning.
 - **Atomic flags**: `std::atomic<bool>` for audio-thread-visible state like `recordingRequested`, `playbackActive`.
@@ -121,7 +126,9 @@ simultaneously. Both loops are otherwise independent of the metronome/clock.
 class PluginChain {
     String chainId;                // stable id ("chain0", ...), survives rename/reorder
     String name;                   // user-editable
-    std::vector<ChainSlot> slots;  // ChainSlot { unique_ptr<AudioPluginInstance>, bypassed, name, path }
+    std::vector<std::shared_ptr<ChainSlot>> slots;      // ChainSlot { unique_ptr<AudioPluginInstance>, bypassed, name, path }
+    std::vector<std::shared_ptr<ChainSlot>> blockSlots; // audio-thread snapshot, reserved to maxSlots = 64
+    std::vector<RetiredSlot> retiredSlots;              // removed slots held until two snapshot refills have passed
     std::vector<PendingSlot> pendingSlots;  // deferred-restore queue, loaded one per timer tick
     Vst3Library& library;          // shared reference, not owned
     std::atomic<bool> wantsMidi;   // true: plugins get the live MIDI buffer; false: empty buffer
@@ -133,10 +140,11 @@ class PluginChain {
 ```
 
 Key methods:
-- `processBlock(buffer, midi)` — runs through non-bypassed plugins sequentially; passes a local empty `MidiBuffer` when `wantsMidi` is off (audio-thread read, message-thread set); filters MIDI by `midiChannelsMask` into `chainMidiFiltered` when needed
-- `hasActivePlugins()` — false when every slot is bypassed/empty; such chains are skipped entirely in `processBlock` (a transparent chain's scratch would just be a dry copy, and summing it back would double the dry signal)
+- `processBlock(buffer, midi)` — refills `blockSlots` under `lock.tryEnter()` (keeping the previous snapshot on contention), then runs the non-bypassed plugins sequentially; passes a local empty `MidiBuffer` when `wantsMidi` is off (audio-thread read, message-thread set); filters MIDI by `midiChannelsMask` into `chainMidiFiltered` when needed. Bumps `slotSnapshotGeneration` only when a refill actually happened
+- `hasActivePlugins()` — false when every slot is bypassed/empty (lock-free: an atomic count); such chains are skipped entirely in `processBlock` (a transparent chain's scratch would just be a dry copy, and summing it back would double the dry signal)
+- `removePlugin()` / `clear()` — move the slot(s) into `retiredSlots` with `deadlineGeneration = slotSnapshotGeneration + 2` instead of destroying them; `collectRetiredSlots()` (called from the processor timer) does the actual destruction on the message thread once two refills have dropped them from the snapshot. No wall-clock fallback; `prepareToPlay`/`releaseResources` force it with audio stopped
 - `addPlugin(file, error)` — sync load
-- `addPluginAsync(file, callback)` — async load on worker thread
+- `addPluginAsync(file, callback)` — async load on worker thread; counts as an in-flight load (`hasLoadsInFlight()`), so the owner won't reclaim the chain while the loader still holds a raw pointer to it
 - `prepareToPlay(sampleRate, blockSize)` — forwards to all plugins
 - `popPendingSlot()` / `hasPendingSlots()` / `getNumPendingSlots()` — the deferred-restore queue; the processor's `timerCallback` pops one slot per message-loop turn and loads it
 - Serializes state as a `juce::DynamicObject` (per-slot path, bypass flag, base64 plugin state, plus the chain's `wantsMidi`/`volume`/`muted`/`recordOnCapture`/`midiChannels` flags); the processor stores it as JSON under the `pluginChains` state property (`makeChainState()` / `applyChainState()` in `PluginProcessor.cpp`)
@@ -191,5 +199,7 @@ Currently the APVTS exposes **`Gain`** (display "Input", `AudioParameterFloat`, 
 
 ## Don't
 
-- Allocate, lock, or call UI APIs in `processBlock` / `prepareToPlay` / `releaseResources` — the audio path stays allocation-free, lock-free, UI-free.
+- Allocate, take a blocking lock, or call UI APIs in `processBlock` / `prepareToPlay` / `releaseResources` — the audio path stays allocation-free, UI-free, and never waits on the message thread. Use `tryEnter()` + a fallback snapshot (as the chain/slot snapshots do) rather than `ScopedLock`.
+- Destroy a chain, slot or plugin on the message thread while audio may still reference it. Retire it (see `retiredChains` / `retiredSlots`) and let the timer collector free it after two snapshot refills — never on a wall-clock timer.
+- Call `MidiOutput::sendMessageNow()` from the audio thread — enqueue into `MidiSendQueue`; `MidiClockOutput`'s sender thread does the send.
 - Add metronome / BPM / count-in / MIDI-clock settings to APVTS — see the Parameters section above: standalone user state + atomics.

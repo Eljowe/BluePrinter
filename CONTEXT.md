@@ -1,9 +1,10 @@
 # BluePrinter
 
-A Windows guitar take-recorder plugin (VST3 + Standalone) that hosts parallel VST3
-FX chains, records takes and loops from the processed signal, and files them in a
-local snippet library. This file defines the project's language and shape; deep
-implementation detail lives in [`AGENTS.md`](AGENTS.md).
+A cross-platform guitar take-recorder plugin (VST3 + Standalone; AU on macOS)
+that hosts parallel VST3 FX chains, records takes and loops from the processed
+signal, and files them in a local snippet library. This file defines the
+project's language and shape; deep implementation detail lives in
+[`AGENTS.md`](AGENTS.md).
 
 ## Language
 
@@ -93,6 +94,15 @@ _Avoid_: Bus, track, strip
 **Slot**:
 One plugin instance within a chain, ordered and individually bypassable.
 _Avoid_: Plugin, insert
+
+**Retired chain / slot**:
+A chain or slot that has been removed from the live list but is not destroyed
+yet. It is held until two snapshot refills have happened since the removal (the
+first drops it from the audio thread's snapshot, the second confirms), and is
+then freed on the message thread. Never released on a wall-clock timer, so a
+paused audio callback cannot make it drop the last reference inside the
+callback.
+_Avoid_: Graveyard, tombstone, zombie
 
 **Input mask**:
 The subset of the 1–8 channel input bus a chain reads. A chain never reads another
@@ -212,9 +222,11 @@ _Avoid_: Message, IPC event
 | Snippet→looper rate/channel prep (0056) | `Source/Resampler.h/.cpp` |
 | Count-in completion test | `Source/PreRollMath.h` |
 | MIDI output device + direct sends | `Source/MidiClockOutput.h/.cpp` |
+| Lock-free MIDI send queue (audio → sender thread) | `Source/MidiSendQueue.h` |
 | Metering math | `Source/MeterMath.h` |
 | Per-chain CPU math (0047) | `Source/ChainCpuMath.h` |
 | Per-meter level/peak/clip state | `Source/Meter.h` |
+| Standalone window fill maths (0062) | `Source/EditorWindowMath.h` |
 | Take stack + review/overdub state machine | `Source/TakeRecorder.h/.cpp` |
 | Per-chain capture stems (0038) | `Source/StemCapture.h/.cpp` |
 | Named setlists (0035) | `Source/SetlistStore.h/.cpp` |
@@ -224,7 +236,14 @@ _Avoid_: Message, IPC event
 
 ## Invariants
 
-- The audio thread never allocates and never takes a lock inside `processBlock`.
+- The audio thread never blocks and never allocates inside `processBlock`: chain
+  and slot snapshots are refilled with `tryEnter()` (falling back to the previous
+  block's snapshot), MIDI output is queued lock-free, and memory is preallocated.
+- Removing a chain or a slot never frees it immediately: it is retired and
+  reclaimed on the message thread once two snapshot refills have happened since
+  the removal (never on a wall-clock timer), so the audio thread can never hold
+  a dangling chain, slot or plugin — and can never be the thread that destroys
+  one. `prepareToPlay`/`releaseResources` force the collection with audio stopped.
 - Chains run in parallel on a pristine input snapshot and never hear each other.
 - Monitor controls (Output, Solo, monitor-mute, Loop level) never change the print.
 - Melody audition is monitor-only; it is stopped when a capture starts and never

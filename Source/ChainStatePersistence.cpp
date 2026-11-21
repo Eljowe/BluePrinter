@@ -97,6 +97,16 @@ void ChainStatePersistence::applyState (const juce::var& state, juce::String& ou
     {
         auto* chain = createChain (spec.name, ChainInputBoth, spec.wantsMidi, spec.recordOnCapture);
 
+        if (chain == nullptr)
+        {
+            // Past the owner's chain maximum: report it once and skip the
+            // rest (the remaining chains could not be created either).
+            if (outError.isNotEmpty()) outError += "\n";
+            outError += "Too many chains in the saved state (maximum "
+                      + juce::String (deps.maxChains) + "): the rest were skipped.";
+            break;
+        }
+
         if (! spec.hasState)
             continue;
 
@@ -147,35 +157,73 @@ PluginChain* ChainStatePersistence::createChain (const juce::String& name,
                                                  bool wantsMidi,
                                                  bool recordOnCapture)
 {
-    auto chain = std::make_unique<PluginChain> (deps.vst3);
+    // Refuse past the owner's maximum: the processor's audio-thread snapshot
+    // is reserved to that size, so extra chains would be silently truncated
+    // (and never processed). Only the message thread mutates the list, so the
+    // check-then-push below cannot race.
+    if (deps.maxChains > 0)
+    {
+        const juce::ScopedLock sl (deps.chainLock);
+        if (static_cast<int> (deps.chains.size()) >= deps.maxChains)
+            return nullptr;
+    }
+
+    auto chain = std::make_shared<PluginChain> (deps.vst3);
     chain->setChainId (juce::String ("chain") + juce::String (deps.nextChainId++));
     chain->setName (name.isNotEmpty() ? name : juce::String ("Chain ") + juce::String (deps.nextChainId));
     chain->setInputMask (inputMask);
     chain->setWantsMidi (wantsMidi);
     chain->setRecordOnCapture (recordOnCapture);
 
+    // Every chain (default, UI-created, or restore-created) must run
+    // the persistence callback on change. Wiring it here — rather than
+    // only on the constructor's default chains — is what makes slot
+    // mutations (add/remove/bypass) on restored chains persist. Wired
+    // before the prepare hook, which can already make a plugin notify.
+    chain->onChanged = deps.onChainChanged;
+
+    // Prepare with the live device config before publishing, so a chain
+    // created after the device opened (addChain) hands its plugins the real
+    // sample rate / block size instead of the chain's 44100/512 defaults.
+    // The processor's hook skips this until the host has prepared the device
+    // (restore-time chains are covered by the host's prepareToPlay), which
+    // keeps the Neural DSP "no fake-then-real double prepare" rule intact.
+    if (deps.prepareChain)
+        deps.prepareChain (*chain);
+
     PluginChain* raw = chain.get();
     {
         const juce::ScopedLock sl (deps.chainLock);
         deps.chains.push_back (std::move (chain));
     }
-    // Every chain (default, UI-created, or restore-created) must run
-    // the persistence callback on change. Wiring it here — rather than
-    // only on the constructor's default chains — is what makes slot
-    // mutations (add/remove/bypass) on restored chains persist.
-    raw->onChanged = deps.onChainChanged;
+
     return raw;
 }
 
 void ChainStatePersistence::clearChains()
 {
-    std::vector<std::unique_ptr<PluginChain>> removed;
+    std::vector<std::shared_ptr<PluginChain>> removed;
     {
         const juce::ScopedLock sl (deps.chainLock);
-        removed = std::move (deps.chains);
+        // Copy then clear, so the vector keeps the capacity the audio thread
+        // relies on (its snapshot reserve is sized to the same maximum).
+        removed = deps.chains;
+        deps.chains.clear();
     }
+
     for (auto& chain : removed)
-        chain->clear();
+    {
+        if (chain == nullptr)
+            continue;
+
+        // Hand it to the owner for deferred destruction; the owner's
+        // retirement closes the chain's plugin windows (exactly once — do not
+        // do it here too) and keeps the chain alive until the audio thread
+        // can no longer reference it. Without a hook (tests only) the chain
+        // simply drops here.
+        if (deps.retireChain)
+            deps.retireChain (chain);
+    }
 }
 
 void ChainStatePersistence::ensureUniqueChainIds()
