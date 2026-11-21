@@ -31,6 +31,23 @@ BP_TEST (Looper_freshCaptureAppendsAndAutoStopsAtTheTarget)
     BP_CHECK (loop.consumeAutoStopPending());
 }
 
+BP_TEST (Looper_freshCaptureSkipsTheSourceOffset)
+{
+    Looper loop;
+    auto record = ramp (1, 16, 0.0f);
+    auto source = ramp (1, 6, 100.0f); // 100..105
+
+    loop.armFresh();
+    loop.armCaptureNow();
+
+    // Skip the first two frames of the delayed print: the capture starts at
+    // 102 and is four frames long (the skipped prefix is absent).
+    loop.captureBlock (record, 16, source, 4, 0, 2);
+    BP_CHECK_EQ (loop.getLength(), static_cast<int64_t> (4));
+    BP_CHECK_NEAR (record.getSample (0, 0), 102.0f, 0.0001f);
+    BP_CHECK_NEAR (record.getSample (0, 3), 105.0f, 0.0001f);
+}
+
 BP_TEST (Looper_overdubKeepsTheLoopLengthAndWritesAfterIt)
 {
     Looper loop;

@@ -25,7 +25,7 @@ bool Looper::isIdle() const
 
 void Looper::captureBlock (juce::AudioBuffer<float>& buffer, int maxSamples,
                            const juce::AudioBuffer<float>& source, int numSamples,
-                           int64_t targetSamples)
+                           int64_t targetSamples, int sourceOffset)
 {
     if (! captureArmed.load (std::memory_order_acquire))
         return;
@@ -36,7 +36,7 @@ void Looper::captureBlock (juce::AudioBuffer<float>& buffer, int maxSamples,
         : length.load (std::memory_order_relaxed);
 
     const auto newWritePos = CaptureWrite::write (buffer, writePos, source,
-                                                  numSamples, maxSamples);
+                                                  numSamples, maxSamples, sourceOffset);
     if (newWritePos != writePos)
     {
         if (overdubCaptureNow)

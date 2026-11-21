@@ -43,8 +43,17 @@ _Avoid_: Loop region, backing track
 
 **Recording mix** (also *capture mix*):
 The signal actually printed: the dry input scaled by Dry, plus the outputs of
-chains whose Record toggle is on. Takes and loops both tap it.
+chains whose Record toggle is on. Takes and loops both tap it. The dry and every
+chain are latency-aligned by PDC, and a capture skips the leading L-sample flush
+(capture offset) so the saved audio starts on the armed downbeat.
 _Avoid_: Record bus, wet mix
+
+**Capture offset**:
+The leading L samples of the PDC-delayed print that a capture skips so the
+saved take/loop begins on the armed downbeat rather than L samples late.
+Fixed-length auto-stop counts written samples, and the per-chain stems share the
+same offset.
+_Avoid_: Latency trim, pre-roll (that is the count-in)
 
 **Dry**:
 The direct, unprocessed input scaled by the Dry level, present in both the monitor
@@ -111,8 +120,17 @@ _Avoid_: Channel map
 
 **Monitor mix**:
 What the user hears, post-master-Output. Monitor-only Solo and monitor-mute change
-it; they never change the recording mix.
+it; they never change the recording mix. It is latency-aligned by PDC: the dry
+path and each chain are delayed to a common L.
 _Avoid_: Main mix (that is the pre-Output sum)
+
+**Plugin delay compensation (PDC)**:
+The alignment of the dry pass-through and every parallel chain to one uniform
+latency `L`, the maximum over the loaded, non-bypassed, non-hard-muted chains.
+The dry path waits `L`, each chain waits `L - its own latency`; both the monitor
+and the print are aligned. `L` is reported to the host and latched for the
+duration of a capture. Capped at 500 ms with one notification.
+_Avoid_: Latency compensation, auto-align
 
 **Guard** (monitor):
 The optional, zero-latency soft clip at the very end of the monitor path — after
@@ -225,6 +243,8 @@ _Avoid_: Message, IPC event
 | Crash self-heal: blob gating, suspects, quarantine | `Source/RestoreSelfHeal.h/.cpp` |
 | Chain bundle serialise/apply + chain construction | `Source/ChainStatePersistence.h/.cpp` |
 | Chain input select + monitor/record sum | `Source/ChainRouting.h` |
+| PDC latency maths (0046) | `Source/DelayCompensation.h` |
+| Preallocated alignment delay line (0046) | `Source/DelayLine.h` |
 | Capture-buffer write clamp | `Source/CaptureWrite.h` |
 | Capture-region copy (finalize) | `Source/CaptureCopy.h` |
 | Snippet→looper rate/channel prep (0056) | `Source/Resampler.h/.cpp` |
@@ -254,6 +274,9 @@ _Avoid_: Message, IPC event
   a dangling chain, slot or plugin — and can never be the thread that destroys
   one. `prepareToPlay`/`releaseResources` force the collection with audio stopped.
 - Chains run in parallel on a pristine input snapshot and never hear each other.
+- PDC aligns the dry path and every chain to one uniform `L` (preallocated delay
+  lines, latency read under a try-lock). `L` is latched during a capture and the
+  capture cursor skips `L`; the click/loop/playback/MIDI stay on the true grid.
 - Monitor controls (Output, Solo, monitor-mute, Loop level, Guard) never change the print.
 - Melody audition is monitor-only; it is stopped when a capture starts and never
   enters the recording mix. One melody player at a time (`MelodySource` tracks

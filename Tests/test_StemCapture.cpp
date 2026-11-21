@@ -113,6 +113,20 @@ BP_TEST (StemCapture_writeClampsToCapacity)
     BP_CHECK_NEAR (capture.getStem (0).buffer.getSample (0, 1), 1.0f, 0.0001f);
 }
 
+BP_TEST (StemCapture_writeStemSkipsTheSourceOffset)
+{
+    StemCapture capture;
+    BP_CHECK (capture.arm ("take", {}, 1, 8));
+
+    auto src = makeMono ({ 1.0f, 2.0f, 3.0f, 4.0f });
+    // Two frames after a two-frame source offset: 3, 4.
+    capture.writeStem (0, src, 0, 1.0f, 2, 2);
+    capture.finalise (2);
+
+    BP_CHECK_NEAR (capture.getStem (0).buffer.getSample (0, 0), 3.0f, 0.0001f);
+    BP_CHECK_NEAR (capture.getStem (0).buffer.getSample (0, 1), 4.0f, 0.0001f);
+}
+
 BP_TEST (StemCapture_refusesOverMemoryCap)
 {
     StemCapture capture;

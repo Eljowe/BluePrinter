@@ -260,6 +260,8 @@ if(BUILD_TESTING)
         Tests/test_SoftClip.cpp
         Tests/test_MeterMath.cpp
         Tests/test_ChainCpuMath.cpp
+        Tests/test_DelayCompensation.cpp
+        Tests/test_DelayLine.cpp
         Tests/test_Meter.cpp
         Tests/test_LoopPlayback.cpp
         Tests/test_ChainRouting.cpp

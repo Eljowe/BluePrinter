@@ -113,6 +113,16 @@ simultaneously. Both loops are otherwise independent of the metronome/clock.
 
 **MIDI input limitation**: the standalone merges all MIDI input devices into the single `MidiBuffer` `processBlock` receives (JUCE 8 `MidiMessage` carries no source ID), so the MIDI channel is the only per-message discriminator — full reasoning and the per-device routing alternative are in AGENTS.md "VST3 Chains". Per-chain channel filtering lives in `PluginChain::processBlock` (`midiChannelsMask`, channels 1–16, system messages always pass).
 
+## Plugin Delay Compensation (0046)
+
+- Each source reports a latency: the dry path is 0, a chain is the sum of `getLatencySamples()` over its loaded, **non-bypassed** slots. One uniform `L` = the max over loaded, non-bypassed, **non-hard-muted** chains (monitor solo/mute do not change it), capped at 500 ms at the session rate.
+- `DelayCompensation::compute` / `computeInto` (`Source/DelayCompensation.h`, pure, CTest) gives each source's delay `max(0, L - lat_i)` and the cap flag. Use `computeInto` with a **pre-sized** vector in `processBlock` so it never allocates.
+- `processBlock` order: pristine `chainInputBuffer` → apply Dry to `buffer` → `dryDelay.setDelay(L); dryDelay.process(buffer, numSamples)` → build `recordingMixBuffer` from the **delayed** `buffer` (no second Dry gain) → chain loop: process → post-volume **pre-delay** meter → `chain->applyOutputDelay(chainScratchBuffer, numSamples, L - lat_i)` → sum into monitor/print/stems. The dry stem uses the delayed dry with gain 1.0.
+- The audio thread never calls `setLatencySamples`: it stores `effectiveLatencySamples`, and the message-thread `timerCallback` reports a change only when it differs from `reportedLatencySamples`.
+- **Latch L** while a take/loop capture is active (count-in included); a latency change applies after the capture. The print is delayed by `L`, so the capture skips the first `L` frames (`sourceOffset` on `CaptureWrite::write`, `TakeRecorder::write`, `Looper::captureBlock`, `StemCapture::writeStem`). Fixed-length auto-stop counts written samples; stems share the offset. Click, loop playback, take-overdub monitor, snippet/take-review playback and the MIDI clock stay undelayed on the true grid.
+- Delay lines are preallocated on the message thread (`prepareToPlay` + the `createChain` prepare hook) and only read/written on the audio thread. `refreshActiveLatencySamples()` uses `tryEnter()` and falls back to `activeLatencySamples` (cached from the snapshot `PluginChain::processBlock` runs), so the audio thread never blocks. A delay change clears that line.
+- The cap warning is one flag (`latencyCapWarningPending`, raised once via `latencyCapWarningIssued`); `WebViewEditor::timerCallback` consumes it and shows the existing toast. No new bridge event.
+
 ## Threading Model
 
 - **Audio thread**: `processBlock()`, `prepareToPlay()`, `releaseResources()`. No blocking locks, no allocations, no UI calls. Chain and slot snapshots are refilled under `tryEnter()` and fall back to the previous block's snapshot on contention; removed chains/slots are retired and reclaimed later on the message thread.
@@ -200,6 +210,7 @@ Currently the APVTS exposes **`Gain`** (display "Input", `AudioParameterFloat`, 
 ## Don't
 
 - Allocate, take a blocking lock, or call UI APIs in `processBlock` / `prepareToPlay` / `releaseResources` — the audio path stays allocation-free, UI-free, and never waits on the message thread. Use `tryEnter()` + a fallback snapshot (as the chain/slot snapshots do) rather than `ScopedLock`.
+- Allocate a delay line, a latency vector or a `DelayCompensation::Result` in `processBlock`, or call `setLatencySamples` from the audio thread. Use the preallocated `DelayLine`s / `computeInto` and report latency from `timerCallback`.
 - Destroy a chain, slot or plugin on the message thread while audio may still reference it. Retire it (see `retiredChains` / `retiredSlots`) and let the timer collector free it after two snapshot refills — never on a wall-clock timer.
 - Call `MidiOutput::sendMessageNow()` from the audio thread — enqueue into `MidiSendQueue`; `MidiClockOutput`'s sender thread does the send.
 - Add metronome / BPM / count-in / MIDI-clock settings to APVTS — see the Parameters section above: standalone user state + atomics.

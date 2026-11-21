@@ -1303,6 +1303,13 @@ void BluePrinterWebViewEditor::timerCallback()
     if (audioProcessor.consumeTakesDropped() > 0)
         sendNotification ("Take limit reached — the oldest take was dropped.", "info");
 
+    // Plugin delay compensation (0046): a source exceeded the 500 ms cap and
+    // was clamped. The audio thread raises the flag once per session; reuse
+    // the existing toast channel (no new bridge event).
+    if (audioProcessor.consumeLatencyCapWarning())
+        sendNotification ("Plugin latency exceeds 500 ms — delay compensation clamped.",
+                          "warning");
+
     // Coalesced chain snapshot. Full snapshots are expensive (they
     // serialize every plugin's state), so bursts of chain mutations
     // (e.g. dragging a volume knob or clicking MIDI channel chips) are

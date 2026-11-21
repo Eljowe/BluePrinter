@@ -4102,6 +4102,7 @@ button {
 .notification-ok { border-left-color: var(--ok); }
 .notification-error { border-left-color: var(--rec); }
 .notification-info { border-left-color: var(--accent); }
+.notification-warning { border-left-color: var(--warn); }
 
 /* ============================================================
    Knob — stark dial: white face, black arc and pointer

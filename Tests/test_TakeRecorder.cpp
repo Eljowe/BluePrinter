@@ -42,6 +42,24 @@ BP_TEST (TakeRecorder_writeFillsTheBufferAndRequestsFinalize)
     BP_CHECK (! rec.consumeFinalizePending());
 }
 
+BP_TEST (TakeRecorder_writeSkipsTheSourceOffset)
+{
+    TakeRecorder rec;
+    auto record = ramp (1, 8, 0.0f);
+    auto source = ramp (1, 6, 100.0f); // 100..105
+
+    rec.beginFresh (record);
+    // Skip the first two frames of the delayed print (the capture cursor
+    // offset); three frames are written.
+    rec.write (record, 8, source, 3, 2);
+
+    BP_CHECK_EQ (rec.getWritePos(), static_cast<int64_t> (3));
+    BP_CHECK_NEAR (record.getSample (0, 0), 102.0f, 0.0001f);
+    BP_CHECK_NEAR (record.getSample (0, 1), 103.0f, 0.0001f);
+    BP_CHECK_NEAR (record.getSample (0, 2), 104.0f, 0.0001f);
+    BP_CHECK_NEAR (record.getSample (0, 3), 0.0f, 0.0001f);
+}
+
 BP_TEST (TakeRecorder_newTakesAppendAndAutoSelect)
 {
     TakeRecorder rec;

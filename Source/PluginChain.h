@@ -6,6 +6,7 @@
 #include <memory>
 #include "Vst3Library.h"
 #include "MidiChannelFilter.h"
+#include "DelayLine.h"
 
 // One slot in the FX chain. Owns the loaded plugin instance and its
 // bypass flag. Plugins are serial — the output of slot N feeds the input
@@ -236,6 +237,33 @@ public:
     // Message-thread only (takes the slot lock).
     int getActiveLatencySamples() const;
 
+    // Audio-thread latency read (0046). Refreshes the cached active latency
+    // from the live slot list under tryEnter(); if the slot lock is busy it
+    // returns the cached value (maintained by processBlock from the snapshot
+    // it actually processes) instead of blocking. Never allocates.
+    int refreshActiveLatencySamples() const;
+    int getCachedLatencySamples() const
+    {
+        return activeLatencySamples.load (std::memory_order_acquire);
+    }
+
+    // Plugin delay compensation (0046). Each chain owns one preallocated
+    // output delay line; the processor sets its delay to (uniform L - this
+    // chain's latency) and runs it on the chain's scratch buffer after the
+    // output meter and before summing. prepare runs on the message thread
+    // (allocation), apply on the audio thread.
+    void prepareOutputDelay (int numChannels, int maxDelaySamples)
+    {
+        outputDelay.prepare (numChannels, maxDelaySamples);
+    }
+    void applyOutputDelay (juce::AudioBuffer<float>& buffer, int numSamples,
+                           int delaySamples)
+    {
+        outputDelay.setDelay (delaySamples);
+        outputDelay.process (buffer, numSamples);
+    }
+    void releaseOutputDelay() { outputDelay.release(); }
+
     // The chain's tail: the SUM of getTailLengthSeconds() over loaded,
     // non-bypassed slots, because a chain's slots are serial (slot N's tail
     // runs through slot N+1). The processor takes the MAX over its parallel
@@ -406,6 +434,16 @@ private:
     // thread.
     std::atomic<int> activePluginCount { 0 };
     void refreshActivePluginCount();
+
+    // Cached sum of the loaded, non-bypassed slots' getLatencySamples()
+    // (0046). Written from processBlock's snapshot and by the processor's
+    // refresh under tryEnter; mutable because refreshActiveLatencySamples is
+    // const (the audio thread never blocks on the slot lock).
+    mutable std::atomic<int> activeLatencySamples { 0 };
+
+    // Per-chain output alignment delay (0046), prepared on the message
+    // thread and run on the audio thread.
+    DelayLine outputDelay;
 
     // In-flight async loads (see hasLoadsInFlight).
     std::atomic<int> loadsInFlight { 0 };

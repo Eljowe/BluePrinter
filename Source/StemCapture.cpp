@@ -93,7 +93,8 @@ void StemCapture::release()
 }
 
 void StemCapture::writeStem (int index, const juce::AudioBuffer<float>& src,
-                             int64_t pos, float gain, int numSamples)
+                             int64_t pos, float gain, int numSamples,
+                             int sourceOffset)
 {
     if (! armed.load (std::memory_order_acquire))
         return;
@@ -102,8 +103,14 @@ void StemCapture::writeStem (int index, const juce::AudioBuffer<float>& src,
     if (pos < 0 || pos >= capacity || numSamples <= 0)
         return;
 
+    const int offset = juce::jmax (0, sourceOffset);
+    const int available = juce::jmax (0, src.getNumSamples() - offset);
+    const int requested = juce::jmin (numSamples, available);
+    if (requested <= 0)
+        return;
+
     auto& dest = stems[static_cast<size_t> (index)].buffer;
-    const auto count = static_cast<int> (juce::jmin<int64_t> (numSamples,
+    const auto count = static_cast<int> (juce::jmin<int64_t> (requested,
                                                               capacity - pos));
     if (count <= 0)
         return;
@@ -112,7 +119,7 @@ void StemCapture::writeStem (int index, const juce::AudioBuffer<float>& src,
     const int start = static_cast<int> (pos);
     for (int ch = 0; ch < channels; ++ch)
     {
-        dest.copyFrom (ch, start, src, ch, 0, count);
+        dest.copyFrom (ch, start, src, ch, offset, count);
         if (gain != 1.0f)
             dest.applyGain (ch, start, count, gain);
     }

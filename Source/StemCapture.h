@@ -66,9 +66,12 @@ public:
     const Stem& getStem (int index) const { return stems[static_cast<size_t> (index)]; }
 
     // Audio thread. Copies `src` into stem `index` at `pos`, scaled by
-    // `gain`, clamped to the buffer capacity.
+    // `gain`, clamped to the buffer capacity. `sourceOffset` skips that many
+    // frames from the start of `src` (the 0046 capture cursor offset);
+    // `numSamples` is the count to copy after the offset.
     void writeStem (int index, const juce::AudioBuffer<float>& src,
-                    int64_t pos, float gain, int numSamples);
+                    int64_t pos, float gain, int numSamples,
+                    int sourceOffset = 0);
 
 private:
     juce::String source;

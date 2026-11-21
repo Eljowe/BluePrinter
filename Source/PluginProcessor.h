@@ -26,6 +26,8 @@
 #include "SetlistStore.h"
 #include "RestoreSelfHeal.h"
 #include "ChainStatePersistence.h"
+#include "DelayCompensation.h"
+#include "DelayLine.h"
 #include <deque>
 #include <map>
 #include <set>
@@ -391,6 +393,15 @@ public:
     void setClipGuardEnabled (bool enabled);
     float getClipGuardCeilingDb() const { return clipGuardCeilingDb.load (std::memory_order_acquire); }
     void setClipGuardCeilingDb (float ceilingDb);
+
+    // Plugin delay compensation (0046). The audio thread clamps the uniform
+    // latency L to the 500 ms cap and raises a one-shot pending flag; the
+    // editor's timer consumes it and shows a notification. No new bridge
+    // event — the existing toast channel is reused.
+    bool consumeLatencyCapWarning()
+    {
+        return latencyCapWarningPending.exchange (false, std::memory_order_acq_rel);
+    }
 
     // Master click level (dB, -60..0; minimum mutes). Monitor-only,
     // independent of the tick/accent balance and persisted in host state.
@@ -809,6 +820,35 @@ private:
     // no allocation happens in processBlock; the shared_ptrs keep a chain
     // alive after the message thread removed it.
     std::vector<std::shared_ptr<PluginChain>> blockChains;
+
+    // Plugin delay compensation (0046). All of these are preallocated on the
+    // message thread: chainLatencies/chainDelays are sized to maxChains, and
+    // the dry + per-chain delay lines allocate in prepareToPlay. processBlock
+    // only reads/writes them.
+    DelayLine dryDelay;
+    // Per-chain latency for the alignment pass (0 for a hard-muted chain, so
+    // it raises neither L nor the print) and the resulting per-chain delay
+    // (L - latency), written by DelayCompensation::computeInto.
+    std::vector<int> chainLatencies;
+    std::vector<int> chainDelays;
+    // Effective uniform latency L used this block (the latched value while a
+    // capture is active), published for the message thread's host report.
+    std::atomic<int> effectiveLatencySamples { 0 };
+    // Host-reported latency, message thread only (timerCallback).
+    int reportedLatencySamples = 0;
+    // L latched for the duration of a capture; audio-thread only.
+    int  captureLatency = 0;
+    bool wasCaptureActive = false;
+    // Capture cursor offset (0046): frames still to skip at the start of the
+    // print so the saved take/loop begins on the armed downbeat. Written at
+    // capture start (message or audio thread) and consumed on the audio
+    // thread, hence atomics.
+    std::atomic<int64_t> takeCaptureSkipRemaining { 0 };
+    std::atomic<int64_t> loopCaptureSkipRemaining { 0 };
+    // 500 ms at the session rate; 0 until prepareToPlay.
+    int maxDelaySamples = 0;
+    std::atomic<bool> latencyCapWarningPending { false };
+    std::atomic<bool> latencyCapWarningIssued  { false };
 
     // Per-block MIDI copy budget for each chain. Both the event count and the
     // byte size are bounded so the copy can never allocate: the buffers are

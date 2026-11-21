@@ -54,3 +54,28 @@ BP_TEST (CaptureWrite_copiesOnlySharedChannels)
     CaptureWrite::write (dest, 0, source, 4, 4);
     BP_CHECK_NEAR (dest.getSample (0, 0), 100.0f, 0.0001f);
 }
+
+BP_TEST (CaptureWrite_offsetSkipsTheSourcePrefix)
+{
+    juce::AudioBuffer<float> dest (1, 10);
+    dest.clear();
+    auto source = ramp (1, 4, 100.0f); // 100, 101, 102, 103
+
+    // Copy three frames after a two-frame source offset: 102, 103, then the
+    // source runs out (only two frames remain).
+    const auto pos = CaptureWrite::write (dest, 0, source, 3, 10, 2);
+    BP_CHECK_EQ (pos, static_cast<int64_t> (2));
+    BP_CHECK_NEAR (dest.getSample (0, 0), 102.0f, 0.0001f);
+    BP_CHECK_NEAR (dest.getSample (0, 1), 103.0f, 0.0001f);
+    BP_CHECK_NEAR (dest.getSample (0, 2), 0.0f, 0.0001f);
+}
+
+BP_TEST (CaptureWrite_offsetPastTheSourceCopiesNothing)
+{
+    auto dest = ramp (1, 4, 0.0f);
+    auto source = ramp (1, 4, 100.0f);
+
+    const auto pos = CaptureWrite::write (dest, 0, source, 4, 4, 4);
+    BP_CHECK_EQ (pos, static_cast<int64_t> (0));
+    BP_CHECK_NEAR (dest.getSample (0, 0), 0.0f, 0.0001f);
+}

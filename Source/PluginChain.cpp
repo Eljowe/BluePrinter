@@ -104,6 +104,25 @@ int PluginChain::getActiveLatencySamples() const
     return total;
 }
 
+int PluginChain::refreshActiveLatencySamples() const
+{
+    // tryEnter: the message thread may be mutating the slot list (add /
+    // remove / bypass). The audio thread must never wait on it, so on
+    // contention fall back to the value processBlock cached from the
+    // snapshot it actually processes.
+    if (! lock.tryEnter())
+        return activeLatencySamples.load (std::memory_order_acquire);
+
+    int total = 0;
+    for (auto& slot : slots)
+        if (slot->plugin != nullptr && ! slot->bypassed)
+            total += juce::jmax (0, slot->plugin->getLatencySamples());
+
+    lock.exit();
+    activeLatencySamples.store (total, std::memory_order_release);
+    return total;
+}
+
 double PluginChain::getTailLengthSeconds() const
 {
     // Serial slots: each plugin's tail feeds the next one, so the chain's
@@ -138,6 +157,18 @@ void PluginChain::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
         // snapshot. Bumped here (not per block) so a reused snapshot never
         // counts as progress.
         slotSnapshotGeneration.fetch_add (1, std::memory_order_release);
+    }
+
+    // Plugin delay compensation (0046): cache the active latency of the
+    // snapshot this block actually runs, so the processor's per-block refresh
+    // can fall back to it when the slot lock is busy. Bypassed slots are
+    // already absent from blockSlots; a chain with nothing active reports 0.
+    {
+        int total = 0;
+        for (auto& slot : blockSlots)
+            if (slot->plugin != nullptr)
+                total += juce::jmax (0, slot->plugin->getLatencySamples());
+        activeLatencySamples.store (total, std::memory_order_release);
     }
 
     if (! wantsMidi.load (std::memory_order_acquire))

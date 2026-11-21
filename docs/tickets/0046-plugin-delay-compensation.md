@@ -1,7 +1,7 @@
 ---
 id: "0046"
 title: "Plugin delay compensation for parallel chains"
-status: ready-for-agent
+status: in-progress
 blocked_by: []
 ---
 
@@ -201,3 +201,17 @@ capture-cursor-offset model; update `CONTEXT.md` (Recording mix / Monitor mix) a
 
 2026-09-14 — Triaged and moved to `ready-for-agent`; open questions resolved as
 decisions 1–10 in the Agent Brief above.
+
+2026-11-21 — Implemented on `feature/0046-pdc`. Added `DelayCompensation`
+(pure) and `DelayLine` (preallocated, header-only) with CTest coverage; per-chain
+latency from loaded, non-bypassed slots with a `tryEnter()` refresh that falls
+back to the snapshot-cached atomic; dry + per-chain alignment delays in both the
+monitor and the print; host report via `setLatencySamples` from `timerCallback`
+only; 500 ms cap with one notification; L latched during a capture; capture
+cursor offset (`sourceOffset`) through `CaptureWrite`, `TakeRecorder`, `Looper`
+and `StemCapture` so the saved take/loop starts on the armed downbeat and stems
+stay aligned. Docs: ADR-0007, `CONTEXT.md`, `AGENTS.md`, `juce-audio` skill.
+CTest (4/4, all `BluePrinterTests`), the bridge parity check and the WebUI build
+pass. **Not marked done:** the manual Windows smoke test (a latency-reporting
+plugin in a chain — monitor and saved take coherent and on the grid) is still
+outstanding.

@@ -546,6 +546,12 @@ BluePrinterAudioProcessor::BluePrinterAudioProcessor()
     chains.reserve (static_cast<size_t> (maxChains));
     blockChains.reserve (static_cast<size_t> (maxChains));
 
+    // Plugin delay compensation scratch (0046): sized once so processBlock
+    // never resizes them. The delay lines themselves are prepared in
+    // prepareToPlay (and by the createChain hook for later chains).
+    chainLatencies.assign (static_cast<size_t> (maxChains), 0);
+    chainDelays.assign (static_cast<size_t> (maxChains), 0);
+
     // Chain bundle serialise/apply + chain construction. The prepare hook
     // hands a freshly created chain the live device config (a chain created
     // after the device opened would otherwise prepare its plugins at the
@@ -557,6 +563,11 @@ BluePrinterAudioProcessor::BluePrinterAudioProcessor()
             [this] { persistPluginChain(); },
             [this] (PluginChain& chain)
             {
+                // Prepare the chain's PDC output line even before the device
+                // is prepared (maxDelaySamples is 0 then, so the line is a
+                // no-op until prepareToPlay reallocates it with the real cap).
+                chain.prepareOutputDelay (juce::jmax (1, getTotalNumInputChannels()),
+                                          maxDelaySamples);
                 if (isDevicePrepared())
                     chain.prepareToPlay (currentSampleRate, currentBlockSize);
             },
@@ -1204,6 +1215,20 @@ void BluePrinterAudioProcessor::prepareToPlay (double sampleRate, int samplesPer
     blockChains.clear();
     blockChains.reserve (static_cast<size_t> (maxChains));
 
+    // Plugin delay compensation (0046). Cap the alignment delay at 500 ms of
+    // the session rate; the dry line and the per-chain lines are preallocated
+    // here (audio is stopped). The latency scratch vectors are sized to
+    // maxChains so the audio thread's per-block pass never allocates.
+    maxDelaySamples = juce::jmax (1, static_cast<int> (sampleRate * 0.5));
+    dryDelay.prepare (juce::jmax (1, juce::jmax (getTotalNumInputChannels(), getTotalNumOutputChannels())), maxDelaySamples);
+    chainLatencies.assign (static_cast<size_t> (maxChains), 0);
+    chainDelays.assign (static_cast<size_t> (maxChains), 0);
+    effectiveLatencySamples.store (0, std::memory_order_release);
+    captureLatency = 0;
+    wasCaptureActive = false;
+    takeCaptureSkipRemaining.store (0, std::memory_order_release);
+    loopCaptureSkipRemaining.store (0, std::memory_order_release);
+
     // Per-chain MIDI copies: sized for the per-block byte budget so the
     // audio thread's bounded copy loop never reallocates.
     chainMidiScratch.ensureSize (static_cast<size_t> (maxChainMidiBytes));
@@ -1230,7 +1255,11 @@ void BluePrinterAudioProcessor::prepareToPlay (double sampleRate, int samplesPer
     {
         const juce::ScopedLock sl (chainLock);
         for (auto& chain : chains)
+        {
             chain->prepareToPlay (sampleRate, samplesPerBlock);
+            chain->prepareOutputDelay (juce::jmax (1, getTotalNumInputChannels()),
+                                       maxDelaySamples);
+        }
     }
 
     // Audio is stopped and blockChains was cleared above: a retired chain's
@@ -1289,8 +1318,21 @@ void BluePrinterAudioProcessor::releaseResources()
     {
         const juce::ScopedLock sl (chainLock);
         for (auto& chain : chains)
+        {
             chain->releaseResources();
+            chain->releaseOutputDelay();
+        }
     }
+
+    // Plugin delay compensation (0046): free the dry line and reset the
+    // capture cursor offsets (audio is stopped).
+    dryDelay.release();
+    maxDelaySamples = 0;
+    effectiveLatencySamples.store (0, std::memory_order_release);
+    captureLatency = 0;
+    wasCaptureActive = false;
+    takeCaptureSkipRemaining.store (0, std::memory_order_release);
+    loopCaptureSkipRemaining.store (0, std::memory_order_release);
 
     // Audio is stopped: drop the snapshot so it can't keep a retired chain
     // alive, then release the retired chains (their deadlines can never be
@@ -1402,23 +1444,120 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         chainSnapshotGeneration.fetch_add (1, std::memory_order_release);
     }
 
-    // 1b. Pristine dry-input snapshot. Every chain copies its selected
+    // 1b. Plugin delay compensation (0046). Per chain, read the active
+    //    latency of its loaded, non-bypassed slots. A hard-muted chain
+    //    contributes 0 so it raises neither L nor the print (monitor solo /
+    //    monitor-mute are monitor-only and never change L). computeInto
+    //    reuses the preallocated chainDelays vector, so nothing allocates
+    //    here. The refresh takes the chain's slot lock only when it is free;
+    //    on contention it returns the value processBlock cached.
+    int newLatency = 0;
+    {
+        const int chainCount = static_cast<int> (blockChains.size());
+        const int latencyCount = juce::jmin (chainCount,
+                                             static_cast<int> (chainLatencies.size()));
+
+        for (int i = 0; i < latencyCount; ++i)
+        {
+            auto* chain = blockChains[static_cast<size_t> (i)].get();
+            const int latency = chain->refreshActiveLatencySamples();
+            chainLatencies[static_cast<size_t> (i)] =
+                (! chain->isMuted() && chain->hasActivePlugins()) ? latency : 0;
+        }
+        // A removed chain must not leave a stale latency behind.
+        for (int i = latencyCount; i < static_cast<int> (chainLatencies.size()); ++i)
+            chainLatencies[static_cast<size_t> (i)] = 0;
+
+        bool clamped = false;
+        newLatency = DelayCompensation::computeInto (chainLatencies,
+                                                     maxDelaySamples,
+                                                     chainDelays,
+                                                     clamped);
+
+        // The cap warning is raised once per session from the audio thread;
+        // the editor's timer turns it into the existing toast (no new bridge
+        // event). maxDelaySamples is 0 only before the device is prepared
+        // (where there is nothing to clamp yet), so don't warn then.
+        if (clamped && maxDelaySamples > 0
+            && ! latencyCapWarningIssued.exchange (true, std::memory_order_acq_rel))
+            latencyCapWarningPending.store (true, std::memory_order_release);
+
+        // Latch L for the whole capture (count-in included): a plugin latency
+        // change mid-capture must not move the print's alignment. The pending
+        // new L applies once the capture ends. The capture cursor offset
+        // below uses the same latched value.
+        const bool captureActive = takeRecorder.isActive() || looper.isActive();
+        if (captureActive && ! wasCaptureActive)
+        {
+            captureLatency = newLatency;
+            if (takeRecorder.isActive())
+                takeCaptureSkipRemaining.store (captureLatency,
+                                                std::memory_order_release);
+            if (looper.isActive())
+                loopCaptureSkipRemaining.store (captureLatency,
+                                                std::memory_order_release);
+        }
+        else if (! captureActive)
+        {
+            captureLatency = newLatency;
+        }
+        wasCaptureActive = captureActive;
+
+        effectiveLatencySamples.store (captureActive ? captureLatency : newLatency,
+                                       std::memory_order_release);
+    }
+
+    const int effectiveLatency = effectiveLatencySamples.load (std::memory_order_acquire);
+
+    // While a capture is active and a plugin latency changed underneath it,
+    // the uniform L is latched but chainDelays was computed from the new L.
+    // Shift every chain delay by the same delta (chainDelays[i] = newL -
+    // lat_i, so + delta = effectiveL - lat_i) so the chains still line up
+    // with the dry path. Bounded, allocation-free.
+    if (effectiveLatency != newLatency)
+    {
+        const int delta = effectiveLatency - newLatency;
+        for (auto& chainDelay : chainDelays)
+            chainDelay = juce::jmax (0, chainDelay + delta);
+    }
+
+    // Capture cursor offset (0046): the print is delayed by L, so a capture
+    // skips the first L frames of the delayed mix to start on the armed
+    // downbeat. `*Frames` is the count to write AFTER the skip. The counters
+    // are only consumed by a capture that is actually writing.
+    const int takeSkip = takeRecorder.isRecordingRequested()
+        ? static_cast<int> (juce::jlimit<int64_t> (
+              0, numSamples, takeCaptureSkipRemaining.load (std::memory_order_acquire)))
+        : 0;
+    const int loopSkip = looper.isCaptureArmed()
+        ? static_cast<int> (juce::jlimit<int64_t> (
+              0, numSamples, loopCaptureSkipRemaining.load (std::memory_order_acquire)))
+        : 0;
+    const int takeFrames = numSamples - takeSkip;
+    const int loopFrames = numSamples - loopSkip;
+
+    // 1c. Pristine dry-input snapshot. Every chain copies its selected
     //    channels from this buffer, so chains are fully parallel —
-    //    chain N can never hear chain M's output.
+    //    chain N can never hear chain M's output. It stays undelayed for the
+    //    chains, the input meter and the tuner.
     {
         const int dryCh = juce::jmin (numChannels, chainInputBuffer.getNumChannels());
         for (int ch = 0; ch < dryCh; ++ch)
             chainInputBuffer.copyFrom (ch, 0, buffer, ch, 0, numSamples);
     }
 
-    // 1c. Scale the direct dry pass-through. The chains already have the
-    //    full input in chainInputBuffer, so this only controls how much
-    //    raw dry is heard and printed — at the minimum the dry is gone
-    //    and only the chains are audible (and captured).
+    // 1d. Scale the direct dry pass-through, then delay it by L so it lines
+    //    up with the compensated chains in the monitor and the print. The
+    //    chains already have the full input in chainInputBuffer, so this only
+    //    controls how much raw dry is heard and printed — at the minimum the
+    //    dry is gone and only the chains are audible (and captured).
     const float dryGain = juce::Decibels::decibelsToGain (
         dryLevel.load (std::memory_order_acquire));
     for (int ch = 0; ch < numChannels; ++ch)
         buffer.applyGain (ch, 0, numSamples, dryGain);
+
+    dryDelay.setDelay (effectiveLatency);
+    dryDelay.process (buffer, numSamples);
 
     // 2. Run the chains in parallel. Every chain gets its own scratch
     //    copy of the input channels it selected, processes it in place,
@@ -1430,40 +1569,50 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     //    Each chain also gets its own copy of the MIDI buffer (filtered
     //    to the chain's MIDI channel selection), so notes can't leak
     //    between chains, and the host's output MIDI stays as the raw
-    //    input. recordingMixBuffer starts as the dry post-gain input
-    //    (scaled by the Dry level) and accumulates only the chains whose
-    //    record toggle is on — that is what captures (take recorder +
-    //    looper) record.
+    //    input. recordingMixBuffer starts as the aligned (delayed) dry
+    //    pass-through and accumulates only the chains whose record toggle
+    //    is on — that is what captures (take recorder + looper) record.
     recordingMixBuffer.clear();
     {
         const int mixCh = juce::jmin (numChannels, recordingMixBuffer.getNumChannels());
         for (int ch = 0; ch < mixCh; ++ch)
-            recordingMixBuffer.copyFrom (ch, 0, chainInputBuffer, ch, 0, numSamples);
+            recordingMixBuffer.copyFrom (ch, 0, buffer, ch, 0, numSamples);
     }
-    recordingMixBuffer.applyGain (dryGain);
 
     // 2a. Stem capture (0038). While a fresh take or loop capture runs,
-    //     tap the dry pass-through and each record-on-capture chain's
-    //     post-volume output into its own preallocated, sample-aligned
-    //     buffer. The write position mirrors the capture buffer's (module)
-    //     cursor, so stems stay frame-aligned with the captured mix.
-    //     Overdub layers are not stemmed. Monitor solo/mute and the master
-    //     Output never apply — stems follow the capture bus only.
+    //     tap the aligned dry pass-through and each record-on-capture
+    //     chain's delayed post-volume output into its own preallocated,
+    //     sample-aligned buffer. The write position mirrors the capture
+    //     buffer's (module) cursor, so stems stay frame-aligned with the
+    //     captured mix; the dry stem is the delayed dry with unity gain
+    //     (Dry is already applied). Overdub layers are not stemmed. Monitor
+    //     solo/mute and the master Output never apply — stems follow the
+    //     capture bus only.
     int64_t stemPos = -1;
+    int stemFrames = 0;
+    int stemSkip = 0;
     if (stemCapture.isArmed() && captureStemsEnabled.load (std::memory_order_acquire))
     {
         if (takeRecorder.isRecordingRequested() && ! takeRecorder.isOverdubCapture())
+        {
             stemPos = takeRecorder.getWritePos();
+            stemFrames = takeFrames;
+            stemSkip = takeSkip;
+        }
         else if (looper.isCaptureArmed() && ! looper.isOverdubCapture())
+        {
             stemPos = looper.getLength();
+            stemFrames = loopFrames;
+            stemSkip = loopSkip;
+        }
     }
     if (stemPos >= 0)
-        stemCapture.writeStem (0, chainInputBuffer, stemPos, dryGain, numSamples);
+        stemCapture.writeStem (0, buffer, stemPos, 1.0f, stemFrames, stemSkip);
 
     // Monitor solo: if any chain is soloed, the monitor mix becomes only
     // the soloed chains, and the direct dry pass-through (already in
-    // buffer) is muted for true isolation. The capture was built from
-    // chainInputBuffer above, so it is untouched — solo/monitor-mute are
+    // buffer) is muted for true isolation. The capture was built from the
+    // aligned sources above, so it is untouched — solo/monitor-mute are
     // monitoring-only.
     bool soloActive = false;
     for (auto& chain : blockChains)
@@ -1487,6 +1636,9 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             // No stale cost readout: an emptied or fully bypassed chain
             // reports 0% and no latency until it does work again.
             chain->cpuFraction.store (0.0f, std::memory_order_release);
+            // Park the alignment line at delay 0 (a change clears any stale
+            // history) so re-activating the chain starts from a clean line.
+            chain->applyOutputDelay (chainScratchBuffer, numSamples, 0);
             continue;
         }
 
@@ -1577,22 +1729,33 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                                && ! chain->isMonitorMuted();
         const float monitorGain = monitorOn ? hardGain : 0.0f;
 
+        // Per-chain output meter (post-volume; muted chains read 0).
+        // Independent of solo/monitor-mute. Computed PRE-delay (0046), so it
+        // keeps reflecting the chain's own output.
+        Meter::computeInto (chainScratchBuffer, numSamples,
+                            chain->outputLevel, chain->outputPeak, hardGain);
+
+        // Plugin delay compensation: align this chain's output to the global
+        // L before it is summed. chainDelays[i] = L - this chain's latency,
+        // so the slowest chain waits nothing and the dry path waits L.
+        {
+            const int chainDelay = chainIndex < static_cast<int> (chainDelays.size())
+                ? chainDelays[static_cast<size_t> (chainIndex)] : 0;
+            chain->applyOutputDelay (chainScratchBuffer, numSamples, chainDelay);
+        }
+
         ChainRouting::sumInto (buffer, chainScratchBuffer, monitorGain, numSamples, numChannels);
 
         if (chain->isRecordOnCapture() && hardGain > 0.0f)
         {
             ChainRouting::sumInto (recordingMixBuffer, chainScratchBuffer, hardGain, numSamples, numChannels);
 
-            // Stem for this chain shares the capture inclusion rule: only
-            // when it is record-on-capture and audible. Silent otherwise.
+            // Stem for this chain shares the capture inclusion rule and the
+            // delayed, aligned output, so the stems still sum to the print.
             if (stemPos >= 0)
-                stemCapture.writeStem (chainIndex + 1, chainScratchBuffer, stemPos, hardGain, numSamples);
+                stemCapture.writeStem (chainIndex + 1, chainScratchBuffer, stemPos,
+                                       hardGain, stemFrames, stemSkip);
         }
-
-        // Per-chain output meter (post-volume; muted chains read 0).
-        // Independent of solo/monitor-mute.
-        Meter::computeInto (chainScratchBuffer, numSamples,
-                            chain->outputLevel, chain->outputPeak, hardGain);
     }
 
     // 2b. Record meter. recordingMixBuffer is the actual print (dry +
@@ -1622,7 +1785,12 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             static_cast<int64_t> (maxRecordSamples));
 
         looper.captureBlock (*recordBuffer, maxRecordSamples,
-                             recordingMixBuffer, numSamples, target);
+                             recordingMixBuffer, loopFrames, target, loopSkip);
+
+        // The leading L-frame flush has been consumed: the next block starts
+        // writing at the module's new position.
+        if (loopSkip > 0)
+            loopCaptureSkipRemaining.fetch_sub (loopSkip, std::memory_order_acq_rel);
     }
 
     // 4. Record the clean (post-gain, pre-click) record mix. Access to
@@ -1636,8 +1804,14 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     {
         if (recordLock.tryEnter())
         {
-            takeRecorder.write (*recordBuffer, maxRecordSamples, recordingMixBuffer, numSamples);
+            takeRecorder.write (*recordBuffer, maxRecordSamples, recordingMixBuffer,
+                                takeFrames, takeSkip);
             recordLock.exit();
+
+            // Consume the capture cursor offset only for a write that
+            // actually happened (a busy lock drops this block).
+            if (takeSkip > 0)
+                takeCaptureSkipRemaining.fetch_sub (takeSkip, std::memory_order_acq_rel);
         }
     }
 
@@ -1740,6 +1914,12 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             // exactly when the layer capture begins so the layer aligns with
             // the loop downbeat (the count-in played over silence).
             looper.beginCapture();
+
+            // Capture is starting: the print is delayed by the latched L, so
+            // skip that leading flush before the first written frame.
+            loopCaptureSkipRemaining.store (
+                effectiveLatencySamples.load (std::memory_order_acquire),
+                std::memory_order_release);
 
             // Capture is starting: re-sync external gear when the clock
             // is already running (the header-level clock toggle).
@@ -2125,6 +2305,12 @@ void BluePrinterAudioProcessor::setLooperRecording (bool enabled)
         }
         else
         {
+            // Capture is starting without a count-in: skip the leading L
+            // frames of the delayed print so the loop starts on the downbeat.
+            // Set before the capture arms so no block can write unskipped.
+            loopCaptureSkipRemaining.store (
+                effectiveLatencySamples.load (std::memory_order_acquire),
+                std::memory_order_release);
             looper.armCaptureNow();
             // Capture is starting without a count-in: re-sync external
             // gear if the clock is already running (the header-level
@@ -2136,6 +2322,7 @@ void BluePrinterAudioProcessor::setLooperRecording (bool enabled)
     else
     {
         looper.stopCapture();
+        loopCaptureSkipRemaining.store (0, std::memory_order_release);
 
         // Overdub stop: stop the loop playback first (so the mix below
         // can't race the audio thread's unlocked loop reads), then mix
@@ -2677,6 +2864,7 @@ void BluePrinterAudioProcessor::redoLoopLayer()
 void BluePrinterAudioProcessor::clearLoop()
 {
     looper.clear();
+    loopCaptureSkipRemaining.store (0, std::memory_order_release);
     looperSourceName.clear();
     looperSourceId = -1;
     if (stemCapture.getSource() == "loop")
@@ -2695,12 +2883,20 @@ void BluePrinterAudioProcessor::beginActualRecording()
         return;
     }
 
+    // The print is delayed by the latched L: skip that leading flush so the
+    // saved take begins on the armed downbeat (0046). Set BEFORE the capture
+    // is armed, so the audio thread can never write a block without it.
+    takeCaptureSkipRemaining.store (
+        effectiveLatencySamples.load (std::memory_order_acquire),
+        std::memory_order_release);
+
     // A new take reuses recordBuffer as live scratch; the take stack is left
     // intact (0037). Audio-thread safe: the module touches atomics only.
     {
         const juce::ScopedLock sl (recordLock);
         takeRecorder.beginFresh (*recordBuffer);
     }
+
     transportPosition.store (0, std::memory_order_release);
 
     // Re-sync external gear when the clock is already running (the
@@ -2719,10 +2915,17 @@ void BluePrinterAudioProcessor::beginActualTakeOverdub()
     // Layering stages the selected take into recordBuffer and captures the
     // new input after it (writePos = selected length); the processor
     // wrap-mixes the layer back into the same take on stop.
+    // Same capture cursor offset as a fresh take: the layer starts on the
+    // loop downbeat, not L frames late (0046). Set before the capture arms.
+    takeCaptureSkipRemaining.store (
+        effectiveLatencySamples.load (std::memory_order_acquire),
+        std::memory_order_release);
+
     {
         const juce::ScopedLock sl (recordLock);
         takeRecorder.beginOverdub (*recordBuffer);
     }
+
     transportPosition.store (0, std::memory_order_release);
 
     // Re-sync external gear when the clock is already running, same as a
@@ -2736,6 +2939,9 @@ void BluePrinterAudioProcessor::beginActualTakeOverdub()
 
 void BluePrinterAudioProcessor::stopRecording()
 {
+    // The capture cursor offset no longer applies once the take stops.
+    takeCaptureSkipRemaining.store (0, std::memory_order_release);
+
     // Cancel count-in if one is running. Nothing was recorded.
     if (takeRecorder.isPreRollActive())
     {
@@ -3961,6 +4167,19 @@ void BluePrinterAudioProcessor::timerCallback()
     // plugin) is destroyed, so it always happens on the message thread.
     collectRetiredChains();
 
+    // Host-reported plugin delay compensation (0046): the audio thread
+    // publishes the effective uniform latency; report it to the host only
+    // when it changes, and only from this message-thread timer (never from
+    // processBlock).
+    {
+        const int target = effectiveLatencySamples.load (std::memory_order_acquire);
+        if (target != reportedLatencySamples)
+        {
+            reportedLatencySamples = target;
+            setLatencySamples (target);
+        }
+    }
+
     // Fixed-length looper capture (0022): the audio thread stopped writing
     // at the target and flagged us. Finalise on the message thread so the
     // buffer trim, peak refresh, MIDI-clock update and listeners all run
@@ -4197,7 +4416,9 @@ void BluePrinterAudioProcessor::timerCallback()
 void BluePrinterAudioProcessor::finalizeRecordingOnMessageThread()
 {
     // The take ended (possibly by filling the max-length buffer on the
-    // audio thread): release the clock if no other source wants it.
+    // audio thread): release the clock if no other source wants it, and
+    // drop any unconsumed capture cursor offset (0046).
+    takeCaptureSkipRemaining.store (0, std::memory_order_release);
     updateClockRunState();
 
     if (recordBuffer == nullptr)

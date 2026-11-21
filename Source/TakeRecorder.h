@@ -91,9 +91,12 @@ public:
 
     // Copies a block at the current write position. When the buffer fills it
     // clears the recording flags and leaves a finalize pending for the message
-    // thread. The caller holds the record lock.
+    // thread. The caller holds the record lock. `sourceOffset` skips that many
+    // frames from the start of `source` (the 0046 capture cursor offset);
+    // `numSamples` is the count to copy after the offset.
     void    write (juce::AudioBuffer<float>& buffer, int maxSamples,
-                   const juce::AudioBuffer<float>& source, int numSamples);
+                   const juce::AudioBuffer<float>& source, int numSamples,
+                   int sourceOffset = 0);
 
     // Overwrites `dest` with the kept region, one-shot. Position and queued
     // seeks use absolute source samples; the trim end is exclusive.

@@ -115,11 +115,12 @@ void TakeRecorder::cancelCountIn()
 }
 
 void TakeRecorder::write (juce::AudioBuffer<float>& buffer, int maxSamples,
-                          const juce::AudioBuffer<float>& source, int numSamples)
+                          const juce::AudioBuffer<float>& source, int numSamples,
+                          int sourceOffset)
 {
     const auto pos = CaptureWrite::write (buffer,
                                           writePos.load (std::memory_order_acquire),
-                                          source, numSamples, maxSamples);
+                                          source, numSamples, maxSamples, sourceOffset);
     writePos.store (pos, std::memory_order_release);
 
     if (pos >= maxSamples)

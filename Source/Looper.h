@@ -68,10 +68,12 @@ public:
     // capture appends at `length`, an overdub layer at `overdubWritePos` (so
     // the fixed loop length never moves mid-capture). A fresh capture that
     // reaches `targetSamples` (> 0) stops itself and leaves an auto-stop
-    // pending for the message thread.
+    // pending for the message thread. `sourceOffset` skips that many frames
+    // from the start of `source` (the 0046 capture cursor offset);
+    // `numSamples` is the count to copy after the offset.
     void    captureBlock (juce::AudioBuffer<float>& buffer, int maxSamples,
                           const juce::AudioBuffer<float>& source, int numSamples,
-                          int64_t targetSamples);
+                          int64_t targetSamples, int sourceOffset = 0);
 
     // Adds the playing loop to `dest`. `gain` is the loop-level gain,
     // `declickSamples` the seam fade base. Sets `outBlockPeak` to the peak
