@@ -175,6 +175,7 @@ still start `needs-triage`.
 | Ticket | Title | Status | Blocked by |
 | ------ | ----- | ------ | ---------- |
 | [0065](0065-song-builder.md) | Song builder: plan sections, chords and recordings | in-progress | - |
+| [0066](0066-song-rehearsal-click-transport.md) | Song rehearsal: click-only transport with a live section/chord highlight | in-progress | 0065 |
 
 0065 is the **plan + record** scope agreed on 2026-11-21: a third Song tab with
 sections, chords, melody notes, per-section loop/take capture and attach, a

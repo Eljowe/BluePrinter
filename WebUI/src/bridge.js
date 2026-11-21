@@ -151,6 +151,10 @@ export const FRONTEND_EVENTS = {
   // click only plays during count-ins, silent through takes and loop
   // captures. Shared by the take recorder and the looper.
   setClickDuringCapture: "frontendSetClickDuringCapture",
+  // Song rehearsal (0066): { enabled, startSample? } — the click-only
+  // transport over the song's arrangement. Starts at startSample (the section
+  // start plus the one-bar count-in), or stops with { enabled: false }.
+  setPracticeRunning: "frontendSetPracticeRunning",
   setLooperRecording: "frontendSetLooperRecording",
   setLooperPlaying: "frontendSetLooperPlaying",
   setLooperLooping: "frontendSetLooperLooping",

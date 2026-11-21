@@ -349,6 +349,20 @@ public:
     int64_t getTransportPosition() const { return transportPosition.load (std::memory_order_acquire); }
     bool    isPreRollActive()     const { return takeRecorder.isPreRollActive(); }
 
+    // Song rehearsal (0066): a click-only transport over a song's arrangement.
+    // It reuses the metronome beat clock (metronomePosition) and the free-run
+    // click path, so the position advances and the click sounds without the
+    // MIDI clock. It never sends MIDI and never touches the capture, the stems
+    // or the audio path. Session-only: the editor destructor and
+    // releaseResources clear it.
+    int64_t getMetronomePosition() const { return metronomePosition.load (std::memory_order_acquire); }
+    bool    isPracticeRunning() const { return practiceRunning.load (std::memory_order_acquire); }
+    // Start the rehearsal at `startSample` (a song/section start plus the
+    // one-bar count-in lead-in), or stop it. Enabling stops snippet playback,
+    // take review, loop playback and the melody audition; it is refused while
+    // a take or loop capture is active. Message thread only.
+    void setPracticeRunning (bool enabled, int64_t startSample = 0);
+
     void setMetronomeEnabled (bool enabled);
     void setBpm (float newBpm);
     // Tap tempo (0049): register a tap at `nowMs` (non-decreasing milliseconds,
@@ -983,6 +997,12 @@ private:
     std::atomic<float>   clipGuardCeilingDb { -1.0f };
     std::atomic<int64_t> transportPosition { 0 };
     std::atomic<int64_t> metronomePosition { 0 };
+    // Song rehearsal (0066). While set, the metronome beat clock free-runs and
+    // sounds the click even with the MIDI clock off. The entry points that take
+    // over the transport clear it. Session-only, never persisted.
+    std::atomic<bool>    practiceRunning { false };
+    // Clears the rehearsal flag without notifying (the caller notifies).
+    void clearPracticeRunning() { practiceRunning.store (false, std::memory_order_release); }
     int loopCrossfadeSamples = 0;
 
     void refreshLooperPeaks();

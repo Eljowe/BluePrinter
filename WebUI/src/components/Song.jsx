@@ -7,12 +7,15 @@ import {
   SECTION_PRESETS,
   SONG_TEMPLATES,
   addSection,
+  barSamples,
   chartText,
   chordTemplates,
   clearChordAtBar,
   createSong,
   formatSongDuration,
   moveSection,
+  rehearsalAt,
+  rehearsalStartSample,
   removeSection,
   sectionStartBar,
   sectionTone,
@@ -28,6 +31,27 @@ import {
 
 const CHORD_ROWS = 8;
 const NAME_DEBOUNCE_MS = 400;
+// Session-only rehearsal start (0066): the Song tab unmounts when the user
+// switches to Take/Loop, and the run keeps going, so the absolute metronome
+// sample a run began at is kept in sessionStorage and restored on remount.
+const PRACTICE_START_KEY = "bp:practiceStart";
+
+function readStoredPracticeStart() {
+  try {
+    const value = Number(window.sessionStorage.getItem(PRACTICE_START_KEY));
+    return Number.isFinite(value) && value >= 0 ? value : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function storePracticeStart(value) {
+  try {
+    window.sessionStorage.setItem(PRACTICE_START_KEY, String(Math.max(0, Number(value) || 0)));
+  } catch {
+    /* storage unavailable — the state still works for this mount */
+  }
+}
 
 function isEditable(element) {
   if (!element) return false;
@@ -94,6 +118,54 @@ export function Song({
   const melodyPlayingId = Number(transport.melodyPlayingId ?? -1);
   const melodyPlayingSource = String(transport.melodyPlayingSource ?? "");
   const libraryFolder = String(transport.libraryFolder ?? "");
+
+  // Song rehearsal (0066): a click-only transport over this plan. The
+  // backend advances metronomePosition (published as practicePosition) and
+  // sounds the click; the bar math here uses the song's own tempo/meter and
+  // the session rate so the readout follows the click.
+  const practiceRunning = Boolean(transport.practiceRunning);
+  const practicePosition = Number(transport.practicePosition ?? 0);
+  const barLength = barSamples(
+    song?.bpm,
+    { numerator: song?.numerator, denominator: song?.denominator },
+    Number(transport.recordingSampleRate ?? 0),
+  );
+  // One full bar of lead-in when the take count-in is on, so the song starts
+  // on the next downbeat and the meter accents stay aligned.
+  const leadInSamples = Number(transport.countInBeats ?? 0) > 0 ? barLength : 0;
+  // The absolute metronome position the run began at (the section's first
+  // bar, which is also the lead-in bar). `rehearsalAt` maps the position
+  // relative to this, so a later-section start is never read as bar 0.
+  const [practiceStart, setPracticeStart] = useState(readStoredPracticeStart);
+  const rehearsal = useMemo(
+    () => (song
+      ? rehearsalAt(song, practicePosition, {
+        startSample: practiceStart,
+        leadInSamples,
+        barSamples: barLength,
+      })
+      : { phase: "idle" }),
+    [song, practicePosition, practiceStart, leadInSamples, barLength],
+  );
+  const canRehearse = Boolean(song && song.sections.length > 0 && barLength > 0 && !capturing);
+  const selectedIndex = song
+    ? Math.max(0, song.sections.findIndex((entry) => entry.id === sectionId))
+    : 0;
+  const practiceSection = practiceRunning && song
+    ? song.sections[rehearsal.sectionIndex] ?? null
+    : null;
+
+  const startRehearsal = (sectionIndex) => {
+    if (!song || !canRehearse) return;
+    // The backend starts the click at the section's first bar; that bar is
+    // the one-bar count-in, so the song starts on the next downbeat.
+    const start = rehearsalStartSample(song, sectionIndex, barLength);
+    setPracticeStart(start);
+    storePracticeStart(start);
+    emit(FRONTEND_EVENTS.setPracticeRunning, { enabled: true, startSample: start });
+  };
+
+  const stopRehearsal = () => emit(FRONTEND_EVENTS.setPracticeRunning, { enabled: false });
 
   const emitSave = (next) => {
     if (next) emit(FRONTEND_EVENTS.saveSong, { song: next });
@@ -298,6 +370,20 @@ export function Song({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [templateOpen, suggestOpen, chordPicker, linkOpen]);
+
+  // The rehearsal stops itself at the end of the song: emit the stop exactly
+  // once when the position crosses the last bar, never on every 30 Hz
+  // snapshot. Any other phase re-arms it so a restart works.
+  const rehearsalDoneRef = useRef(false);
+  useEffect(() => {
+    if (!practiceRunning || rehearsal.phase !== "done") {
+      rehearsalDoneRef.current = false;
+      return;
+    }
+    if (rehearsalDoneRef.current) return;
+    rehearsalDoneRef.current = true;
+    emit(FRONTEND_EVENTS.setPracticeRunning, { enabled: false });
+  }, [practiceRunning, rehearsal.phase]);
 
   const applySongTempo = (target) => {
     if (!target) return;
@@ -679,21 +765,103 @@ export function Song({
         </button>
       </div>
 
+      <div className="song-rehearsal" role="group" aria-label="Song rehearsal">
+        <div className="song-rehearsal-actions">
+          {practiceRunning ? (
+            <button type="button" className="btn btn-sm song-rehearsal-stop" onClick={stopRehearsal}>
+              Stop rehearsal
+            </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={() => startRehearsal(selectedIndex)}
+                disabled={!canRehearse}
+                title={barLength > 0
+                  ? `Start the click at ${section?.name ?? "the top"}`
+                  : "Waiting for the audio device"}
+              >
+                Rehearse from here
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={() => startRehearsal(0)}
+                disabled={!canRehearse}
+                title={barLength > 0 ? "Start the click at the top of the song" : "Waiting for the audio device"}
+              >
+                Rehearse song
+              </button>
+            </>
+          )}
+        </div>
+
+        <div
+          className={`song-rehearsal-readout ${practiceRunning ? "is-running" : ""}`}
+          role="group"
+          aria-label="Rehearsal position"
+        >
+          {!practiceRunning ? (
+            <span className="song-hint">
+              Click-only rehearsal — one bar of count-in, then the plan.
+            </span>
+          ) : rehearsal.phase === "countin" ? (
+            <span className="song-rehearsal-countin">
+              Count-in · beat {rehearsal.countInBeat} / {Math.max(1, Number(song.numerator) || 4)}
+            </span>
+          ) : (
+            <>
+              <span className="song-rehearsal-section">{practiceSection?.name ?? ""}</span>
+              <span className="song-rehearsal-bar">
+                bar {rehearsal.barInSection + 1} / {practiceSection?.bars ?? 0}
+                <span className="song-rehearsal-bar-song">
+                  {" · "}song bar {rehearsal.barInSong + 1} / {totalBars(song)}
+                </span>
+              </span>
+            </>
+          )}
+        </div>
+
+        {practiceRunning && rehearsal.phase !== "countin" ? (
+          <div className="song-rehearsal-chord" role="group" aria-label="Current chord">
+            {rehearsal.chord ? (
+              <>
+                <strong>{rehearsal.chord.symbol}</strong>
+                {rehearsal.chord.name ? <span>{rehearsal.chord.name}</span> : null}
+              </>
+            ) : (
+              <span className="song-hint">no chord</span>
+            )}
+          </div>
+        ) : null}
+
+        {practiceRunning && transport.metronomeEnabled === false ? (
+          <span className="song-hint song-rehearsal-warn">
+            Click is off — turn it on in the sync strip.
+          </span>
+        ) : null}
+      </div>
+
       <div className="song-arrangement" role="group" aria-label="Song arrangement">
-        {song.sections.map((entry) => (
-          <button
-            key={entry.id}
-            type="button"
-            className={`song-block song-tone-${sectionTone(entry.name)} ${entry.id === sectionId ? "is-selected" : ""}`}
-            style={{ flexGrow: entry.bars }}
-            onClick={() => setSelectedSectionId(entry.id)}
-            aria-pressed={entry.id === sectionId}
-            aria-label={`${entry.name}, ${entry.bars} bars`}
-          >
-            <span className="song-block-name">{entry.name}</span>
-            <span className="song-block-bars">{entry.bars}</span>
-          </button>
-        ))}
+        {song.sections.map((entry, index) => {
+          const current = practiceRunning && rehearsal.sectionIndex === index
+            && (rehearsal.phase === "playing" || rehearsal.phase === "countin");
+          return (
+            <button
+              key={entry.id}
+              type="button"
+              className={`song-block song-tone-${sectionTone(entry.name)} ${entry.id === sectionId ? "is-selected" : ""} ${current ? "is-current" : ""}`}
+              style={{ flexGrow: entry.bars }}
+              onClick={() => setSelectedSectionId(entry.id)}
+              aria-pressed={entry.id === sectionId}
+              aria-label={`${entry.name}, ${entry.bars} bars`}
+            >
+              <span className="song-block-name">{entry.name}</span>
+              <span className="song-block-bars">{entry.bars}</span>
+            </button>
+          );
+        })}
         {song.sections.length === 0 ? (
           <span className="song-hint">No sections yet — add one below.</span>
         ) : null}
@@ -704,10 +872,12 @@ export function Song({
           {song.sections.map((entry, index) => {
             const snippet = entry.snippetId > 0 ? snippetMap.get(Number(entry.snippetId)) : null;
             const summary = entry.chords.slice(0, 3).map((chord) => chord.symbol).join(" · ");
+            const current = practiceRunning && rehearsal.sectionIndex === index
+              && (rehearsal.phase === "playing" || rehearsal.phase === "countin");
             return (
               <div
                 key={entry.id}
-                className={`song-row ${entry.id === sectionId ? "is-selected" : ""}`}
+                className={`song-row ${entry.id === sectionId ? "is-selected" : ""} ${current ? "is-current" : ""}`}
               >
                 <button
                   type="button"
@@ -844,11 +1014,13 @@ export function Song({
                 {Array.from({ length: section.bars }, (_, bar) => {
                   const event = section.chords.find((chord) => chord.bar === bar);
                   const held = !event && section.chords.some((chord) => chord.bar < bar);
+                  const current = practiceRunning && rehearsal.phase === "playing"
+                    && rehearsal.sectionIndex === selectedIndex && rehearsal.barInSection === bar;
                   return (
                     <button
                       key={bar}
                       type="button"
-                      className={`song-chord-cell ${event ? "has-chord" : held ? "is-held" : ""}`}
+                      className={`song-chord-cell ${event ? "has-chord" : held ? "is-held" : ""} ${current ? "is-current" : ""}`}
                       onClick={() => setChordPicker({ sectionId: section.id, bar })}
                       aria-label={`Bar ${bar + 1}${event ? `: ${event.symbol}` : held ? ", chord held" : ", no chord"}`}
                       aria-haspopup="true"

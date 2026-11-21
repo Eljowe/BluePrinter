@@ -6392,6 +6392,95 @@ html:has(.bp-splash) {
   color: var(--on-ink);
 }
 
+/* Song rehearsal (0066): the click-only transport bar and its live
+   highlight. Cobalt marks the current state; is-selected stays the
+   user's choice, so the two are deliberately different. */
+.song-rehearsal {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  padding: 8px 12px;
+  border: 2px solid var(--line);
+  background: var(--panel);
+  box-shadow: var(--shadow-hard-sm);
+}
+
+.song-rehearsal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.song-rehearsal-stop {
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.song-rehearsal-readout {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  color: var(--ink-2);
+}
+
+.song-rehearsal-readout.is-running {
+  color: var(--ink);
+}
+
+.song-rehearsal-countin {
+  color: var(--warn-ink);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.song-rehearsal-section {
+  font-family: var(--font-display);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.song-rehearsal-bar-song {
+  color: var(--ink-3);
+}
+
+.song-rehearsal-chord {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-left: auto;
+  padding: 2px 10px;
+  border-left: 2px solid var(--accent);
+}
+
+.song-rehearsal-chord strong {
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  font-weight: 400;
+  line-height: 1.1;
+  color: var(--accent-ink);
+}
+
+.song-rehearsal-chord span {
+  font-size: 0.66rem;
+  color: var(--ink-3);
+}
+
+.song-rehearsal-warn {
+  color: var(--warn-ink);
+}
+
+.song-block.is-current {
+  border-color: var(--accent);
+  box-shadow: inset 0 -3px 0 var(--accent);
+}
+
 .song-columns {
   display: grid;
   grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
@@ -6421,6 +6510,15 @@ html:has(.bp-splash) {
 
 .song-row.is-selected {
   box-shadow: inset 4px 0 0 var(--accent);
+}
+
+.song-row.is-current {
+  border-color: var(--accent);
+  box-shadow: inset 4px 0 0 var(--accent);
+}
+
+.song-row.is-current.is-selected {
+  box-shadow: inset 4px 0 0 var(--accent), inset 0 0 0 1px var(--accent);
 }
 
 .song-row-main {
@@ -6592,6 +6690,12 @@ html:has(.bp-splash) {
 
 .song-chord-cell.is-held {
   color: var(--line-soft);
+}
+
+.song-chord-cell.is-current {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+  color: var(--accent-ink);
 }
 
 .song-chord-cell:hover {

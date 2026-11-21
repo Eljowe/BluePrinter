@@ -172,6 +172,10 @@ public:
     static constexpr const char* frontendSetMidiClockOnRecordEvent = "frontendSetMidiClockOnRecord";
     static constexpr const char* frontendSetMidiDeviceEvent    = "frontendSetMidiDevice";
     static constexpr const char* frontendSetClickDuringCaptureEvent = "frontendSetClickDuringCapture";
+    // Song rehearsal (0066): { enabled, startSample? } — start the click-only
+    // transport at a sample offset (a song/section start plus the one-bar
+    // count-in), or stop it.
+    static constexpr const char* frontendSetPracticeRunningEvent = "frontendSetPracticeRunning";
     static constexpr const char* frontendSetLooperRecordingEvent = "frontendSetLooperRecording";
     static constexpr const char* frontendSetLooperPlayingEvent   = "frontendSetLooperPlaying";
     static constexpr const char* frontendSetLooperLoopingEvent   = "frontendSetLooperLooping";

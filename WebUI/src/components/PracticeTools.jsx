@@ -106,7 +106,7 @@ export function PracticeTools({
           <div><dt>Enter</dt><dd>Save the selected take's trimmed region</dd></div>
           <div><dt>Delete</dt><dd>Delete the selected take (no confirmation)</dd></div>
           <div><dt>T</dt><dd>Tap tempo</dd></div>
-          <div><dt>Esc</dt><dd>Stop playback</dd></div>
+          <div><dt>Esc</dt><dd>Stop playback and song rehearsal</dd></div>
           <div><dt>Ctrl/Cmd + + / −</dt><dd>Zoom the interface</dd></div>
           <div><dt>Ctrl/Cmd + 0</dt><dd>Fit the interface to the window</dd></div>
           <div><dt>F11</dt><dd>Maximise / restore the window (standalone)</dd></div>

@@ -18,7 +18,7 @@ import { SplashScreen } from "./components/SplashScreen";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { BACKEND_EVENTS, FRONTEND_EVENTS, emit, getInitialData, subscribe } from "./bridge";
 import { SCALE_IDS, reconcileActiveTool } from "./utils";
-import { normaliseSong } from "./songModel";
+import { barSamples, normaliseSong, totalBars } from "./songModel";
 import iconUrl from "./icon.svg";
 import { IconArrowDown } from "./components/icons";
 
@@ -143,6 +143,7 @@ function readInitialTransport() {
     standalone: false, maximised: false,
     tunerOpen: false, tunerMonitorMute: false, tunerFrequency: 0, tunerConfidence: 0, tunerReferencePitch: 440, tunerNote: "", tunerCents: 0,
      preRollActive: false, transportPosition: 0,
+     practiceRunning: false, practicePosition: 0,
      takePending: false, takeLength: 0, takePlaying: false, takePosition: 0, takePeaks: [], takes: [], selectedTakeId: -1,
      takeTrimStart: 0, takeTrimEnd: 0, takeUndoAvailable: false,
      melodyAnalysing: false, melodyAnalysed: false, melodyPlaying: false, melodyPlayingSource: "", melodyPlayingId: -1, melodyPosition: 0, melodyLength: 0, melodyKey: "", melodyNotes: [],
@@ -202,6 +203,8 @@ function readInitialTransport() {
     maximised: Boolean(raw.maximised),
      preRollActive: Boolean(raw.preRollActive),
      transportPosition: Number(raw.transportPosition ?? 0),
+     practiceRunning: Boolean(raw.practiceRunning),
+     practicePosition: Number(raw.practicePosition ?? 0),
      takePending: Boolean(raw.takePending),
      takeLength: Number(raw.takeLength ?? 0),
      takeTrimStart: Number(raw.takeTrimStart ?? 0),
@@ -456,6 +459,7 @@ export default function App() {
       if (e.key === "Escape") {
         if (Number(transport.playingSnippetId ?? -1) >= 0) emit(FRONTEND_EVENTS.stopPlayback);
         if (transport.takePlaying && !capturing) emit(FRONTEND_EVENTS.setTakePlayback, { enabled: false });
+        if (transport.practiceRunning) emit(FRONTEND_EVENTS.setPracticeRunning, { enabled: false });
       }
     };
 
@@ -474,6 +478,7 @@ export default function App() {
     transport.melodyPlaying,
     transport.selectedTakeId,
     transport.playingSnippetId,
+    transport.practiceRunning,
   ]);
 
   // Splash lifecycle. `showing` -> `leaving` (fade) -> `hidden`. The splash
@@ -606,6 +611,8 @@ export default function App() {
         maximised: payload.maximised !== undefined ? Boolean(payload.maximised) : prev.maximised,
         preRollActive:    Boolean(payload.preRollActive),
          transportPosition: Number(payload.transportPosition ?? 0),
+         practiceRunning: payload.practiceRunning !== undefined ? Boolean(payload.practiceRunning) : prev.practiceRunning,
+         practicePosition: payload.practicePosition !== undefined ? Number(payload.practicePosition) : prev.practicePosition,
          takePending: payload.takePending !== undefined ? Boolean(payload.takePending) : prev.takePending,
          takeLength: payload.takeLength !== undefined ? Number(payload.takeLength) : prev.takeLength,
          takeTrimStart: payload.takeTrimStart !== undefined ? Number(payload.takeTrimStart) : prev.takeTrimStart,
@@ -652,6 +659,40 @@ export default function App() {
     });
     return unsubTransport;
   }, []);
+
+  // Song rehearsal safety net (0066): the Song tab's own stop-at-end effect
+  // only runs while that tab is mounted, and the run survives a tab switch.
+  // Stop the click from anywhere once it passes the song's end. A later-section
+  // start has the same absolute end: startBar*bar + lead + (totalBars-startBar)*bar
+  // = lead + totalBars*bar. The backend's disable is idempotent, so a duplicate
+  // with the Song's local stop is harmless.
+  const practiceEndStopRef = useRef(false);
+  useEffect(() => {
+    if (!transport.practiceRunning) {
+      practiceEndStopRef.current = false;
+      return;
+    }
+    const song = songs.find((entry) => entry.id === activeSongId) ?? songs[0] ?? null;
+    if (!song) {
+      practiceEndStopRef.current = false;
+      return;
+    }
+    const bar = barSamples(song.bpm, song, Number(transport.recordingSampleRate ?? 0));
+    if (!(bar > 0)) {
+      practiceEndStopRef.current = false;
+      return;
+    }
+    const lead = Number(transport.countInBeats ?? 0) > 0 ? bar : 0;
+    const end = lead + totalBars(song) * bar;
+    if (!(end > 0) || Number(transport.practicePosition ?? 0) < end) {
+      practiceEndStopRef.current = false;
+      return;
+    }
+    if (practiceEndStopRef.current) return;
+    practiceEndStopRef.current = true;
+    emit(FRONTEND_EVENTS.setPracticeRunning, { enabled: false });
+  }, [transport.practiceRunning, transport.practicePosition, transport.countInBeats,
+      transport.recordingSampleRate, songs, activeSongId]);
 
   useEffect(() => {
     const unsubNotify = subscribe(BACKEND_EVENTS.notify, (payload) => {

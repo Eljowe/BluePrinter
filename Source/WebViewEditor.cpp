@@ -831,6 +831,12 @@ juce::WebBrowserComponent::Options makeWebViewOptions(BluePrinterAudioProcessor&
             if (auto* obj = data.getDynamicObject())
                 processor.setClickDuringCapture (static_cast<bool> (obj->getProperty ("enabled")));
         })
+        .withEventListener(BluePrinterWebViewEditor::frontendSetPracticeRunningEvent, [&processor](juce::var data)
+        {
+            if (auto* obj = data.getDynamicObject())
+                processor.setPracticeRunning (static_cast<bool> (obj->getProperty ("enabled")),
+                                              static_cast<int64_t> (obj->getProperty ("startSample")));
+        })
         .withEventListener(BluePrinterWebViewEditor::frontendSetLooperRecordingEvent, [&processor](juce::var data)
         { if (auto* obj = data.getDynamicObject()) processor.setLooperRecording (static_cast<bool> (obj->getProperty ("enabled"))); })
         .withEventListener(BluePrinterWebViewEditor::frontendSetLooperPlayingEvent, [&processor](juce::var data)
@@ -1242,6 +1248,10 @@ BluePrinterWebViewEditor::~BluePrinterWebViewEditor()
     audioProcessor.apvts.removeParameterListener(paramOutput, this);
     audioProcessor.removeListener (this);
 
+    // Closing the editor must not leave a rehearsal click running (0066).
+    // Called after removeListener so the notify can't re-enter this object.
+    audioProcessor.setPracticeRunning (false);
+
     // Drop the per-chain slot-removal bindings as well: they capture `this`,
     // and the chains outlive the editor (a DAW can destroy the editor while
     // the processor keeps running, and a later restore, preset load or chain
@@ -1626,6 +1636,9 @@ juce::var BluePrinterWebViewEditor::makeTransportSnapshot() const
     }
     obj->setProperty ("preRollActive",    audioProcessor.isPreRollActive());
     obj->setProperty ("transportPosition", static_cast<double> (audioProcessor.getTransportPosition()));
+    // Song rehearsal (0066): the click-only transport and its beat position.
+    obj->setProperty ("practiceRunning",  audioProcessor.isPracticeRunning());
+    obj->setProperty ("practicePosition", static_cast<double> (audioProcessor.getMetronomePosition()));
     obj->setProperty ("takePending",  audioProcessor.isTakePending());
     obj->setProperty ("takeLength",   static_cast<double> (audioProcessor.getTakeLength()));
     obj->setProperty ("takePlaying",  audioProcessor.isTakePlaying());

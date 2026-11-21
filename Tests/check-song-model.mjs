@@ -21,6 +21,8 @@ import {
   newSongId,
   normaliseChords,
   normaliseSong,
+  rehearsalAt,
+  rehearsalStartSample,
   removeSection,
   sectionChordLine,
   sectionStartBar,
@@ -236,6 +238,101 @@ eq(sectionTone("Intro"), "intro", "tone intro");
 eq(sectionTone("Chorus 2"), "chorus", "tone chorus");
 eq(sectionTone("Pre-Chorus"), "other", "tone unknown");
 eq(sectionTone(""), "other", "tone empty");
+
+// --- Rehearsal (0066) -----------------------------------------------------
+
+// 2 + 4 bars at a round 1000 samples per bar, 4/4.
+const rehearsalSong = normaliseSong({
+  name: "Rehearsal",
+  bpm: 120,
+  numerator: 4,
+  denominator: 4,
+  sections: [
+    { id: "a", name: "Intro", bars: 2, chords: [{ bar: 0, symbol: "C", name: "C major" }] },
+    { id: "b", name: "Verse", bars: 4,
+      chords: [{ bar: 0, symbol: "Am", name: "A minor" }, { bar: 2, symbol: "F", name: "F major" }] },
+  ],
+});
+const BAR = 1000;
+const LEAD = 1000;
+const at = (position, options = {}) => rehearsalAt(rehearsalSong, position, {
+  startSample: 0,
+  leadInSamples: LEAD,
+  barSamples: BAR,
+  ...options,
+});
+const atFrom = (position, startSample) => rehearsalAt(rehearsalSong, position, {
+  startSample,
+  leadInSamples: LEAD,
+  barSamples: BAR,
+});
+
+// Count-in: one full bar of lead-in, beat 1..4 of the meter.
+eq(at(0).phase, "countin", "count-in starts at beat 1");
+eq(at(0).countInBeat, 1, "count-in first beat");
+eq(at(249).countInBeat, 1, "count-in still beat 1");
+eq(at(250).countInBeat, 2, "count-in beat 2");
+eq(at(999).countInBeat, 4, "count-in last beat");
+eq(at(0).sectionIndex, 0, "count-in names the first section");
+eq(at(0).chord, null, "count-in has no chord");
+eq(at(1000).phase, "playing", "the song starts after the lead-in");
+eq(rehearsalAt(rehearsalSong, 0, { startSample: 0, leadInSamples: 0, barSamples: BAR }).phase,
+  "playing", "no count-in starts playing immediately");
+
+// First bar and the held chord.
+eq(at(1000).barInSong, 0, "first bar of the song");
+eq(at(1000).sectionIndex, 0, "first bar is in the first section");
+eq(at(1000).barInSection, 0, "first bar in section");
+eq(at(1000).chord?.symbol, "C", "first bar chord");
+eq(at(2000).chord?.symbol, "C", "chord held across bars");
+
+// Section boundary: bar 2 is the Verse.
+eq(at(2000).barInSong, 1, "bar 2 stays in the Intro");
+eq(at(2000).sectionIndex, 0, "bar 2 section");
+eq(at(3000).barInSong, 2, "bar 3 is the first Verse bar");
+eq(at(3000).sectionIndex, 1, "bar 3 section");
+eq(at(3000).barInSection, 0, "bar 3 is Verse bar 1");
+eq(at(3000).chord?.symbol, "Am", "Verse first chord");
+eq(at(4000).chord?.symbol, "Am", "Verse chord held");
+eq(at(5000).chord?.symbol, "F", "Verse chord change at bar 3");
+eq(at(6000).chord?.symbol, "F", "last Verse bar holds F");
+
+// End: past the last bar is done, naming the last position.
+eq(at(7000).phase, "done", "past the last bar is done");
+eq(at(7000).sectionIndex, 1, "done keeps the last section");
+eq(at(7000).barInSection, 3, "done keeps the last bar in section");
+eq(at(7000).barInSong, 5, "done keeps the last song bar");
+eq(at(7000).chord?.symbol, "F", "done keeps the last chord");
+eq(at(999999).phase, "done", "far past the end is done");
+
+// A later-section run: the lead-in plays on that section's first bar and the
+// position is mapped relative to the run start, never from bar 0.
+eq(atFrom(2000, 2000).phase, "countin", "later-section run counts in at its first bar");
+eq(atFrom(2000, 2000).sectionIndex, 1, "count-in highlights the started section");
+eq(atFrom(2000, 2000).barInSong, 2, "count-in names the section's first bar");
+eq(atFrom(2999, 2000).phase, "countin", "the lead-in runs a full bar");
+eq(atFrom(2999, 2000).countInBeat, 4, "last count-in beat of the lead-in");
+eq(atFrom(3000, 2000).phase, "playing", "the song starts on the next downbeat");
+eq(atFrom(3000, 2000).sectionIndex, 1, "later-section start maps to that section");
+eq(atFrom(3000, 2000).barInSection, 0, "later-section start is its first bar");
+eq(atFrom(3000, 2000).barInSong, 2, "later-section start is that song bar");
+eq(atFrom(3000, 2000).chord?.symbol, "Am", "later-section first chord");
+eq(atFrom(6999, 2000).barInSong, 5, "last bar before the absolute end");
+eq(atFrom(7000, 2000).phase, "done", "later-section run ends at the absolute end");
+eq(atFrom(7000, 2000).sectionIndex, 1, "later-section done keeps the last section");
+
+// Invalid math is idle.
+eq(rehearsalAt(null, 1000, { barSamples: BAR }).phase, "idle", "no song is idle");
+eq(rehearsalAt(normaliseSong({ name: "Empty", sections: [] }), 0,
+  { barSamples: BAR }).phase, "idle", "empty song is idle");
+eq(rehearsalAt(rehearsalSong, 0, { barSamples: 0 }).phase, "idle", "zero bar length is idle");
+
+// Start samples: the section's first bar (the lead-in bar), never + lead-in.
+eq(rehearsalStartSample(rehearsalSong, 0, BAR), 0, "rehearse song starts at bar 0");
+eq(rehearsalStartSample(rehearsalSong, 1, BAR), 2000, "rehearse from the Verse starts at its first bar");
+eq(rehearsalStartSample(rehearsalSong, -3, BAR), 0, "negative section index clamps to the top");
+eq(rehearsalStartSample(rehearsalSong, 1, 0), 0, "no bar length yields 0");
+eq(rehearsalStartSample(null, 0, BAR), 0, "no song yields 0");
 
 // --- normaliseSong --------------------------------------------------------
 

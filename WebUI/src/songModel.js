@@ -222,6 +222,113 @@ export function sectionStartBar(song, index) {
   return start;
 }
 
+// --- Rehearsal (0066) ------------------------------------------------------
+
+// The chord held at `bar`: the last chord event at or before it. Chord events
+// are sorted by normaliseChords, but the scan doesn't rely on it.
+function heldChordAt(section, bar) {
+  let held = null;
+  for (const chord of section?.chords ?? []) {
+    const at = Number(chord?.bar);
+    if (!Number.isFinite(at) || at > bar) continue;
+    if (!held || at >= Number(held.bar)) held = chord;
+  }
+  return held;
+}
+
+// The section that owns `bar` (bar < totalBars), plus its first bar.
+function sectionAtBar(sections, bar) {
+  let start = 0;
+  let index = 0;
+  for (let i = 0; i < sections.length; i += 1) {
+    const count = Number(sections[i].bars) || 0;
+    index = i;
+    if (bar < start + count) return { index: i, start };
+    start += count;
+  }
+  return { index, start };
+}
+
+// Where the click-only rehearsal is: the song bar under `positionSamples`
+// (the metronome beat clock), the section that owns it and the chord held
+// there. `startSample` is the absolute position the run began at (the
+// section's first bar); the one-bar `leadInSamples` count-in plays there and
+// the song starts on the next downbeat, so the run is mapped relative to
+// `startSample`, never from bar 0. During the lead-in the phase is "countin"
+// and the section is the one the run started in. A position past the last bar
+// reports "done" — the caller stops the transport once. Invalid song/bar math
+// reports "idle".
+export function rehearsalAt(song, positionSamples, { startSample = 0, leadInSamples = 0, barSamples = 0 } = {}) {
+  const sections = song?.sections ?? [];
+  const bars = totalBars(song);
+  const barLength = Number(barSamples);
+  const position = Number(positionSamples);
+  if (sections.length === 0 || bars <= 0
+      || !Number.isFinite(barLength) || barLength <= 0 || !Number.isFinite(position))
+    return { phase: "idle" };
+
+  const leadIn = Math.max(0, Number(leadInSamples) || 0);
+  const runStart = Number.isFinite(Number(startSample)) ? Math.max(0, Number(startSample)) : 0;
+  const relative = Math.max(0, position - runStart);
+  const startBar = Math.min(bars - 1, Math.floor(runStart / barLength));
+  const startedIn = sectionAtBar(sections, startBar);
+
+  if (relative < leadIn) {
+    // One full bar of lead-in: count the beats of the song's meter so the
+    // readout lines up with the click accents. The lead-in bar is the
+    // section's first bar, so the highlight is already on the right section.
+    const numerator = Math.max(1, Number(song?.numerator) || 4);
+    const beatLength = barLength / numerator;
+    const beat = Math.min(numerator, Math.floor(relative / beatLength) + 1);
+    return {
+      phase: "countin",
+      countInBeat: Math.max(1, beat),
+      sectionIndex: startedIn.index,
+      barInSection: 0,
+      barInSong: startBar,
+      chord: null,
+    };
+  }
+
+  const songBar = startBar + Math.floor((relative - leadIn) / barLength);
+  const lastIndex = sections.length - 1;
+  const lastSection = sections[lastIndex];
+  const lastBarInSection = Math.max(0, (Number(lastSection.bars) || 1) - 1);
+
+  if (songBar >= bars) {
+    // Past the end: keep naming the last bar so the readout doesn't blank
+    // while the stop round-trip lands.
+    return {
+      phase: "done",
+      sectionIndex: lastIndex,
+      barInSection: lastBarInSection,
+      barInSong: bars - 1,
+      chord: heldChordAt(lastSection, lastBarInSection),
+    };
+  }
+
+  const found = sectionAtBar(sections, songBar);
+  const barInSection = songBar - found.start;
+  return {
+    phase: "playing",
+    sectionIndex: found.index,
+    barInSection,
+    barInSong: songBar,
+    chord: heldChordAt(sections[found.index], barInSection),
+  };
+}
+
+// The metronome-position sample a rehearsal starts at: the section's first
+// bar. That bar is also the one-bar count-in lead-in, so the song itself
+// starts one bar later at `rehearsalStartSample(...) + leadInSamples`.
+// Section 0 is the top; never negative.
+export function rehearsalStartSample(song, sectionIndex, barSamples) {
+  const barLength = Number(barSamples);
+  if (!song || !Number.isFinite(barLength) || barLength <= 0) return 0;
+  const index = Math.max(0, Math.trunc(Number(sectionIndex) || 0));
+  return Math.max(0, sectionStartBar(song, index) * barLength);
+}
+
 export function formatSongDuration(seconds) {
   const total = Math.max(0, Math.round(Number(seconds) || 0));
   const minutes = Math.floor(total / 60);

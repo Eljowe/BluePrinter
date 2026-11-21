@@ -1297,6 +1297,10 @@ void BluePrinterAudioProcessor::releaseResources()
     flushPendingChainPersist();
     flushTagNamePersist();
     flushSongPersist();
+    // Song rehearsal (0066) is session-only: a stopped device must not leave
+    // a runaway click behind.
+    clearPracticeRunning();
+
     takeRecorder.cancelCountIn();
     transportPosition.store (0, std::memory_order_release);
     if (takeRecorder.isRecordingRequested())
@@ -2021,25 +2025,34 @@ void BluePrinterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     //    way, re-syncing with a Start at actual-recording / capture
     //    time. Queued MIDI Start / Stop are flushed here so the
     //    receiver gets them at a block boundary.
+    //
+    //    Song rehearsal (0066) shares the same free-run path: while
+    //    practiceRunning is set the position advances and the click sounds
+    //    even with the MIDI clock off. It only gates the audible click
+    //    (subject to the master metronome toggle, never clickDuringCapture)
+    //    and never drives MIDI output — renderMidiClockInBlock stays gated on
+    //    clockRunning alone.
     {
         refreshClockRunning();
 
         const bool clockEnabled = clockRunning.load (std::memory_order_acquire);
-        const bool clockFreeRan = clockEnabled
+        const bool practiceEnabled = practiceRunning.load (std::memory_order_acquire);
+        const bool freeRan = (clockEnabled || practiceEnabled)
             && metronomePosition.load (std::memory_order_acquire) == blockStartMetronomePos;
 
-        if (clockFreeRan)
+        if (freeRan)
         {
             metronomePosition.store (blockStartMetronomePos + numSamples,
                                      std::memory_order_release);
             clockAdvancedThisBlock = true;
 
-            // Sound the click for the free-running clock so the beats
-            // are audible without recording or looping. The header-level
-            // clock toggle free-runs; takes and loop captures ride the
-            // same clock and gate their own click with clickDuringCapture.
-            if (midiClockEnabled.load (std::memory_order_acquire)
-                && metronomeEnabled.load (std::memory_order_acquire))
+            // Sound the click for the free-running clock or the song
+            // rehearsal so the beats are audible without recording or
+            // looping. Rehearsal obeys only the master click toggle, so
+            // clickDuringCapture can't silence it. Takes and loop captures
+            // ride the same clock and gate their own click with
+            // clickDuringCapture.
+            if (metronomeEnabled.load (std::memory_order_acquire))
                 metronomePlayer.render (buffer, blockStartMetronomePos, numSamples, clickBuffer, accentClickBuffer, subClickBuffer);
         }
 
@@ -2218,6 +2231,9 @@ void BluePrinterAudioProcessor::startRecording()
     if (recordBuffer == nullptr || maxRecordSamples <= 0)
         return;
 
+    // A capture takes over the transport: the song rehearsal stops (0066).
+    clearPracticeRunning();
+
     // The looper and the take recorder share recordBuffer; don't let
     // them capture simultaneously.
     if (looper.isActive())
@@ -2270,6 +2286,10 @@ void BluePrinterAudioProcessor::setLooperRecording (bool enabled)
 
         if (recordBuffer == nullptr || maxRecordSamples <= 0)
             return;
+
+        // A loop capture takes over the transport: the song rehearsal stops
+        // (0066).
+        clearPracticeRunning();
 
         // A loop capture no longer invalidates the take stack (0037): the
         // takes own their audio, so the shared recordBuffer is free to reuse.
@@ -2739,6 +2759,10 @@ bool BluePrinterAudioProcessor::exportStems (const juce::String& source,
 
 void BluePrinterAudioProcessor::setLooperPlaying (bool enabled)
 {
+    // Loop playback takes over the transport: the song rehearsal stops (0066).
+    if (enabled)
+        clearPracticeRunning();
+
     // Loop playback supersedes take-review playback.
     if (enabled && takeRecorder.isReviewPlaying())
         takeRecorder.stopReview();
@@ -3004,6 +3028,10 @@ void BluePrinterAudioProcessor::startPlayback (int snippetId, int startSample)
     if (library.indexOfId (snippetId) < 0)
         return;
 
+    // Snippet playback takes over the transport: the song rehearsal stops
+    // (0066).
+    clearPracticeRunning();
+
     const auto clampedStart = static_cast<int64_t> (juce::jmax (0, startSample));
     playbackReadPos.store (clampedStart, std::memory_order_release);
     playbackSeekSamples.store (clampedStart, std::memory_order_release);
@@ -3036,6 +3064,39 @@ void BluePrinterAudioProcessor::stopPlayback()
     playbackReadPos.store (0, std::memory_order_release);
     playbackSeekSamples.store (-1, std::memory_order_release);
     playbackSnippet.reset();
+
+    listeners.call ([](Listener& l) { l.transportChanged(); });
+}
+
+void BluePrinterAudioProcessor::setPracticeRunning (bool enabled, int64_t startSample)
+{
+    if (! enabled)
+    {
+        // Idempotent: a redundant stop (Esc, the stop-at-end effect, the
+        // editor destructor) doesn't push another snapshot.
+        if (practiceRunning.exchange (false, std::memory_order_acq_rel))
+            listeners.call ([](Listener& l) { l.transportChanged(); });
+        return;
+    }
+
+    // A capture owns the transport. The frontend disables its rehearsal
+    // buttons too, so this only guards a stale click.
+    if (takeRecorder.isActive() || looper.isActive() || looper.isOverdubCapture())
+        return;
+
+    // Rehearsal is not synced to any other playback: stop snippet playback,
+    // take review, loop playback and the melody audition first. Each call
+    // notifies on its own; the final notify below covers the position/flag.
+    stopPlayback();
+    setTakePlayback (false);
+    setLooperPlaying (false);
+    stopMelodyPlayback();
+
+    // The position is the metronome beat clock the click and the frontend
+    // bar math both read. The caller has already added the one-bar count-in
+    // lead-in, so the song starts on the next downbeat.
+    metronomePosition.store (juce::jmax ((int64_t) 0, startSample), std::memory_order_release);
+    practiceRunning.store (true, std::memory_order_release);
 
     listeners.call ([](Listener& l) { l.transportChanged(); });
 }
@@ -4625,6 +4686,9 @@ void BluePrinterAudioProcessor::setTakePlayback (bool enabled, int64_t startSamp
         if (! takeRecorder.canStartReview() || looper.isActive() || looper.isOverdubCapture())
             return;
 
+        // Take review takes over the transport: the song rehearsal stops (0066).
+        clearPracticeRunning();
+
         // One reviewer at a time: stop snippet playback and the looper
         // so the take review is the only thing playing.
         stopPlayback();
@@ -4753,6 +4817,10 @@ void BluePrinterAudioProcessor::setMelodyPlayback (bool enabled, int64_t startSa
         if (it == takeMelodies.end() || it->second.notes.empty())
             return;
 
+        // Melody audition takes over the transport: the song rehearsal stops
+        // (0066).
+        clearPracticeRunning();
+
         // One player at a time: stop snippet playback, the looper and take
         // review so the melody audition is the only thing sounding.
         stopPlayback();
@@ -4794,6 +4862,10 @@ void BluePrinterAudioProcessor::setSnippetMelodyPlayback (int id, bool enabled, 
             for (const auto& n : snippet->melody)
                 notes.push_back ({ n.startSample, n.lengthSamples, n.midi, n.cents, 1.0f });
         }
+
+        // Melody audition takes over the transport: the song rehearsal stops
+        // (0066).
+        clearPracticeRunning();
 
         // One player at a time, exactly like the take audition.
         stopPlayback();
