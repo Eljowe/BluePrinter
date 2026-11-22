@@ -281,13 +281,13 @@ behaviour.
 
 - **Song builder** (0065): a third **Song** tab beside Take and Loop — a *planner*, not a timeline
   (ADR-0008). A song is a document (`Source/SongStore.h/.cpp`):
-  `{version,id,name,keyRoot,keyScale,bpm,numerator,denominator,sections:[{id,name,bars,chords:[{bar,symbol,name}],idea,snippetId,recordedBpm,recordedBars}]}`.
+  `{version,id,name,keyRoot,keyScale,bpm,numerator,denominator,sections:[{id,name,bars,chords:[{bar,symbol,name}],idea,lyrics,snippetId,recordedBpm,recordedBars}]}`.
   Limits: 64 songs, 64 sections/song, 512 total bars/song, section bars normalised to
   {1,2,4,8,12,16}, at most 32 chord events/section (unique bars, sorted, inside `[0,bars)`), name
-  1..80, section name 1..40, idea 0..200, symbol 1..12, chord name 0..40, bpm 20..300, numerator
-  1..16, denominator {1,2,4,8,16}, keyRoot 0..11, keyScale major/minor, snippetId 0/positive,
-  recordedBpm 0 or 20..300, recordedBars 0..16, ids `[A-Za-z0-9_-]{1,32}` with deterministic
-  `s1`/numeric fallbacks. Persisted as a JSON array under the `songs` properties key with the same
+  1..80, section name 1..40, idea 0..200, lyrics 0..2000 (internal line breaks kept), symbol 1..12,
+  chord name 0..40, bpm 20..300, numerator 1..16, denominator {1,2,4,8,16}, keyRoot 0..11, keyScale
+  major/minor, snippetId 0/positive, recordedBpm 0 or 20..300, recordedBars 0..16, ids
+  `[A-Za-z0-9_-]{1,32}` with deterministic `s1`/numeric fallbacks. Persisted as a JSON array under the `songs` properties key with the same
   500 ms debounce as setlists (`armSongPersist`/`flushSongPersist`); absent = empty.
   `restoreUserState` loads it after setlists and prunes links to missing snippets; every
   `pruneSetlistsAgainstLibrary()` call site also calls `pruneSongsAgainstLibrary()` and coalesces
@@ -297,6 +297,13 @@ behaviour.
   of the linked recordings. `WebUI/src/songModel.js` is the pure model (templates
   `pop`/`blues`/`blank`, bar/duration math, editing helpers, `suggestChords` via
   `buildChordCatalog`, `chartText`), covered by the `SongModel` CTest; `Song.jsx` is the tab.
+- **Section lyrics** (0067): an optional multi-line `lyrics` string per section (0..2000 chars,
+  ends trimmed, internal `\n` kept). The editor has a `<textarea rows={4}>` under **Melody / idea**
+  whose draft commits on blur and on **Ctrl/Cmd + Enter** (plain Enter inserts a newline); a row
+  with lyrics shows `· LYRICS` before its `LINKED`/`MISSING` marker; rehearsal shows the running
+  section's lyrics under the big chord readout only while `phase === "playing"` (not the count-in or
+  done); **Copy chart** prints `Lyrics:` and the lines verbatim under the idea. Additive inside the
+  existing `songs` document — no version bump, no new event, no new properties key, absent = empty.
 - Recording a section applies the song tempo/meter, sets `frontendSetLooperLengthBars { bars: section.bars }`,
   switches to the Loop/Take tab and starts the capture, remembering the section; **Save & attach**
   saves the loop/take and, on the next snippets payload, diffs the ids, links the new snippet, sets

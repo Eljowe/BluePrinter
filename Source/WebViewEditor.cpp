@@ -213,6 +213,7 @@ juce::var songToVar (const Song& song)
         }
         sectionObj->setProperty ("chords", juce::var (chords));
         sectionObj->setProperty ("idea", section.idea);
+        sectionObj->setProperty ("lyrics", section.lyrics);
         sectionObj->setProperty ("snippetId", section.snippetId);
         sectionObj->setProperty ("recordedBpm", static_cast<double> (section.recordedBpm));
         sectionObj->setProperty ("recordedBars", section.recordedBars);
@@ -254,6 +255,7 @@ Song songFromVar (const juce::var& value)
             section.name = sectionObj->getProperty ("name").toString();
             section.bars = static_cast<int> (sectionObj->getProperty ("bars"));
             section.idea = sectionObj->getProperty ("idea").toString();
+            section.lyrics = sectionObj->getProperty ("lyrics").toString();
             section.snippetId = static_cast<int> (sectionObj->getProperty ("snippetId"));
             section.recordedBpm = static_cast<float> (static_cast<double> (sectionObj->getProperty ("recordedBpm")));
             section.recordedBars = static_cast<int> (sectionObj->getProperty ("recordedBars"));

@@ -5,10 +5,10 @@
 
 // Song builder (0065): a song is a planning document — name, key, tempo,
 // meter and an ordered list of sections. Each section carries bar count,
-// chord events (one per bar at most), a melody/idea line and one linked
-// library snippet. Stored as one JSON array in the properties file under
-// `songs`. Pure message-thread state — no audio-thread access — so it lives
-// outside the processor's hot path and is unit tested
+// chord events (one per bar at most), a melody/idea line, free multi-line
+// lyrics and one linked library snippet. Stored as one JSON array in the
+// properties file under `songs`. Pure message-thread state — no audio-thread
+// access — so it lives outside the processor's hot path and is unit tested
 // (Tests/test_SongStore.cpp).
 //
 // A song is a plan, not a timeline: no audio regions, no mixer, no
@@ -25,6 +25,7 @@ struct SongSection
     int bars = 8;
     std::vector<SongChord> chords;
     juce::String idea;
+    juce::String lyrics;     // free multi-line text (0067); \n breaks kept
     int snippetId = 0;       // 0 = no linked recording
     float recordedBpm = 0.0f; // 0 = unknown
     int recordedBars = 0;     // 0 = unknown

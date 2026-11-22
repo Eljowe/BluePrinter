@@ -179,8 +179,8 @@ section blocks)
 
 **Section**:
 One ordered part of a song: a name, a loopable bar count (1/2/4/8/12/16), its
-chord events, a melody/idea line and one linked recording. A section always
-maps to one fixed-length loop.
+chord events, a melody/idea line, free multi-line lyrics and one linked
+recording. A section always maps to one fixed-length loop.
 _Avoid_: Part, region, clip
 
 **Chord event**:

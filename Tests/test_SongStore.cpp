@@ -19,6 +19,7 @@ Song makeSong (const juce::String& id, const juce::String& name)
     section.name = "Intro";
     section.bars = 4;
     section.idea = "clean";
+    section.lyrics = "hold the line\nuntil the chorus";
     section.snippetId = 7;
     section.recordedBpm = 118.0f;
     section.recordedBars = 4;
@@ -50,6 +51,7 @@ BP_TEST (SongStore_upsertFindRemove)
         BP_CHECK_EQ (found->sections.size(), static_cast<size_t> (1));
         BP_CHECK_EQ (found->sections[0].chords.size(), static_cast<size_t> (1));
         BP_CHECK_EQ (found->sections[0].snippetId, 7);
+        BP_CHECK_EQ (found->sections[0].lyrics, juce::String ("hold the line\nuntil the chorus"));
     }
 
     // Same id replaces in place.
@@ -121,12 +123,14 @@ BP_TEST (SongStore_jsonRoundTrips)
             BP_CHECK_EQ (round->sections[0].id, juce::String ("s1"));
             BP_CHECK_EQ (round->sections[0].bars, 4);
             BP_CHECK_EQ (round->sections[0].idea, juce::String ("clean"));
+            BP_CHECK_EQ (round->sections[0].lyrics, juce::String ("hold the line\nuntil the chorus"));
             BP_CHECK_EQ (round->sections[0].snippetId, 7);
             BP_CHECK_NEAR (round->sections[0].recordedBpm, 118.0, 0.001);
             BP_CHECK_EQ (round->sections[0].chords.size(), static_cast<size_t> (1));
             BP_CHECK_EQ (round->sections[0].chords[0].symbol, juce::String ("Am"));
             BP_CHECK_EQ (round->sections[1].name, juce::String ("Chorus"));
             BP_CHECK_EQ (round->sections[1].bars, 8);
+            BP_CHECK (round->sections[1].lyrics.isEmpty());
             BP_CHECK_EQ (round->sections[1].chords[0].bar, 4);
         }
     }
@@ -147,6 +151,10 @@ BP_TEST (SongStore_sanitisesFields)
     section.name = "";
     section.bars = 3; // nearest allowed: 2
     section.idea = juce::String::repeatedString ("i", 300);
+    // 2101 chars with a line break at 1000: capped at 2000, newline kept.
+    section.lyrics = juce::String::repeatedString ("l", 1000)
+                   + "\n"
+                   + juce::String::repeatedString ("y", 1100);
     section.snippetId = -4;
     section.recordedBpm = 5.0f;   // clamps into 20..300
     section.recordedBars = 99;
@@ -172,6 +180,9 @@ BP_TEST (SongStore_sanitisesFields)
         BP_CHECK_EQ (clean.bars, 2);
         BP_CHECK_EQ (clean.name, juce::String ("Section 2"));
         BP_CHECK_EQ (clean.idea.length(), 200);
+        BP_CHECK_EQ (clean.lyrics.length(), 2000);
+        BP_CHECK_EQ (clean.lyrics.indexOfChar ('\n'), 1000);
+        BP_CHECK (clean.lyrics.contains ("\n"));
         BP_CHECK_EQ (clean.snippetId, 0);
         BP_CHECK_NEAR (clean.recordedBpm, 20.0, 0.001);
         BP_CHECK_EQ (clean.recordedBars, 16);
@@ -384,6 +395,7 @@ BP_TEST (SongStore_jsonTolerantOfGarbageAndVersions)
         BP_CHECK_EQ (saved->sections.size(), static_cast<size_t> (1));
         BP_CHECK_EQ (saved->sections[0].bars, 8); // 7 normalises to 8
         BP_CHECK_EQ (saved->sections[0].chords.size(), static_cast<size_t> (1));
+        BP_CHECK (saved->sections[0].lyrics.isEmpty()); // absent in the JSON
     }
 
     // A wrapper object is tolerated too.

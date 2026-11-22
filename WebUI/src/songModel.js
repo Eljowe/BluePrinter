@@ -2,10 +2,11 @@
 //
 // A song is a planning document: name, key, tempo, meter and ordered
 // sections. Each section carries a bar count, at most one chord event per
-// bar, a melody/idea line and one linked library snippet. This module is
-// plain ESM (no DOM, no React) so the backend contract, the Song tab and
-// the SongModel CTest all share one implementation. The C++ SongStore
-// enforces the same limits; normaliseSong is the defensive mirror.
+// bar, a melody/idea line, free multi-line lyrics and one linked library
+// snippet. This module is plain ESM (no DOM, no React) so the backend
+// contract, the Song tab and the SongModel CTest all share one
+// implementation. The C++ SongStore enforces the same limits;
+// normaliseSong is the defensive mirror.
 
 import { buildChordCatalog } from "./chords.js";
 import { rootName } from "./utils.js";
@@ -34,6 +35,7 @@ const MAX_CHORDS = 32;
 const MAX_NAME = 80;
 const MAX_SECTION_NAME = 40;
 const MAX_IDEA = 200;
+const MAX_LYRICS = 2000;
 const MAX_SYMBOL = 12;
 const MAX_CHORD_NAME = 40;
 const MAX_ID = 32;
@@ -180,6 +182,7 @@ export function normaliseSong(raw) {
       bars,
       chords: normaliseChords(rawSection.chords, bars),
       idea: trimmedTo(rawSection.idea, MAX_IDEA),
+      lyrics: trimmedTo(rawSection.lyrics, MAX_LYRICS),
       snippetId: clampInt(rawSection.snippetId, 0, Number.MAX_SAFE_INTEGER, 0),
       recordedBpm: Number.isFinite(recordedBpm) && recordedBpm > 0
         ? clampNumber(recordedBpm, 20, 300, 0)
@@ -374,6 +377,7 @@ export function addSection(song, section = {}) {
     bars: section.bars ?? 8,
     chords: section.chords ?? [],
     idea: section.idea ?? "",
+    lyrics: section.lyrics ?? "",
     snippetId: section.snippetId ?? 0,
     recordedBpm: section.recordedBpm ?? 0,
     recordedBars: section.recordedBars ?? 0,
@@ -548,6 +552,7 @@ export function createSong({
       bars: spec.bars,
       chords: placeDegrees(byRoman, spec.bars, degrees ?? [], Boolean(spec.twelveBar)),
       idea: "",
+      lyrics: "",
       snippetId: 0,
       recordedBpm: 0,
       recordedBars: 0,
@@ -594,6 +599,11 @@ export function chartText(song, snippetsById = {}) {
       lines.push(sectionChordLine(section));
     if (section.idea.trim())
       lines.push(`Idea: ${section.idea.trim()}`);
+    if (section.lyrics.trim()) {
+      lines.push("Lyrics:");
+      for (const line of section.lyrics.trim().split("\n"))
+        lines.push(line);
+    }
     if (section.snippetId > 0) {
       const snippet = findSnippet(snippetsById, section.snippetId);
       lines.push(`Recording: ${snippet ? snippet.name : "(missing)"}`);

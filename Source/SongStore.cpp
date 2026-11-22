@@ -11,6 +11,7 @@ constexpr int maxChords       = 32;
 constexpr int maxNameChars    = 80;
 constexpr int maxSectionName  = 40;
 constexpr int maxIdeaChars    = 200;
+constexpr int maxLyricsChars  = 2000;
 constexpr int maxSymbolChars  = 12;
 constexpr int maxChordName    = 40;
 constexpr int maxIdChars      = 32;
@@ -171,6 +172,7 @@ Song sanitiseSong (const Song& input)
         entry.bars = bars;
         entry.chords = sanitiseChords (section.chords, bars);
         entry.idea = trimmedTo (section.idea, maxIdeaChars);
+        entry.lyrics = trimmedTo (section.lyrics, maxLyricsChars);
         entry.snippetId = section.snippetId > 0 ? section.snippetId : 0;
         entry.recordedBpm = sanitiseRecordedBpm (section.recordedBpm);
         entry.recordedBars = clampInt (section.recordedBars, 0, 16);
@@ -327,6 +329,7 @@ juce::String SongStore::toJson() const
             }
             sectionObj->setProperty ("chords", juce::var (chords));
             sectionObj->setProperty ("idea", section.idea);
+            sectionObj->setProperty ("lyrics", section.lyrics);
             sectionObj->setProperty ("snippetId", section.snippetId);
             sectionObj->setProperty ("recordedBpm", static_cast<double> (section.recordedBpm));
             sectionObj->setProperty ("recordedBars", section.recordedBars);
@@ -384,6 +387,7 @@ void SongStore::fromJson (const juce::String& json)
                 section.name = readString (*sectionObj, "name");
                 section.bars = readInt (*sectionObj, "bars", 8);
                 section.idea = readString (*sectionObj, "idea");
+                section.lyrics = readString (*sectionObj, "lyrics");
                 section.snippetId = readInt (*sectionObj, "snippetId", 0);
                 section.recordedBpm = static_cast<float> (readDouble (*sectionObj, "recordedBpm", 0.0));
                 section.recordedBars = readInt (*sectionObj, "recordedBars", 0);

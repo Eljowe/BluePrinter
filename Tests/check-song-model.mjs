@@ -71,6 +71,7 @@ eq(totalBars(pop), 40, "pop total bars");
 eq(pop.sections[1].chords.map((chord) => chord.symbol), ["C", "G", "Am", "F"], "pop verse chords");
 eq(pop.sections[1].chords.map((chord) => chord.bar), [0, 2, 4, 6], "pop verse chord bars");
 check(pop.sections.every((section) => section.chords.length > 0), "pop every section has chords");
+check(pop.sections.every((section) => section.lyrics === ""), "template sections start without lyrics");
 check(pop.sections.every((section) => section.id.startsWith("s")), "pop section ids");
 
 const popMinor = createSong({ name: "Pop minor", keyRoot: 9, keyScale: "minor", bpm: 100, template: "pop" });
@@ -133,6 +134,12 @@ eq(moveSection(pop, "s1", -1), pop, "move out of range is a no-op");
 const updated = updateSection(pop, "s1", { idea: "quiet", snippetId: 12 });
 eq(updated.sections[0].idea, "quiet", "update section idea");
 eq(updated.sections[0].snippetId, 12, "update section link");
+
+eq(addSection(pop).sections[6].lyrics, "", "added section has empty lyrics");
+const lyricalSection = updateSection(pop, "s1", { lyrics: "hold the line\nuntil the chorus" });
+eq(lyricalSection.sections[0].lyrics, "hold the line\nuntil the chorus", "update section lyrics");
+eq(updateSection(lyricalSection, "s1", { name: "Intro 2" }).sections[0].lyrics,
+  "hold the line\nuntil the chorus", "an unrelated patch keeps the lyrics");
 
 // setSectionBars drops chord events past the new end.
 const shortened = setSectionBars(pop, "s2", 2);
@@ -212,6 +219,17 @@ check(chart.includes("## Verse (8 bars)"), "chart section heading");
 check(chart.includes("- | - | Am | Am | Am | Am | Am | Am"), "chart chord line");
 check(chart.includes("Idea: soft pick"), "chart idea");
 check(chart.includes("Recording: Verse take"), "chart recording");
+check(!chart.includes("Lyrics:"), "chart omits empty lyrics");
+const lyricChart = chartText(
+  updateSection(chartSong, "s1", { lyrics: "hold the line\nuntil the chorus" }),
+  { 4: { id: 4, name: "Verse take" } },
+);
+check(lyricChart.includes("Lyrics:"), "chart lyrics heading");
+check(lyricChart.includes("hold the line\nuntil the chorus"), "chart lyric lines verbatim");
+check(lyricChart.indexOf("Idea: soft pick") < lyricChart.indexOf("Lyrics:"),
+  "chart lyrics come after the idea");
+check(lyricChart.indexOf("Lyrics:") < lyricChart.indexOf("Recording: Verse take"),
+  "chart lyrics come before the recording");
 check(chartText(chartSong, {}).includes("Recording: (missing)"), "chart missing recording");
 eq(chartText(null, {}), "", "chart of no song");
 
@@ -362,11 +380,24 @@ eq(dirty.numerator, 1, "normalise numerator");
 eq(dirty.denominator, 4, "normalise denominator");
 eq(dirty.sections[0].bars, 2, "normalise section bars");
 eq(dirty.sections[0].name, "Section 1", "normalise section name");
+eq(dirty.sections[0].lyrics, "", "normalise absent lyrics to empty");
 eq(dirty.sections[0].snippetId, 0, "normalise negative snippet id");
 eq(dirty.sections[0].recordedBpm, 20, "normalise recorded bpm");
 eq(dirty.sections[0].recordedBars, 16, "normalise recorded bars");
 eq(dirty.sections[0].chords.length, 1, "normalise drops out-of-range chords");
 check(dirty.sections[1].id !== dirty.sections[2].id, "normalise duplicate section ids");
+
+const lyrical = normaliseSong({
+  name: "Lyrical",
+  sections: [
+    { id: "a", name: "Verse", bars: 8, lyrics: "hold the line\nuntil the chorus" },
+    { id: "b", name: "Chorus", bars: 8, lyrics: "x".repeat(2100) },
+    { id: "c", name: "Bridge", bars: 8 },
+  ],
+});
+eq(lyrical.sections[0].lyrics, "hold the line\nuntil the chorus", "normalise keeps lyric lines");
+eq(lyrical.sections[1].lyrics.length, 2000, "normalise caps lyrics at 2000");
+eq(lyrical.sections[2].lyrics, "", "normalise absent lyrics to empty");
 
 const capped = normaliseSong({
   name: "Capped",

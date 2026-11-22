@@ -6276,6 +6276,23 @@ html:has(.bp-splash) {
   font-size: 0.78rem;
 }
 
+/* Lyrics (0067): a textarea does not take the 30px single-line height, so
+   it gets its own rule (padding, wrapping, a vertical resize handle). */
+.song-field textarea {
+  border: 2px solid var(--line);
+  background: var(--bg);
+  color: var(--ink);
+  padding: 6px 8px;
+  font-family: var(--font);
+  font-size: 0.78rem;
+  line-height: 1.45;
+  resize: vertical;
+}
+
+.song-field textarea:focus {
+  border-color: var(--accent);
+}
+
 .song-name-field {
   flex: 1 1 180px;
 }
@@ -6470,6 +6487,20 @@ html:has(.bp-splash) {
 .song-rehearsal-chord span {
   font-size: 0.66rem;
   color: var(--ink-3);
+}
+
+/* The running section's lyrics (0067): its own full-width line under the
+   chord readout so the chord block keeps its place, capped and scrolled. */
+.song-rehearsal-lyrics {
+  flex: 1 1 100%;
+  max-height: 5.5em;
+  overflow-y: auto;
+  padding-left: 8px;
+  border-left: 2px solid var(--line);
+  color: var(--ink-2);
+  font-size: 0.72rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
 }
 
 .song-rehearsal-warn {
@@ -6760,6 +6791,10 @@ html:has(.bp-splash) {
 }
 
 .song-idea {
+  width: 100%;
+}
+
+.song-lyrics {
   width: 100%;
 }
 

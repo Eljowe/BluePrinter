@@ -92,6 +92,7 @@ export function Song({
   const [nameDraft, setNameDraft] = useState(song?.name ?? "");
   const [sectionNameDraft, setSectionNameDraft] = useState("");
   const [ideaDraft, setIdeaDraft] = useState("");
+  const [lyricsDraft, setLyricsDraft] = useState("");
   const [templateOpen, setTemplateOpen] = useState(false);
   const [suggestOpen, setSuggestOpen] = useState(false);
   const [chordPicker, setChordPicker] = useState(null); // { sectionId, bar }
@@ -229,6 +230,7 @@ export function Song({
   useEffect(() => {
     setSectionNameDraft(section?.name ?? "");
     setIdeaDraft(section?.idea ?? "");
+    setLyricsDraft(section?.lyrics ?? "");
     setChordPicker(null);
     setSuggestOpen(false);
     setLinkOpen(false);
@@ -606,6 +608,14 @@ export function Song({
     emitSave(updateSection(song, section.id, { idea: trimmed }));
   };
 
+  // Lyrics keep their internal line breaks: only the ends are trimmed.
+  const commitLyrics = () => {
+    if (!song || !section) return;
+    const trimmed = lyricsDraft.trim().slice(0, 2000);
+    if (trimmed === section.lyrics) return;
+    emitSave(updateSection(song, section.id, { lyrics: trimmed }));
+  };
+
   const catalog = useMemo(
     () => (song ? buildChordCatalog(song.keyRoot, song.keyScale) : []),
     [song?.keyRoot, song?.keyScale],
@@ -644,8 +654,8 @@ export function Song({
         <div className="song-empty-card">
           <h3>Plan a song</h3>
           <p>
-            A song holds ordered sections, one chord per bar, a melody/idea line and one linked
-            recording per section. Start from a template:
+            A song holds ordered sections, one chord per bar, a melody/idea line, lyrics and one
+            linked recording per section. Start from a template:
           </p>
           <div className="song-empty-templates">
             {SONG_TEMPLATES.map((template) => (
@@ -836,6 +846,10 @@ export function Song({
           </div>
         ) : null}
 
+        {practiceRunning && rehearsal.phase === "playing" && practiceSection?.lyrics ? (
+          <div className="song-rehearsal-lyrics">{practiceSection.lyrics}</div>
+        ) : null}
+
         {practiceRunning && transport.metronomeEnabled === false ? (
           <span className="song-hint song-rehearsal-warn">
             Click is off — turn it on in the sync strip.
@@ -890,6 +904,7 @@ export function Song({
                     <span className="song-row-name">{entry.name}</span>
                     <span className="song-row-meta">
                       {entry.bars} bars{summary ? ` · ${summary}` : ""}
+                      {entry.lyrics ? " · LYRICS" : ""}
                       {entry.snippetId > 0 ? (snippet ? " · LINKED" : " · MISSING") : ""}
                     </span>
                   </span>
@@ -1099,6 +1114,25 @@ export function Song({
                   onBlur={commitIdea}
                   onKeyDown={(event) => { if (event.key === "Enter") commitIdea(); }}
                   aria-label="Section melody or idea"
+                />
+              </label>
+
+              <label className="song-field song-lyrics">
+                <span>Lyrics</span>
+                <textarea
+                  rows={4}
+                  value={lyricsDraft}
+                  maxLength={2000}
+                  placeholder="One line per lyric line"
+                  onChange={(event) => setLyricsDraft(event.target.value)}
+                  onBlur={commitLyrics}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+                      event.preventDefault();
+                      commitLyrics();
+                    }
+                  }}
+                  aria-label="Section lyrics"
                 />
               </label>
 
